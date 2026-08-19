@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetDesk — Vehicle Management System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0E13; --panel:#141920; --panel-2:#191F28; --border:#232B36; --border-lite:#2C3644;
+    --text:#E7EBF0; --muted:#8996A6; --dim:#5B6675;
+    --amber:#E8A33D; --green:#3FB37F; --red:#E1543F; --teal:#4FA8C9;
+    --amber-bg:rgba(232,163,61,0.12); --green-bg:rgba(63,179,127,0.12); --red-bg:rgba(225,84,63,0.13); --teal-bg:rgba(79,168,201,0.12);
+    --radius:8px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);}
+  body{font-family:'Space Grotesk',system-ui,sans-serif;font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;}
+  .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+  ::selection{background:var(--amber);color:#0B0E13;}
+  a{color:var(--teal);}
+  button{font-family:inherit;cursor:pointer;}
+  input,select,textarea{font-family:'IBM Plex Mono',monospace;background:var(--panel-2);border:1px solid var(--border-lite);color:var(--text);border-radius:6px;padding:7px 9px;font-size:13px;width:100%;}
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--amber);outline-offset:0;border-color:var(--amber);}
+  label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+
+  #shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh;}
+  @media (max-width:860px){#shell{grid-template-columns:1fr;} #sidebar{position:sticky;top:0;z-index:50;}}
+
+  #sidebar{background:var(--panel);border-right:1px solid var(--border);padding:18px 14px;display:flex;flex-direction:column;gap:2px;}
+  .brand{display:flex;align-items:center;gap:9px;padding:6px 8px 18px 8px;}
+  .brand-mark{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,var(--amber),#c97a1f);display:flex;align-items:center;justify-content:center;font-weight:700;color:#0B0E13;font-size:13px;flex:none;}
+  .brand-name{font-weight:700;font-size:15px;letter-spacing:.01em;}
+  .brand-sub{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-top:1px;}
+
+  .navbtn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;color:var(--muted);padding:10px 10px;border-radius:7px;font-size:13.5px;font-weight:500;transition:background .12s,color .12s;}
+  .navbtn .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none;}
+  .navbtn:hover{background:var(--panel-2);color:var(--text);}
+  .navbtn.active{background:var(--amber-bg);color:var(--amber);}
+  .navbtn.active .dot{background:var(--amber);}
+  .navbtn .badge{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10px;background:var(--red);color:#fff;border-radius:20px;padding:1px 6px;}
+
+  .sidebar-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--border);font-size:11px;color:var(--dim);}
+  .sync-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+  .sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;}
+  .sync-dot.busy{background:var(--amber);animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+  #main{padding:22px 26px 60px;max-width:1320px;}
+  .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .topbar h1{font-size:21px;margin:0 0 3px;font-weight:700;}
+  .topbar .sub{color:var(--muted);font-size:13px;}
+  .topbar-right{display:flex;align-items:center;gap:10px;}
+
+  .btn{background:var(--panel-2);border:1px solid var(--border-lite);color:var(--text);padding:8px 13px;border-radius:7px;font-size:12.5px;font-weight:500;display:inline-flex;align-items:center;gap:6px;width:auto;}
+  .btn:hover{border-color:var(--amber);}
+  .btn.primary{background:var(--amber);color:#0B0E13;border-color:var(--amber);font-weight:600;}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .btn.ghost{background:transparent;border-color:var(--border);color:var(--muted);}
+  .btn.small{padding:5px 10px;font-size:11.5px;}
+
+  .board{display:flex;gap:0;border:1px solid var(--border-lite);border-radius:9px;overflow:hidden;margin-bottom:22px;background:#0E1319;flex-wrap:wrap;}
+  .board-seg{flex:1;min-width:140px;padding:13px 16px;border-right:1px solid var(--border);position:relative;}
+  .board-seg:last-child{border-right:none;}
+  .board-seg .k{font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);margin-bottom:6px;}
+  .board-seg .v{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;display:flex;align-items:baseline;gap:6px;}
+  .board-seg .v small{font-size:11px;color:var(--muted);font-weight:400;}
+  .board-seg.red .v{color:var(--red);}
+  .board-seg.amber .v{color:var(--amber);}
+  .board-seg.green .v{color:var(--green);}
+
+  .grid{display:grid;gap:12px;}
+  .grid.cols-4{grid-template-columns:repeat(4,1fr);}
+  .grid.cols-3{grid-template-columns:repeat(3,1fr);}
+  .grid.cols-2{grid-template-columns:repeat(2,1fr);}
+  @media(max-width:900px){.grid.cols-4,.grid.cols-3{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:560px){.grid.cols-4,.grid.cols-3,.grid.cols-2{grid-template-columns:1fr;}}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:15px 16px;}
+  .card.kpi{position:relative;}
+  .kpi .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center;gap:6px;}
+  .kpi .value{font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:600;margin-bottom:5px;}
+  .kpi .target{font-size:11.5px;color:var(--dim);}
+  .kpi .bar-track{height:5px;background:var(--border);border-radius:4px;margin-top:9px;overflow:hidden;}
+  .kpi .bar-fill{height:100%;border-radius:4px;}
+  .tag{display:inline-block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:20px;white-space:nowrap;}
+  .tag.green{background:var(--green-bg);color:var(--green);}
+  .tag.amber{background:var(--amber-bg);color:var(--amber);}
+  .tag.red{background:var(--red-bg);color:var(--red);}
+  .tag.teal{background:var(--teal-bg);color:var(--teal);}
+  .tag.grey{background:var(--border);color:var(--muted);}
+
+  .section-title{font-size:14px;font-weight:600;margin:26px 0 10px;display:flex;align-items:center;gap:8px;}
+  .section-title .line{flex:1;height:1px;background:var(--border);}
+  .section-sub{color:var(--muted);font-size:12px;margin:-6px 0 14px;}
+
+  .tabs{display:flex;gap:4px;background:var(--panel-2);border:1px solid var(--border);padding:3px;border-radius:8px;width:max-content;margin-bottom:16px;}
+  .tabs button{background:none;border:none;color:var(--muted);padding:7px 14px;border-radius:6px;font-size:12.5px;font-weight:500;width:auto;}
+  .tabs button.active{background:var(--amber);color:#0B0E13;font-weight:600;}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);padding:9px 10px;border-bottom:1px solid var(--border-lite);white-space:nowrap;}
+  td{padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text);white-space:nowrap;font-family:'IBM Plex Mono',monospace;font-size:12px;}
+  tr:hover td{background:var(--panel-2);}
+  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel);margin-bottom:8px;}
+  .empty-row td{color:var(--dim);font-style:italic;text-align:center;padding:22px;font-family:'Space Grotesk';white-space:normal;}
+
+  .form-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:18px;}
+  .form-card summary{cursor:pointer;font-weight:600;font-size:13.5px;list-style:none;display:flex;align-items:center;gap:8px;}
+  .form-card summary::-webkit-details-marker{display:none;}
+  .form-card summary:before{content:'+';color:var(--amber);font-size:16px;width:18px;}
+  .form-card[open] summary:before{content:'−';}
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-top:14px;}
+  .form-actions{margin-top:14px;display:flex;gap:8px;align-items:center;}
+
+  .rec-list{display:flex;flex-direction:column;gap:10px;}
+  .rec-item{display:flex;gap:12px;background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:7px;padding:12px 14px;}
+  .rec-item.red{border-left-color:var(--red);}
+  .rec-item.amber{border-left-color:var(--amber);}
+  .rec-item.green{border-left-color:var(--green);}
+  .rec-item .txt{font-size:13px;color:var(--text);}
+  .rec-item .dept{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;font-family:'IBM Plex Mono',monospace;}
+
+  .modal-bg{position:fixed;inset:0;background:rgba(5,7,10,0.72);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;}
+  .modal{background:var(--panel);border:1px solid var(--border-lite);border-radius:10px;padding:22px;max-width:560px;width:100%;max-height:85vh;overflow:auto;}
+  .modal h3{margin:0 0 14px;font-size:16px;}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--green);color:var(--green);padding:11px 16px;border-radius:8px;font-size:12.5px;font-family:'IBM Plex Mono',monospace;z-index:300;box-shadow:0 8px 24px rgba(0,0,0,.4);}
+
+  .muted{color:var(--muted);} .dim{color:var(--dim);} .small{font-size:11.5px;}
+  .flex{display:flex;align-items:center;} .between{justify-content:space-between;} .gap8{gap:8px;}
+
+  @media(prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important;}}
+
+  .report-toolbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:20px;}
+  .report-toolbar > div{display:flex;flex-direction:column;gap:4px;min-width:160px;}
+  #report-doc{background:#0F141B;border:1px solid var(--border);border-radius:10px;padding:34px 38px;}
+  .report-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid var(--amber);padding-bottom:16px;margin-bottom:20px;flex-wrap:wrap;gap:10px;}
+  .report-head .rt{font-size:22px;font-weight:700;}
+  .report-head .rs{color:var(--muted);font-size:13px;margin-top:3px;}
+  .report-meta{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px;}
+  @media(max-width:700px){.report-meta{grid-template-columns:repeat(2,1fr);}}
+  .report-meta div{background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:10px 12px;}
+  .report-meta .k{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin-bottom:3px;font-family:'IBM Plex Mono',monospace;}
+  .report-meta .v{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:14px;}
+  .report-dept{margin-bottom:26px;page-break-inside:avoid;}
+  .report-dept h3{font-size:15px;margin:0 0 10px;padding-left:10px;border-left:3px solid var(--amber);}
+  .report-dept h4{font-size:12px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .report-table{width:100%;border-collapse:collapse;margin-bottom:10px;}
+  .report-table th{background:var(--panel-2);text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:8px 10px;border:1px solid var(--border);}
+  .report-table td{padding:8px 10px;border:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:12.5px;}
+  .report-notes{font-size:12.5px;color:var(--muted);background:var(--panel);border:1px dashed var(--border-lite);border-radius:7px;padding:10px 12px;margin-top:6px;}
+  .report-notes b{color:var(--text);}
+  .signoff{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:30px;padding-top:20px;border-top:1px solid var(--border);}
+  .signoff .line{border-bottom:1px solid var(--border-lite);height:34px;}
+  .signoff .cap{font-size:11px;color:var(--dim);margin-top:5px;text-transform:uppercase;letter-spacing:.05em;}
+
+  @media print{
+    body{background:#fff;color:#111;}
+    #sidebar, .topbar-right, .report-toolbar, .btn{display:none !important;}
+    #shell{display:block;}
+    #main{padding:0;max-width:none;}
+    #report-doc{background:#fff;border:none;padding:0;color:#111;}
+    .report-meta div, .card, .report-table th, .report-table td, .report-notes{background:#fff !important;border-color:#ccc !important;color:#111 !important;}
+    .tag{border:1px solid #999;color:#111 !important;background:#fff !important;}
+    .report-head{border-bottom-color:#111;}
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* =========================================================================
+   FLEETDESK — Vehicle Management ERP (single-file, shared live storage)
+   ========================================================================= */
+
+const STORAGE_KEYS = {
+  transport:'vms:transport', journey:'vms:journey', inspections:'vms:inspections',
+  pretrip:'vms:pretrip', safety:'vms:safety', vehicles:'vms:vehicles',
+  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', targets:'vms:targets'
+};
+
+// Route definitions per the fleet's fixed daily trip & duration targets.
+// NOTE: "Gypsum — Apapa -> Sagamu" duration target was not explicitly split out from the
+// Apapa/Ewekoro 24-hr figure in the brief, so it is assumed to follow the same 24-hr
+// go-load-offload window. Adjust durationTargetHrs below if that assumption is wrong.
+const ROUTES = {
+  clinker:        {label:'Clinker — Ewekoro ⇄ Sagamu (to & fro)', tripsPerDayTarget:2, durationTargetHrs:8},
+  gypsum_ewekoro: {label:'Gypsum — Apapa → Ewekoro',               tripsPerDayTarget:1, durationTargetHrs:24},
+  gypsum_sagamu:  {label:'Gypsum — Apapa → Sagamu',                tripsPerDayTarget:1, durationTargetHrs:24},
+  gypsum_adumbu:  {label:'Gypsum — Adumbu',                        tripsPerDayTarget:4, durationTargetHrs:2},
+  other:          {label:'Other / Ad-hoc',                         tripsPerDayTarget:0, durationTargetHrs:null},
+};
+const ROUTE_KEYS_TARGETED = Object.keys(ROUTES).filter(k=>k!=='other');
+
+const REPAIR_COMPONENTS = ['Engine','Brakes','Tyres / Wheels','Electrical','Gearbox / Transmission','Suspension','Cooling System','Hydraulics','Body / Chassis','Other'];
+
+const DEFAULT_TARGETS = {
+  tonnagePerTripTarget: 30, turnaroundTargetHrs: 6, transitTargetHrs: 4,
+  onTimeTarget: 0.95, riskAssessmentTarget: 1.0, maxDelayHrsTarget: 1,
+  inspectionComplianceTarget: 1.0, defectRateTarget: 0.10, prePostPassRateTarget: 1.0,
+  ltifrTarget: 1.0, nearMissWeeklyTarget: 3,
+  pmComplianceTarget: 0.95, breakdownRateTarget: 0.05, mttrTargetHrs: 8,
+  dailyTruckInspectionTarget: 5,   // Safety AND Maintenance each inspect 5 trucks/day
+  roadPatrolWeeklyTarget: 2,       // Safety AND Maintenance each patrol 2x/week
+  toolboxTalkWeeklyTarget: 1       // Safety AND Maintenance each hold 1 toolbox talk/week
+};
+
+let STATE = {
+  loading:true, tab:'summary',
+  periodByDept:{transport:'week', journey:'week', inspections:'week', safety:'week', maintenance:'week'},
+  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[] },
+  targets:{...DEFAULT_TARGETS},
+  toast:null, settingsOpen:false, syncing:false, lastSync:null, connectionError:null,
+  reportWeekEnding: null, reportPreparedBy:''
+};
+
+/* ---------------- storage helpers (Google Sheets backend via Apps Script) ---------------- */
+// Your Apps Script Web App URL. Either hardcode it below, or open this app with
+// ?api=<your web app url> appended to the link (query param always wins, so one
+// shared link with the param works for every teammate without editing this file).
+const GAS_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbwKJUcGB5utjwUzCwRiOSbe7ICfoiqj1BcvM4ZZgyBPOSuRnAFHTsKBzf3r26Nj0_g-7g/exec";
+const GAS_URL = (new URLSearchParams(window.location.search).get('api')) || GAS_URL_DEFAULT;
+const GAS_CONFIGURED = !!GAS_URL && GAS_URL.indexOf('PASTE_YOUR') === -1 && GAS_URL.indexOf('http') === 0;
+
+function safeParseJSON(v, fallback){
+  if(v===null || v===undefined || v==='') return fallback;
+  try{ return JSON.parse(v); }catch(e){ return fallback; }
+}
+
+async function gasGetAll(keys){
+  const url = `${GAS_URL}?action=getAll&keys=${encodeURIComponent(keys.join(','))}`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('Backend returned '+res.status);
+  return await res.json();
+}
+async function gasSet(key, valueStr){
+  const res = await fetch(GAS_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'}, // avoids CORS preflight against Apps Script
+    body: JSON.stringify({action:'set', key, value: valueStr})
+  });
+  if(!res.ok) throw new Error('Backend returned '+res.status);
+  return await res.json();
+}
+
+async function loadAll(){
+  if(!GAS_CONFIGURED){ STATE.loading = false; render(); return; }
+  STATE.syncing = true; STATE.connectionError = null; render();
+  try{
+    const allKeys = Object.values(STORAGE_KEYS);
+    const json = await gasGetAll(allKeys);
+    STATE.data = {
+      transport: safeParseJSON(json[STORAGE_KEYS.transport], []),
+      journey: safeParseJSON(json[STORAGE_KEYS.journey], []),
+      inspections: safeParseJSON(json[STORAGE_KEYS.inspections], []),
+      pretrip: safeParseJSON(json[STORAGE_KEYS.pretrip], []),
+      safety: safeParseJSON(json[STORAGE_KEYS.safety], []),
+      vehicles: safeParseJSON(json[STORAGE_KEYS.vehicles], []),
+      maintenance: safeParseJSON(json[STORAGE_KEYS.maintenance], []),
+      maintenanceDaily: safeParseJSON(json[STORAGE_KEYS.maintenanceDaily], []),
+    };
+    STATE.targets = {...DEFAULT_TARGETS, ...safeParseJSON(json[STORAGE_KEYS.targets], {})};
+    STATE.connectionError = null;
+  }catch(e){
+    console.error('loadAll failed', e);
+    STATE.connectionError = "Couldn't reach the shared spreadsheet. Check your internet connection or the backend URL, then hit Refresh.";
+  }
+  STATE.syncing = false; STATE.lastSync = new Date(); STATE.loading = false;
+  if(!STATE.reportWeekEnding) STATE.reportWeekEnding = todayStr();
+  render();
+}
+async function persist(deptKey){
+  STATE.syncing = true; render();
+  try{ await gasSet(STORAGE_KEYS[deptKey], JSON.stringify(STATE.data[deptKey])); STATE.connectionError = null; }
+  catch(e){ console.error('persist failed', deptKey, e); STATE.connectionError = "Couldn't save to the shared spreadsheet — your change is only on this screen until you reconnect."; }
+  STATE.syncing = false; STATE.lastSync = new Date();
+  render();
+}
+async function persistTargets(){
+  try{ await gasSet(STORAGE_KEYS.targets, JSON.stringify(STATE.targets)); }
+  catch(e){ console.error('persistTargets failed', e); showToast("Couldn't save targets to the shared spreadsheet."); }
+}
+function showToast(msg){ STATE.toast = msg; render(); setTimeout(()=>{ STATE.toast=null; render(); }, 2600); }
+
+/* ---------------- date / math helpers ---------------- */
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function inPeriod(dateStr, period){
+  if(!dateStr) return false;
+  const d = new Date(dateStr+'T00:00:00');
+  const now = new Date(); now.setHours(0,0,0,0);
+  const diffDays = Math.round((now - d)/86400000);
+  if(period==='day') return diffDays===0;
+  if(period==='week') return diffDays>=0 && diffDays<7;
+  if(period==='month') return diffDays>=0 && diffDays<30;
+  return true;
+}
+function filterPeriod(recs, period){ return recs.filter(r=>inPeriod(r.date, period)); }
+function inWeekRange(dateStr, endDateStr){
+  if(!dateStr || !endDateStr) return false;
+  const d = new Date(dateStr+'T00:00:00'), end = new Date(endDateStr+'T00:00:00');
+  const start = new Date(end.getTime() - 6*86400000);
+  return d>=start && d<=end;
+}
+function filterWeekRange(recs, endDateStr){ return recs.filter(r=>inWeekRange(r.date, endDateStr)); }
+function weekRangeLabel(endDateStr){
+  const end = new Date(endDateStr+'T00:00:00'), start = new Date(end.getTime() - 6*86400000);
+  const opts = {day:'numeric', month:'short', year:'numeric'};
+  return `${start.toLocaleDateString(undefined,opts)} – ${end.toLocaleDateString(undefined,opts)}`;
+}
+// Scales a fixed daily/weekly target rate to the chosen viewing period (day/week/month).
+function scaledTarget(rate, unit, period){
+  const days = {day:1, week:7, month:30}[period] || 7;
+  if(unit==='day') return rate*days;
+  if(unit==='week') return rate*(days/7);
+  return rate;
+}
+function num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
+function sumBy(recs,key){ return recs.reduce((a,r)=>a+num(r[key]),0); }
+function avgBy(recs,key){ const vals=recs.map(r=>num(r[key])); if(!vals.length) return 0; return vals.reduce((a,b)=>a+b,0)/vals.length; }
+function fmt(v, decimals=0){ if(v===undefined||v===null||isNaN(v)) return '—'; return v.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals}); }
+function pct(v){ if(v===undefined||v===null||isNaN(v)) return '—'; return (v*100).toFixed(1)+'%'; }
+function attainment(actual, target, goodDir='higher'){
+  if(target===null || target===undefined || target===0) return null;
+  return goodDir==='higher' ? actual/target : target/actual;
+}
+function statusOf(ratio){
+  if(ratio===null || ratio===undefined || isNaN(ratio)) return 'grey';
+  if(ratio>=0.98) return 'green'; if(ratio>=0.90) return 'amber'; return 'red';
+}
+function statusLabel(s){ return {green:'On Target',amber:'Watch',red:'Action Needed',grey:'No Target'}[s]; }
+function uid(){ return 'id'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
+function findVehicle(vid){ return STATE.data.vehicles.find(v=>v.id===vid); }
+function vehicleLabel(vid){ const v=findVehicle(vid); return v? v.regNo : '(removed vehicle)'; }
+
+/* ---------------- KPI engines ---------------- */
+function kpisTransport(recs){
+  const trips_t=sumBy(recs,'tripsTarget'), trips_a=sumBy(recs,'tripsActual');
+  const ton_t=sumBy(recs,'tonnageTarget'), ton_a=sumBy(recs,'tonnageActual');
+  const tat_t=avgBy(recs,'turnaroundTarget'), tat_a=avgBy(recs,'turnaroundActual');
+  const tt_t=avgBy(recs,'transitTarget'), tt_a=avgBy(recs,'transitActual');
+  const loadActual = trips_a? ton_a/trips_a : 0;
+  return [
+    {key:'trips', label:'Trips Completed', actual:trips_a, target:trips_t, fmt:0, unit:'', good:'higher', ratio:attainment(trips_a,trips_t,'higher')},
+    {key:'tonnage', label:'Tonnage Moved', actual:ton_a, target:ton_t, fmt:0, unit:'MT', good:'higher', ratio:attainment(ton_a,ton_t,'higher')},
+    {key:'turnaround', label:'Avg Turnaround', actual:tat_a, target:tat_t, fmt:1, unit:'hrs', good:'lower', ratio:attainment(tat_a,tat_t,'lower')},
+    {key:'transit', label:'Avg Transit Time', actual:tt_a, target:tt_t, fmt:1, unit:'hrs', good:'lower', ratio:attainment(tt_a,tt_t,'lower')},
+    {key:'load', label:'Avg Load / Trip', actual:loadActual, target:STATE.targets.tonnagePerTripTarget, fmt:1, unit:'MT', good:'higher', ratio:attainment(loadActual,STATE.targets.tonnagePerTripTarget,'higher')},
+  ];
+}
+
+function kpisJourneyOverall(recs, period){
+  const totalActual = recs.length;
+  const totalTarget = ROUTE_KEYS_TARGETED.reduce((a,k)=>a+scaledTarget(ROUTES[k].tripsPerDayTarget,'day',period),0);
+  const onTimeCount = recs.filter(r=>r.onTime==='Yes').length;
+  const onTimePct = totalActual? onTimeCount/totalActual : 0;
+  const riskCount = recs.filter(r=>r.riskAssessment==='Yes').length;
+  const riskPct = totalActual? riskCount/totalActual : 0;
+  const avgDelay = avgBy(recs,'delayHrs');
+  const totalDeviations = sumBy(recs,'deviations');
+  const violations = recs.filter(r=>r.driverHoursViolation==='Yes').length;
+  return [
+    {key:'trips', label:'Total Trips', actual:totalActual, target:totalTarget, fmt:0, good:'higher', ratio:attainment(totalActual,totalTarget,'higher')},
+    {key:'ontime', label:'On-Time Arrival', actual:onTimePct, target:STATE.targets.onTimeTarget, fmt:'pct', good:'higher', ratio:attainment(onTimePct,STATE.targets.onTimeTarget,'higher')},
+    {key:'risk', label:'Risk Assessment Compliance', actual:riskPct, target:STATE.targets.riskAssessmentTarget, fmt:'pct', good:'higher', ratio:attainment(riskPct,STATE.targets.riskAssessmentTarget,'higher')},
+    {key:'delay', label:'Avg Delay / Idling', actual:avgDelay, target:STATE.targets.maxDelayHrsTarget, fmt:1, unit:'hrs', good:'lower', ratio:attainment(avgDelay,STATE.targets.maxDelayHrsTarget,'lower')},
+    {key:'deviations', label:'Route Deviations', actual:totalDeviations, target:0, fmt:0, good:'lower', ratio: totalDeviations===0?1:(0.5/totalDeviations)},
+    {key:'violations', label:'Driver Hours Violations', actual:violations, target:0, fmt:0, good:'lower', ratio: violations===0?1:(0.5/violations)},
+  ];
+}
+function kpisJourneyByRoute(recs, period){
+  return ROUTE_KEYS_TARGETED.map(key=>{
+    const cfg = ROUTES[key];
+    const routeRecs = recs.filter(r=>r.route===key);
+    const target = scaledTarget(cfg.tripsPerDayTarget,'day',period);
+    const actual = routeRecs.length;
+    const avgDurActual = avgBy(routeRecs,'durationActual');
+    const tripsRatio = attainment(actual,target,'higher');
+    const durRatio = routeRecs.length? attainment(avgDurActual,cfg.durationTargetHrs,'lower') : null;
+    const ratios = [tripsRatio, durRatio].filter(r=>r!==null && r!==undefined);
+    const combined = ratios.length? ratios.reduce((a,b)=>a+b,0)/ratios.length : null;
+    return {key, label:cfg.label, target, actual, avgDurActual, durTarget:cfg.durationTargetHrs, status:statusOf(combined), ratio:combined};
+  });
+}
+function kpisJourneyByTruck(recs){
+  const map = {};
+  recs.forEach(r=>{
+    if(!map[r.vehicleId]) map[r.vehicleId] = {vehicleId:r.vehicleId, trips:0, delaySum:0, deviations:0, onTime:0, lastDriver:'', lastDate:''};
+    const m = map[r.vehicleId];
+    m.trips++; m.delaySum += num(r.delayHrs); m.deviations += num(r.deviations);
+    if(r.onTime==='Yes') m.onTime++;
+    if(!m.lastDate || r.date >= m.lastDate){ m.lastDate = r.date; m.lastDriver = r.driverName || m.lastDriver; }
+  });
+  return Object.values(map).map(m=>({
+    vehicleId:m.vehicleId, regNo:vehicleLabel(m.vehicleId), trips:m.trips,
+    avgDelay: m.trips? m.delaySum/m.trips : 0, deviations:m.deviations,
+    onTimePct: m.trips? m.onTime/m.trips : 0, lastDriver: m.lastDriver || '—'
+  })).sort((a,b)=>b.trips-a.trips);
+}
+
+function kpisInspections(recs){
+  const due=sumBy(recs,'vehiclesDue'), done=sumBy(recs,'vehiclesInspected');
+  const defects=sumBy(recs,'defectsFound'), critical=sumBy(recs,'criticalDefects');
+  const compliance = due? done/due : 0;
+  const defectRate = done? defects/done : 0;
+  return [
+    {key:'compliance', label:'Inspection Compliance', actual:compliance, target:STATE.targets.inspectionComplianceTarget, fmt:'pct', good:'higher', ratio:attainment(compliance,STATE.targets.inspectionComplianceTarget,'higher')},
+    {key:'defectrate', label:'Defect Rate', actual:defectRate, target:STATE.targets.defectRateTarget, fmt:'pct', good:'lower', ratio:attainment(defectRate,STATE.targets.defectRateTarget,'lower')},
+    {key:'critical', label:'Critical Defects', actual:critical, target:0, fmt:0, good:'lower', ratio: critical===0?1:(0.5/critical)},
+    {key:'done', label:'Vehicles Inspected', actual:done, target:due, fmt:0, good:'higher', ratio:attainment(done,due,'higher')},
+  ];
+}
+function kpisPrePost(recs){
+  const pre = recs.filter(r=>r.type==='Pre-Trip'), post = recs.filter(r=>r.type==='Post-Trip');
+  const preRate = pre.length? pre.filter(r=>r.result==='Pass').length/pre.length : 0;
+  const postRate = post.length? post.filter(r=>r.result==='Pass').length/post.length : 0;
+  return [
+    {key:'pre', label:'Pre-Trip Pass Rate', actual:preRate, target:STATE.targets.prePostPassRateTarget, fmt:'pct', good:'higher', ratio: pre.length? attainment(preRate,STATE.targets.prePostPassRateTarget,'higher') : null},
+    {key:'post', label:'Post-Trip Pass Rate', actual:postRate, target:STATE.targets.prePostPassRateTarget, fmt:'pct', good:'higher', ratio: post.length? attainment(postRate,STATE.targets.prePostPassRateTarget,'higher') : null},
+    {key:'prechecks', label:'Pre-Trip Checks Logged', actual:pre.length, target:null, fmt:0, good:'higher', ratio:null},
+    {key:'postchecks', label:'Post-Trip Checks Logged', actual:post.length, target:null, fmt:0, good:'higher', ratio:null},
+  ];
+}
+function kpisSafety(recs, period){
+  const hours=sumBy(recs,'hoursWorked'), incidents=sumBy(recs,'incidents'), nearMiss=sumBy(recs,'nearMisses');
+  const trucksInspected=sumBy(recs,'trucksInspected'), roadPatrols=sumBy(recs,'roadPatrols'), toolbox=sumBy(recs,'toolboxTalks');
+  const ltifr = hours? (incidents/hours)*200000 : 0;
+  const truckInspTarget = scaledTarget(STATE.targets.dailyTruckInspectionTarget,'day',period);
+  const patrolTarget = scaledTarget(STATE.targets.roadPatrolWeeklyTarget,'week',period);
+  const toolboxTarget = scaledTarget(STATE.targets.toolboxTalkWeeklyTarget,'week',period);
+  const nearMissTarget = scaledTarget(STATE.targets.nearMissWeeklyTarget,'week',period);
+  return [
+    {key:'ltifr', label:'LTIFR', actual:ltifr, target:STATE.targets.ltifrTarget, fmt:2, good:'lower', ratio:attainment(ltifr,STATE.targets.ltifrTarget,'lower')},
+    {key:'incidents', label:'Incidents', actual:incidents, target:0, fmt:0, good:'lower', ratio: incidents===0?1:(0.5/incidents)},
+    {key:'nearmiss', label:'Near-Misses Reported', actual:nearMiss, target:nearMissTarget, fmt:0, good:'higher', ratio:attainment(nearMiss,nearMissTarget,'higher')},
+    {key:'truckinsp', label:'Trucks Inspected (Safety)', actual:trucksInspected, target:truckInspTarget, fmt:0, good:'higher', ratio:attainment(trucksInspected,truckInspTarget,'higher')},
+    {key:'patrol', label:'Road Patrols', actual:roadPatrols, target:patrolTarget, fmt:0, good:'higher', ratio:attainment(roadPatrols,patrolTarget,'higher')},
+    {key:'toolbox', label:'Toolbox Talks', actual:toolbox, target:toolboxTarget, fmt:0, good:'higher', ratio:attainment(toolbox,toolboxTarget,'higher')},
+  ];
+}
+function maintenanceStatusForVehicle(v){
+  const kmRemaining = num(v.serviceIntervalKm) - (num(v.currentOdometer) - num(v.lastServiceOdometer));
+  let daysRemaining = null;
+  if(v.lastServiceDate && v.serviceIntervalDays){
+    const last = new Date(v.lastServiceDate+'T00:00:00');
+    const due = new Date(last.getTime() + num(v.serviceIntervalDays)*86400000);
+    daysRemaining = Math.round((due - new Date())/86400000);
+  }
+  let status='green', reason='Within service interval';
+  const kmCritical = kmRemaining<=0, kmWarn = kmRemaining>0 && kmRemaining<500;
+  const dayCritical = daysRemaining!==null && daysRemaining<=0, dayWarn = daysRemaining!==null && daysRemaining>0 && daysRemaining<=7;
+  if(kmCritical || dayCritical){ status='red'; reason = kmCritical? 'Service overdue by '+fmt(Math.abs(kmRemaining))+' km' : 'Service overdue by '+Math.abs(daysRemaining)+' days'; }
+  else if(kmWarn || dayWarn){ status='amber'; reason = kmWarn? fmt(kmRemaining)+' km until service due' : daysRemaining+' days until service due'; }
+  return {status, reason, kmRemaining, daysRemaining};
+}
+function kpisMaintenance(recs, vehicles, dailyRecs, period){
+  const scheduled = recs.filter(r=>r.type==='Scheduled');
+  const breakdowns = recs.filter(r=>r.type==='Breakdown');
+  const pmDue = sumBy(recs,'pmDue') || scheduled.length;
+  const pmCompliance = pmDue? scheduled.length/Math.max(pmDue,scheduled.length) : (scheduled.length?1:0);
+  const totalVehicles = vehicles.length || 1;
+  const breakdownRate = breakdowns.length / totalVehicles;
+  const mttr = avgBy(breakdowns,'downtimeHours');
+  const alerts = vehicles.map(maintenanceStatusForVehicle);
+  const overdue = alerts.filter(a=>a.status==='red').length;
+  const dueSoon = alerts.filter(a=>a.status==='amber').length;
+  const trucksInspected=sumBy(dailyRecs,'trucksInspected'), roadPatrols=sumBy(dailyRecs,'roadPatrols'), toolbox=sumBy(dailyRecs,'toolboxTalks');
+  const truckInspTarget = scaledTarget(STATE.targets.dailyTruckInspectionTarget,'day',period);
+  const patrolTarget = scaledTarget(STATE.targets.roadPatrolWeeklyTarget,'week',period);
+  const toolboxTarget = scaledTarget(STATE.targets.toolboxTalkWeeklyTarget,'week',period);
+  return [
+    {key:'pm', label:'PM Compliance', actual:pmCompliance, target:STATE.targets.pmComplianceTarget, fmt:'pct', good:'higher', ratio:attainment(pmCompliance,STATE.targets.pmComplianceTarget,'higher')},
+    {key:'breakdown', label:'Breakdown Rate', actual:breakdownRate, target:STATE.targets.breakdownRateTarget, fmt:'pct', good:'lower', ratio:attainment(breakdownRate,STATE.targets.breakdownRateTarget,'lower')},
+    {key:'mttr', label:'Avg Repair Time (MTTR)', actual:mttr, target:STATE.targets.mttrTargetHrs, fmt:1, unit:'hrs', good:'lower', ratio:attainment(mttr,STATE.targets.mttrTargetHrs,'lower')},
+    {key:'predictive', label:'Predictive Alerts (open)', actual:overdue+dueSoon, target:0, fmt:0, good:'lower', ratio:(overdue+dueSoon)===0?1:(overdue?0.3:0.7)},
+    {key:'truckinsp', label:'Trucks Inspected (Maint.)', actual:trucksInspected, target:truckInspTarget, fmt:0, good:'higher', ratio:attainment(trucksInspected,truckInspTarget,'higher')},
+    {key:'patrol', label:'Road Patrols (Maint.)', actual:roadPatrols, target:patrolTarget, fmt:0, good:'higher', ratio:attainment(roadPatrols,patrolTarget,'higher')},
+    {key:'toolbox', label:'Toolbox Talks (Maint.)', actual:toolbox, target:toolboxTarget, fmt:0, good:'higher', ratio:attainment(toolbox,toolboxTarget,'higher')},
+  ];
+}
+// All-time repair analytics: repeated repairs, frequency per truck, highest-repair trucks.
+function repairAnalytics(vehicles, logs){
+  const repairLogs = logs.filter(l=>l.type==='Breakdown'||l.type==='Repair');
+  const freqMap = {};
+  repairLogs.forEach(l=>{ freqMap[l.vehicleId]=(freqMap[l.vehicleId]||0)+1; });
+  const frequency = Object.entries(freqMap).map(([vid,count])=>({vehicleId:vid, regNo:vehicleLabel(vid), count})).sort((a,b)=>b.count-a.count);
+  const topRepaired = frequency.slice(0,5);
+  const groupMap = {};
+  repairLogs.forEach(l=>{
+    const key = l.vehicleId+'|'+(l.component||'Unspecified');
+    if(!groupMap[key]) groupMap[key]={vehicleId:l.vehicleId, regNo:vehicleLabel(l.vehicleId), component:l.component||'Unspecified', count:0, lastDate:l.date};
+    groupMap[key].count++;
+    if(l.date && (!groupMap[key].lastDate || l.date>groupMap[key].lastDate)) groupMap[key].lastDate=l.date;
+  });
+  const repeated = Object.values(groupMap).filter(g=>g.count>=2).sort((a,b)=>b.count-a.count);
+  return {frequency, topRepaired, repeated};
+}
+
+/* ---------------- recommendation engine ---------------- */
+function buildRecommendations(filtered){
+  const recs = [];
+  const f = filtered || {
+    transport: filterPeriod(STATE.data.transport,'week'), journey: filterPeriod(STATE.data.journey,'week'),
+    inspections: filterPeriod(STATE.data.inspections,'week'), pretrip: filterPeriod(STATE.data.pretrip,'week'),
+    safety: filterPeriod(STATE.data.safety,'week'), maintenance: filterPeriod(STATE.data.maintenance,'week'),
+    maintenanceDaily: filterPeriod(STATE.data.maintenanceDaily,'week'),
+  };
+  const t = kpisTransport(f.transport);
+  const jOverall = kpisJourneyOverall(f.journey,'week');
+  const jByRoute = kpisJourneyByRoute(f.journey,'week');
+  const i = kpisInspections(f.inspections);
+  const pp = kpisPrePost(f.pretrip);
+  const s = kpisSafety(f.safety,'week');
+  const m = kpisMaintenance(f.maintenance, STATE.data.vehicles, f.maintenanceDaily,'week');
+  const repairs = repairAnalytics(STATE.data.vehicles, STATE.data.maintenance);
+
+  function pushIfBad(dept, kpi, msgAmber, msgRed){
+    if(!kpi) return;
+    const st = statusOf(kpi.ratio);
+    if(st==='red') recs.push({dept, severity:'red', text: msgRed});
+    else if(st==='amber') recs.push({dept, severity:'amber', text: msgAmber});
+  }
+  const g = (arr,k)=>arr.find(x=>x.key===k);
+
+  pushIfBad('Transport', g(t,'trips'), `Trip completion at ${pct(g(t,'trips').ratio)} of target this week — check dispatch scheduling and vehicle availability.`, `Trip completion critically low — investigate driver/vehicle shortages immediately.`);
+  pushIfBad('Transport', g(t,'tonnage'), `Tonnage attainment trailing target — review load planning and under-utilised trips.`, `Tonnage moved well below target — audit load factors and route allocation urgently.`);
+  pushIfBad('Transport', g(t,'turnaround'), `Turnaround time running above target — review loading-bay and detention delays.`, `Turnaround time significantly above target — escalate loading/offloading bottlenecks to site ops.`);
+
+  pushIfBad('Journey Mgmt', g(jOverall,'trips'), `Fleet is behind the combined route trip target this week — check route allocation across gas trucks.`, `Fleet is well behind the combined daily trip targets — escalate route/driver allocation urgently.`);
+  pushIfBad('Journey Mgmt', g(jOverall,'ontime'), `On-time arrivals slipping — review route planning and departure windows.`, `On-time performance critically low — reassess journey plans and traffic/route risk.`);
+  pushIfBad('Journey Mgmt', g(jOverall,'risk'), `Some journeys missing a completed risk assessment — reinforce pre-trip planning discipline.`, `Risk assessment compliance critically low — journeys are running without proper planning sign-off.`);
+  pushIfBad('Journey Mgmt', g(jOverall,'delay'), `Average delay/idling above target — review loading-point queuing and traffic routing.`, `Delay/idling well above target — significant time is being lost fleet-wide; investigate causes by route.`);
+  const devKpi = g(jOverall,'deviations');
+  if(devKpi && num(devKpi.actual)>0) recs.push({dept:'Journey Mgmt', severity: num(devKpi.actual)>3?'red':'amber', text:`${devKpi.actual} route deviation(s) logged this week — review with drivers and confirm approved routing.`});
+  const violKpi = g(jOverall,'violations');
+  if(violKpi && num(violKpi.actual)>0) recs.push({dept:'Journey Mgmt', severity: num(violKpi.actual)>2?'red':'amber', text:`${violKpi.actual} driver-hours violation(s) logged this week — review rostering and rest-break compliance.`});
+  const worstRoutes = jByRoute.filter(r=>r.status==='red');
+  const watchRoutes = jByRoute.filter(r=>r.status==='amber');
+  if(worstRoutes.length) recs.push({dept:'Journey Mgmt', severity:'red', text:`Route(s) missing target: ${worstRoutes.map(r=>r.label).join(', ')} — trip count and/or duration is off target.`});
+  else if(watchRoutes.length) recs.push({dept:'Journey Mgmt', severity:'amber', text:`Route(s) trending off target: ${watchRoutes.map(r=>r.label).join(', ')} — monitor this week.`});
+
+  pushIfBad('Inspections', g(i,'compliance'), `Inspection compliance below target — some vehicles dispatched without a completed check.`, `Inspection compliance critically low — vehicles may be running without valid pre-trip checks.`);
+  pushIfBad('Inspections', g(i,'defectrate'), `Defect rate trending up — consider a fleet-wide condition audit.`, `Defect rate is high — schedule a fleet condition audit and review maintenance intervals.`);
+  const critKpi = g(i,'critical');
+  if(critKpi && num(critKpi.actual)>0) recs.push({dept:'Inspections', severity:'red', text:`${critKpi.actual} critical defect(s) reported — ground affected vehicles until rectified.`});
+  if(g(pp,'pre') && g(pp,'pre').ratio!==null) pushIfBad('Inspections', g(pp,'pre'), `Pre-trip pass rate slipping — reinforce pre-trip checklist discipline with drivers.`, `Pre-trip pass rate critically low — vehicles are failing checks before dispatch; investigate root causes.`);
+  if(g(pp,'post') && g(pp,'post').ratio!==null) pushIfBad('Inspections', g(pp,'post'), `Post-trip pass rate slipping — check for damage/wear accumulating during trips.`, `Post-trip pass rate critically low — review driver handling and route conditions.`);
+
+  const incKpi = g(s,'incidents');
+  if(incKpi && num(incKpi.actual)>0) recs.push({dept:'Safety', severity:'red', text:`${incKpi.actual} safety incident(s) this week — trigger root-cause investigation per HSE procedure.`});
+  pushIfBad('Safety', g(s,'ltifr'), `LTIFR trending above target — reinforce toolbox talks and hazard reporting.`, `LTIFR above target threshold — escalate to HSE management for corrective action plan.`);
+  pushIfBad('Safety', g(s,'truckinsp'), `Safety truck-inspection count behind the 5/day target — schedule catch-up inspections.`, `Safety truck inspections well behind target — daily inspection cadence has broken down.`);
+  pushIfBad('Safety', g(s,'patrol'), `Road patrols behind the twice-weekly target — schedule remaining patrol(s) this week.`, `Road patrols significantly behind target — routes are going unchecked.`);
+  pushIfBad('Safety', g(s,'toolbox'), `Weekly toolbox talk not yet held — schedule before week end.`, `Toolbox talk compliance critically low — safety communication cadence has broken down.`);
+
+  pushIfBad('Maintenance', g(m,'pm'), `PM compliance slipping — reschedule overdue services this week.`, `PM compliance critically low — overdue services are elevating breakdown risk fleet-wide.`);
+  pushIfBad('Maintenance', g(m,'breakdown'), `Breakdown rate above target — review recent failure patterns by component.`, `Breakdown rate high — consider a fleet reliability review and spares stock check.`);
+  pushIfBad('Maintenance', g(m,'truckinsp'), `Maintenance truck-inspection count behind the 5/day target — schedule catch-up inspections.`, `Maintenance truck inspections well behind target — daily inspection cadence has broken down.`);
+  pushIfBad('Maintenance', g(m,'patrol'), `Maintenance road patrols behind the twice-weekly target — schedule remaining patrol(s) this week.`, `Maintenance road patrols significantly behind target.`);
+  pushIfBad('Maintenance', g(m,'toolbox'), `Weekly maintenance toolbox talk not yet held — schedule before week end.`, `Maintenance toolbox talk compliance critically low.`);
+  const chronic = repairs.repeated.filter(r=>r.count>=3);
+  const repeat2 = repairs.repeated.filter(r=>r.count===2);
+  if(chronic.length) recs.push({dept:'Maintenance', severity:'red', text:`Chronic repeat repairs: ${chronic.map(r=>`${r.regNo} (${r.component}, ${r.count}x)`).join('; ')} — investigate root cause, consider component replacement over repeat repair.`});
+  else if(repeat2.length) recs.push({dept:'Maintenance', severity:'amber', text:`Repeat repairs logged: ${repeat2.slice(0,3).map(r=>`${r.regNo} (${r.component})`).join(', ')} — watch for a recurring pattern.`});
+  const overdueVehicles = STATE.data.vehicles.map(maintenanceStatusForVehicle).filter(a=>a.status==='red');
+  const dueSoonVehicles = STATE.data.vehicles.map(v=>maintenanceStatusForVehicle(v)).filter(a=>a.status==='amber');
+  if(overdueVehicles.length) recs.push({dept:'Maintenance', severity:'red', text:`${overdueVehicles.length} vehicle(s) overdue for service — predictive model flags immediate scheduling.`});
+  if(dueSoonVehicles.length) recs.push({dept:'Maintenance', severity:'amber', text:`${dueSoonVehicles.length} vehicle(s) approaching service threshold — schedule within 7 days / 500km.`});
+
+  if(recs.length===0) recs.push({dept:'Fleet', severity:'green', text:'All departments are within target this week. No corrective actions required — maintain current cadence.'});
+  const order={red:0,amber:1,green:2};
+  recs.sort((a,b)=>order[a.severity]-order[b.severity]);
+  return recs;
+}
+
+/* ---------------- generic UI builders ---------------- */
+function kpiCard(k){
+  const st = statusOf(k.ratio);
+  const barPct = (k.ratio===null||k.ratio===undefined)? 0 : Math.max(4, Math.min(100, k.ratio*100));
+  const barColor = {green:'var(--green)',amber:'var(--amber)',red:'var(--red)',grey:'var(--dim)'}[st];
+  const valueDisplay = k.fmt==='pct' ? pct(k.actual) : fmt(k.actual, k.fmt===undefined?0:k.fmt) + (k.unit? ' '+k.unit : '');
+  const targetDisplay = (k.target===null||k.target===undefined) ? 'No fixed target' : ('Target '+(k.fmt==='pct'?pct(k.target):fmt(k.target,k.fmt===undefined?0:k.fmt)+(k.unit?' '+k.unit:'')));
+  return `<div class="card kpi">
+    <div class="label"><span>${k.label}</span><span class="tag ${st}">${statusLabel(st)}</span></div>
+    <div class="value">${valueDisplay}</div>
+    <div class="target">${targetDisplay}</div>
+    <div class="bar-track"><div class="bar-fill" style="width:${barPct}%;background:${barColor}"></div></div>
+  </div>`;
+}
+function periodTabs(deptKey){
+  const cur = STATE.periodByDept[deptKey];
+  const opts = [['day','Today'],['week','This Week'],['month','This Month']];
+  return `<div class="tabs" data-period-tabs="${deptKey}">${opts.map(([k,l])=>`<button data-period="${k}" class="${cur===k?'active':''}">${l}</button>`).join('')}</div>`;
+}
+function fieldInput(f){
+  if(f.type==='select'){
+    return `<div><label>${f.label}</label><select name="${f.key}" ${f.required?'required':''}>${f.options.map(o=>`<option value="${o}">${o}</option>`).join('')}</select></div>`;
+  }
+  return `<div><label>${f.label}${f.unit?` (${f.unit})`:''}</label><input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:''} ${f.required?'required':''} placeholder="${f.placeholder||''}"></div>`;
+}
+
+/* ---------------- generic department (Transport, Safety) ---------------- */
+const DEPTS = {
+  transport:{
+    label:'Transport Operations', accent:'#E8A33D',
+    fields:[
+      {key:'tripsTarget',label:'Trips Target',type:'number',required:true},
+      {key:'tripsActual',label:'Trips Actual',type:'number',required:true},
+      {key:'tonnageTarget',label:'Tonnage Target',type:'number',unit:'MT'},
+      {key:'tonnageActual',label:'Tonnage Actual',type:'number',unit:'MT'},
+      {key:'turnaroundTarget',label:'Turnaround Target',type:'number',unit:'hrs',step:'0.1'},
+      {key:'turnaroundActual',label:'Turnaround Actual',type:'number',unit:'hrs',step:'0.1'},
+      {key:'transitTarget',label:'Transit Target',type:'number',unit:'hrs',step:'0.1'},
+      {key:'transitActual',label:'Transit Actual',type:'number',unit:'hrs',step:'0.1'},
+    ],
+    kpis:(recs)=>kpisTransport(recs),
+    tableCols:[['date','Date'],['tripsTarget','Trips Tgt'],['tripsActual','Trips Act'],['tonnageTarget','Ton. Tgt'],['tonnageActual','Ton. Act'],['turnaroundActual','TAT Act (h)'],['transitActual','Transit Act (h)']]
+  },
+  safety:{
+    label:'Safety (HSE)', accent:'#E1543F',
+    fields:[
+      {key:'hoursWorked',label:'Hours Worked',type:'number',required:true},
+      {key:'incidents',label:'Incidents',type:'number'},
+      {key:'nearMisses',label:'Near-Misses Reported',type:'number'},
+      {key:'trucksInspected',label:'Trucks Inspected (target 5/day)',type:'number'},
+      {key:'roadPatrols',label:'Road Patrols (target 2/week)',type:'number'},
+      {key:'toolboxTalks',label:'Toolbox Talks (target 1/week)',type:'number'},
+    ],
+    kpis:(recs)=>kpisSafety(recs, STATE.periodByDept.safety),
+    tableCols:[['date','Date'],['hoursWorked','Hrs Worked'],['incidents','Incidents'],['nearMisses','Near-Miss'],['trucksInspected','Trucks Insp.'],['roadPatrols','Patrols'],['toolboxTalks','Toolbox']]
+  }
+};
+
+function renderDeptPage(deptKey){
+  const cfg = DEPTS[deptKey];
+  const period = STATE.periodByDept[deptKey];
+  const recs = filterPeriod(STATE.data[deptKey], period);
+  const kpis = cfg.kpis(recs);
+  const allRecs = [...STATE.data[deptKey]].sort((a,b)=> (a.date<b.date?1:-1));
+  return `
+  <div class="topbar">
+    <div><h1>${cfg.label}</h1><div class="sub">Daily entries roll up into weekly &amp; monthly KPIs automatically.</div></div>
+    <div class="topbar-right">${syncBadge()}</div>
+  </div>
+  ${periodTabs(deptKey)}
+  <div class="grid cols-4">${kpis.map(kpiCard).join('')}</div>
+  <details class="form-card" style="margin-top:20px;">
+    <summary>Log new entry — ${cfg.label}</summary>
+    <form data-log-form="${deptKey}">
+      <div class="form-grid">
+        <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+        ${cfg.fields.map(fieldInput).join('')}
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Save Entry</button><span class="dim small">Visible to the whole team instantly.</span></div>
+    </form>
+  </details>
+  <div class="section-title"><span>Entry Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr>${cfg.tableCols.map(c=>`<th>${c[1]}</th>`).join('')}<th></th></tr></thead>
+    <tbody>${allRecs.length? allRecs.map(r=>`<tr>${cfg.tableCols.map(c=>`<td>${c[0]==='date'?r.date:fmt(num(r[c[0]]))}</td>`).join('')}<td><button class="btn ghost small" data-delete="${deptKey}:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="${cfg.tableCols.length+1}">No entries yet — log the first one above.</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+/* ---------------- journey management (trip-level) ---------------- */
+function renderJourneyPage(){
+  const period = STATE.periodByDept.journey;
+  const recs = filterPeriod(STATE.data.journey, period);
+  const overall = kpisJourneyOverall(recs, period);
+  const byRoute = kpisJourneyByRoute(recs, period);
+  const byTruck = kpisJourneyByTruck(recs);
+  const allRecs = [...STATE.data.journey].sort((a,b)=> (a.date<b.date?1:-1));
+
+  return `
+  <div class="topbar">
+    <div><h1>Journey Management</h1><div class="sub">Per-trip logging: routes, delay/idling, deviations &amp; trips per truck against fixed daily targets.</div></div>
+    <div class="topbar-right">${syncBadge()}</div>
+  </div>
+  ${periodTabs('journey')}
+  <div class="grid cols-3">${overall.map(kpiCard).join('')}</div>
+
+  <div class="section-title"><span>Trips by Route — Target vs Actual</span><div class="line"></div></div>
+  <div class="section-sub">Targets: Clinker 2/day (Ewekoro⇄Sagamu, 8h) · Gypsum Apapa→Ewekoro 1/day (24h) · Gypsum Apapa→Sagamu 1/day (24h*) · Gypsum Adumbu 4/day (2h). *Apapa→Sagamu duration assumed same as Apapa→Ewekoro — confirm and adjust if different.</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Route</th><th>Target Trips</th><th>Actual Trips</th><th>Avg Duration Actual</th><th>Duration Target</th><th>Status</th></tr></thead>
+    <tbody>${byRoute.map(r=>`<tr><td style="white-space:normal;">${r.label}</td><td>${fmt(r.target,1)}</td><td>${fmt(r.actual)}</td><td>${r.actual?fmt(r.avgDurActual,1)+' h':'—'}</td><td>${r.durTarget!==null?r.durTarget+' h':'—'}</td><td><span class="tag ${r.status}">${statusLabel(r.status)}</span></td></tr>`).join('')}</tbody>
+  </table></div>
+
+  <div class="section-title"><span>Trips per Truck</span><div class="line"></div><span class="dim small mono">${byTruck.length} trucks active this period</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Truck No.</th><th>Last Driver</th><th>Trips</th><th>Avg Delay / Idling</th><th>Route Deviations</th><th>On-Time %</th></tr></thead>
+    <tbody>${byTruck.length? byTruck.map(t=>`<tr><td>${t.regNo}</td><td>${t.lastDriver}</td><td>${t.trips}</td><td>${fmt(t.avgDelay,1)} h</td><td>${t.deviations}</td><td>${pct(t.onTimePct)}</td></tr>`).join('') : `<tr class="empty-row"><td colspan="6">No trips logged for this period yet.</td></tr>`}</tbody>
+  </table></div>
+
+  <details class="form-card" style="margin-top:20px;">
+    <summary>Log a trip</summary>
+    <form data-log-form="journey">
+      <div class="form-grid">
+        <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+        <div><label>Truck No.</label><select name="vehicleId" required><option value="">Select truck…</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}">${v.regNo}</option>`).join('')}</select></div>
+        <div><label>Driver Name</label><input type="text" name="driverName" placeholder="e.g. John Doe" required></div>
+        <div><label>Route</label><select name="route" required>${ROUTE_KEYS_TARGETED.concat('other').map(k=>`<option value="${k}">${ROUTES[k].label}</option>`).join('')}</select></div>
+        <div><label>Duration Actual (hrs)</label><input type="number" name="durationActual" step="0.1" required></div>
+        <div><label>Delay / Idling (hrs)</label><input type="number" name="delayHrs" step="0.1" value="0"></div>
+        <div><label>Route Deviations (count)</label><input type="number" name="deviations" value="0"></div>
+        <div><label>On-Time Arrival</label><select name="onTime"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+        <div><label>Risk Assessment Completed</label><select name="riskAssessment"><option value="Yes">Yes</option><option value="No">No</option></select></div>
+        <div><label>Driver Hours Violation</label><select name="driverHoursViolation"><option value="No">No</option><option value="Yes">Yes</option></select></div>
+        <div><label>Notes</label><input type="text" name="notes" placeholder="Optional"></div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Save Trip</button><span class="dim small">Visible to the whole team instantly.</span></div>
+    </form>
+  </details>
+
+  <div class="section-title"><span>Trip Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>Truck No.</th><th>Driver</th><th>Route</th><th>Duration</th><th>Delay</th><th>Deviations</th><th>On-Time</th><th>Risk Ass.</th><th>Hrs Viol.</th><th></th></tr></thead>
+    <tbody>${allRecs.length? allRecs.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.driverName||'—'}</td><td>${ROUTES[r.route]?ROUTES[r.route].label:r.route}</td><td>${fmt(num(r.durationActual),1)} h</td><td>${fmt(num(r.delayHrs),1)} h</td><td>${num(r.deviations)}</td><td>${r.onTime}</td><td>${r.riskAssessment}</td><td>${r.driverHoursViolation}</td><td><button class="btn ghost small" data-delete="journey:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="11">No trips logged yet — log the first one above.</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+/* ---------------- inspections (aggregate + pre/post trip) ---------------- */
+function renderInspectionsPage(){
+  const period = STATE.periodByDept.inspections;
+  const recs = filterPeriod(STATE.data.inspections, period);
+  const kpis = kpisInspections(recs);
+  const allRecs = [...STATE.data.inspections].sort((a,b)=> (a.date<b.date?1:-1));
+
+  const pretripRecs = filterPeriod(STATE.data.pretrip, period);
+  const ppKpis = kpisPrePost(pretripRecs);
+  const allPretrip = [...STATE.data.pretrip].sort((a,b)=> (a.date<b.date?1:-1));
+
+  return `
+  <div class="topbar">
+    <div><h1>Vehicle Inspections</h1><div class="sub">Fleet-wide inspection compliance plus per-trip Pre-Trip / Post-Trip checks.</div></div>
+    <div class="topbar-right">${syncBadge()}</div>
+  </div>
+  ${periodTabs('inspections')}
+  <div class="grid cols-4">${kpis.map(kpiCard).join('')}</div>
+
+  <details class="form-card" style="margin-top:20px;">
+    <summary>Log daily inspection summary</summary>
+    <form data-log-form="inspections">
+      <div class="form-grid">
+        <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+        <div><label>Vehicles Due</label><input type="number" name="vehiclesDue" required></div>
+        <div><label>Vehicles Inspected</label><input type="number" name="vehiclesInspected" required></div>
+        <div><label>Defects Found</label><input type="number" name="defectsFound"></div>
+        <div><label>Critical Defects</label><input type="number" name="criticalDefects"></div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Save Entry</button></div>
+    </form>
+  </details>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>Due</th><th>Inspected</th><th>Defects</th><th>Critical</th><th></th></tr></thead>
+    <tbody>${allRecs.length? allRecs.map(r=>`<tr><td>${r.date}</td><td>${fmt(num(r.vehiclesDue))}</td><td>${fmt(num(r.vehiclesInspected))}</td><td>${fmt(num(r.defectsFound))}</td><td>${fmt(num(r.criticalDefects))}</td><td><button class="btn ghost small" data-delete="inspections:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="6">No inspection summaries logged yet.</td></tr>`}</tbody>
+  </table></div>
+
+  <div class="section-title"><span>Pre-Trip / Post-Trip Checks</span><div class="line"></div></div>
+  <div class="grid cols-4">${ppKpis.map(kpiCard).join('')}</div>
+  <details class="form-card" style="margin-top:14px;">
+    <summary>Log a pre-trip / post-trip check</summary>
+    <form data-log-form="pretrip">
+      <div class="form-grid">
+        <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+        <div><label>Vehicle</label><select name="vehicleId" required><option value="">Select vehicle…</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}">${v.regNo}</option>`).join('')}</select></div>
+        <div><label>Check Type</label><select name="type" required><option value="Pre-Trip">Pre-Trip</option><option value="Post-Trip">Post-Trip</option></select></div>
+        <div><label>Result</label><select name="result" required><option value="Pass">Pass</option><option value="Fail">Fail</option></select></div>
+        <div><label>Notes</label><input type="text" name="notes" placeholder="Defects / observations"></div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Save Check</button></div>
+    </form>
+  </details>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>Vehicle</th><th>Type</th><th>Result</th><th>Notes</th><th></th></tr></thead>
+    <tbody>${allPretrip.length? allPretrip.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.type}</td><td><span class="tag ${r.result==='Pass'?'green':'red'}">${r.result}</span></td><td style="white-space:normal;">${r.notes||''}</td><td><button class="btn ghost small" data-delete="pretrip:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="6">No pre-trip/post-trip checks logged yet.</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+/* ---------------- maintenance (registry + predictive + repair analytics + daily activity) ---------------- */
+function renderMaintenancePage(){
+  const period = STATE.periodByDept.maintenance;
+  const recs = filterPeriod(STATE.data.maintenance, period);
+  const dailyRecs = filterPeriod(STATE.data.maintenanceDaily, period);
+  const kpis = kpisMaintenance(recs, STATE.data.vehicles, dailyRecs, period);
+  const alerts = STATE.data.vehicles.map(v=>({v, a:maintenanceStatusForVehicle(v)})).sort((x,y)=>({red:0,amber:1,green:2}[x.a.status]-{red:0,amber:1,green:2}[y.a.status]));
+  const allLogs = [...STATE.data.maintenance].sort((a,b)=> (a.date<b.date?1:-1));
+  const allDaily = [...STATE.data.maintenanceDaily].sort((a,b)=> (a.date<b.date?1:-1));
+  const repairs = repairAnalytics(STATE.data.vehicles, STATE.data.maintenance);
+
+  return `
+  <div class="topbar">
+    <div><h1>Maintenance &amp; Predictive Servicing</h1><div class="sub">Vehicle registry drives predictive service alerts; repair history drives reliability analytics.</div></div>
+    <div class="topbar-right">${syncBadge()}</div>
+  </div>
+  ${periodTabs('maintenance')}
+  <div class="grid cols-4">${kpis.map(kpiCard).join('')}</div>
+
+  <div class="section-title"><span>Daily Activity — Truck Inspections, Patrols &amp; Toolbox Talks</span><div class="line"></div></div>
+  <div class="section-sub">Targets: 5 truck inspections/day · 2 road patrols/week · 1 toolbox talk/week (maintenance team).</div>
+  <details class="form-card">
+    <summary>Log daily maintenance activity</summary>
+    <form data-log-form="maintenanceDaily">
+      <div class="form-grid">
+        <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+        <div><label>Trucks Inspected</label><input type="number" name="trucksInspected"></div>
+        <div><label>Road Patrols</label><input type="number" name="roadPatrols"></div>
+        <div><label>Toolbox Talks</label><input type="number" name="toolboxTalks"></div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Save Entry</button></div>
+    </form>
+  </details>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>Trucks Insp.</th><th>Patrols</th><th>Toolbox</th><th></th></tr></thead>
+    <tbody>${allDaily.length? allDaily.map(r=>`<tr><td>${r.date}</td><td>${fmt(num(r.trucksInspected))}</td><td>${fmt(num(r.roadPatrols))}</td><td>${fmt(num(r.toolboxTalks))}</td><td><button class="btn ghost small" data-delete="maintenanceDaily:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="5">No daily activity logged yet.</td></tr>`}</tbody>
+  </table></div>
+
+  <div class="section-title"><span>Predictive Alerts — Vehicle Registry</span><div class="line"></div></div>
+  <details class="form-card" open>
+    <summary>Manage vehicle registry (${STATE.data.vehicles.length})</summary>
+    <form data-vehicle-form="1">
+      <div class="form-grid">
+        <div><label>Reg No.</label><input type="text" name="regNo" required placeholder="e.g. KDA 221B"></div>
+        <div><label>Make / Model</label><input type="text" name="model" placeholder="e.g. Isuzu FRR"></div>
+        <div><label>Current Odometer (km)</label><input type="number" name="currentOdometer" required></div>
+        <div><label>Last Service Odometer (km)</label><input type="number" name="lastServiceOdometer" required></div>
+        <div><label>Service Interval (km)</label><input type="number" name="serviceIntervalKm" value="10000" required></div>
+        <div><label>Last Service Date</label><input type="date" name="lastServiceDate" value="${todayStr()}" required></div>
+        <div><label>Service Interval (days)</label><input type="number" name="serviceIntervalDays" value="90" required></div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Add / Update Vehicle</button><span class="dim small">Predictive status recalculates instantly.</span></div>
+    </form>
+  </details>
+  <div class="table-wrap" style="margin-top:14px;"><table>
+    <thead><tr><th>Reg No.</th><th>Model</th><th>Odometer</th><th>Km to Service</th><th>Days to Service</th><th>Status</th><th></th></tr></thead>
+    <tbody>${alerts.length? alerts.map(({v,a})=>`<tr><td>${v.regNo}</td><td class="mono">${v.model||'—'}</td><td>${fmt(num(v.currentOdometer))} km</td><td>${a.kmRemaining!==null?fmt(a.kmRemaining):'—'}</td><td>${a.daysRemaining!==null?a.daysRemaining:'—'}</td><td><span class="tag ${a.status}">${a.status==='red'?'Overdue':a.status==='amber'?'Due Soon':'OK'}</span></td><td><button class="btn ghost small" data-delete-vehicle="${v.id}">Remove</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="7">No vehicles registered yet.</td></tr>`}</tbody>
+  </table></div>
+
+  <div class="section-title"><span>Repair Analytics (All-Time)</span><div class="line"></div></div>
+  <div class="grid cols-2">
+    <div>
+      <div class="section-sub" style="margin:0 0 8px;">Trucks with the highest repairs (top 5)</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Reg No.</th><th>Total Repairs</th></tr></thead>
+        <tbody>${repairs.topRepaired.length? repairs.topRepaired.map(r=>`<tr><td>${r.regNo}</td><td>${r.count}</td></tr>`).join('') : `<tr class="empty-row"><td colspan="2">No breakdown/repair events logged yet.</td></tr>`}</tbody>
+      </table></div>
+    </div>
+    <div>
+      <div class="section-sub" style="margin:0 0 8px;">Repair frequency by truck (all)</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Reg No.</th><th>Repair Count</th></tr></thead>
+        <tbody>${repairs.frequency.length? repairs.frequency.map(r=>`<tr><td>${r.regNo}</td><td>${r.count}</td></tr>`).join('') : `<tr class="empty-row"><td colspan="2">No breakdown/repair events logged yet.</td></tr>`}</tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="section-sub" style="margin:14px 0 8px;">Repeated repairs — same truck, same component</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Reg No.</th><th>Component</th><th>Occurrences</th><th>Last Date</th><th>Flag</th></tr></thead>
+    <tbody>${repairs.repeated.length? repairs.repeated.map(r=>`<tr><td>${r.regNo}</td><td>${r.component}</td><td>${r.count}</td><td>${r.lastDate||'—'}</td><td><span class="tag ${r.count>=3?'red':'amber'}">${r.count>=3?'Chronic':'Repeat'}</span></td></tr>`).join('') : `<tr class="empty-row"><td colspan="5">No repeated repairs detected yet.</td></tr>`}</tbody>
+  </table></div>
+
+  <details class="form-card" style="margin-top:20px;">
+    <summary>Log maintenance event (service / breakdown / repair)</summary>
+    <form data-log-form="maintenance">
+      <div class="form-grid">
+        <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+        <div><label>Vehicle</label><select name="vehicleId" required><option value="">Select vehicle…</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}">${v.regNo}</option>`).join('')}</select></div>
+        <div><label>Event Type</label><select name="type" required><option value="Scheduled">Scheduled Service</option><option value="Breakdown">Breakdown</option><option value="Repair">Repair (non-breakdown)</option></select></div>
+        <div><label>Component</label><select name="component"><option value="">—</option>${REPAIR_COMPONENTS.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></div>
+        <div><label>Downtime (hrs)</label><input type="number" name="downtimeHours" step="0.1"></div>
+        <div><label>Notes</label><input type="text" name="notes" placeholder="Optional"></div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Save Entry</button></div>
+    </form>
+  </details>
+  <div class="section-title"><span>Maintenance Log</span><div class="line"></div><span class="dim small mono">${allLogs.length} records</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>Vehicle</th><th>Type</th><th>Component</th><th>Downtime (h)</th><th>Notes</th><th></th></tr></thead>
+    <tbody>${allLogs.length? allLogs.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.type}</td><td>${r.component||'—'}</td><td>${r.downtimeHours?fmt(num(r.downtimeHours),1):'—'}</td><td style="white-space:normal;">${r.notes||''}</td><td><button class="btn ghost small" data-delete="maintenance:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="7">No maintenance events logged yet.</td></tr>`}</tbody>
+  </table></div>`;
+}
+
+/* ---------------- summary ---------------- */
+function syncBadge(){
+  const t = STATE.lastSync? STATE.lastSync.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
+  const errBadge = STATE.connectionError? `<span class="tag red" title="${STATE.connectionError.replace(/"/g,'&quot;')}" style="margin-right:6px;">Sync Error</span>` : '';
+  return `${errBadge}<div class="btn ghost small" style="cursor:default;"><span class="sync-dot ${STATE.syncing?'busy':''}"></span> ${STATE.syncing?'Syncing…':'Synced '+t}</div><button class="btn small" data-refresh="1">Refresh</button><button class="btn small" data-settings="1">Targets</button>`;
+}
+function renderSummary(){
+  const recs = buildRecommendations();
+  const redCount = recs.filter(r=>r.severity==='red').length;
+  const amberCount = recs.filter(r=>r.severity==='amber').length;
+
+  const t = kpisTransport(filterPeriod(STATE.data.transport,'week'));
+  const j = kpisJourneyOverall(filterPeriod(STATE.data.journey,'week'),'week');
+  const i = kpisInspections(filterPeriod(STATE.data.inspections,'week'));
+  const s = kpisSafety(filterPeriod(STATE.data.safety,'week'),'week');
+  const m = kpisMaintenance(filterPeriod(STATE.data.maintenance,'week'), STATE.data.vehicles, filterPeriod(STATE.data.maintenanceDaily,'week'),'week');
+
+  const deptBlock = (title, kpis, tabKey) => `
+    <div class="section-title"><span>${title}</span><div class="line"></div><button class="btn small ghost" data-goto="${tabKey}">Open department →</button></div>
+    <div class="grid cols-4">${kpis.map(kpiCard).join('')}</div>`;
+
+  return `
+  <div class="topbar">
+    <div><h1>Fleet Summary</h1><div class="sub">Cross-department status · rolling 7-day window · ${new Date().toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'short',day:'numeric'})}</div></div>
+    <div class="topbar-right">${syncBadge()}</div>
+  </div>
+  <div class="board">
+    <div class="board-seg red"><div class="k">Critical</div><div class="v">${redCount}<small>action needed</small></div></div>
+    <div class="board-seg amber"><div class="k">Warning</div><div class="v">${amberCount}<small>watch list</small></div></div>
+    <div class="board-seg green"><div class="k">On Target</div><div class="v">${Math.max(0,5-redCount-amberCount)}<small>of 5 depts</small></div></div>
+    <div class="board-seg"><div class="k">Fleet Size</div><div class="v">${STATE.data.vehicles.length}<small>vehicles</small></div></div>
+    <div class="board-seg"><div class="k">Predictive Flags</div><div class="v">${STATE.data.vehicles.filter(v=>maintenanceStatusForVehicle(v).status!=='green').length}<small>need scheduling</small></div></div>
+  </div>
+  <div class="section-title"><span>Recommendations</span><div class="line"></div></div>
+  <div class="rec-list">${recs.map(r=>`<div class="rec-item ${r.severity}"><div><div class="dept">${r.dept}</div><div class="txt">${r.text}</div></div></div>`).join('')}</div>
+  ${deptBlock('Transport Operations', t, 'transport')}
+  ${deptBlock('Journey Management', j, 'journey')}
+  ${deptBlock('Vehicle Inspections', i, 'inspections')}
+  ${deptBlock('Safety (HSE)', s, 'safety')}
+  ${deptBlock('Maintenance', m, 'maintenance')}
+  `;
+}
+
+/* ---------------- weekly performance report ---------------- */
+const REPORT_ROW_DEFS = {
+  transport: k=>[['Trips Completed',k.find(x=>x.key==='trips')],['Tonnage Moved (MT)',k.find(x=>x.key==='tonnage')],['Avg Turnaround (hrs)',k.find(x=>x.key==='turnaround')],['Avg Transit Time (hrs)',k.find(x=>x.key==='transit')],['Avg Load / Trip (MT)',k.find(x=>x.key==='load')]],
+  journey: k=>[['Total Trips',k.find(x=>x.key==='trips')],['On-Time Arrival',k.find(x=>x.key==='ontime')],['Risk Assessment Compliance',k.find(x=>x.key==='risk')],['Avg Delay / Idling (hrs)',k.find(x=>x.key==='delay')],['Route Deviations',k.find(x=>x.key==='deviations')],['Driver Hours Violations',k.find(x=>x.key==='violations')]],
+  inspections: k=>[['Inspection Compliance',k.find(x=>x.key==='compliance')],['Defect Rate',k.find(x=>x.key==='defectrate')],['Critical Defects',k.find(x=>x.key==='critical')],['Vehicles Inspected',k.find(x=>x.key==='done')]],
+  safety: k=>[['LTIFR',k.find(x=>x.key==='ltifr')],['Incidents',k.find(x=>x.key==='incidents')],['Near-Misses Reported',k.find(x=>x.key==='nearmiss')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Road Patrols',k.find(x=>x.key==='patrol')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
+  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Road Patrols',k.find(x=>x.key==='patrol')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
+};
+const REPORT_DEPT_MATCH = {
+  transport:r=>r.dept==='Transport', journey:r=>r.dept==='Journey Mgmt', inspections:r=>r.dept==='Inspections',
+  safety:r=>r.dept==='Safety', maintenance:r=>r.dept==='Maintenance',
+};
+function reportValueStr(row){
+  if(!row) return {a:'—', t:'—'};
+  const fmtOne = (v)=> row.fmt==='pct' ? pct(v) : fmt(v, row.fmt===undefined?0:row.fmt) + (row.unit?' '+row.unit:'');
+  return {a: fmtOne(row.actual), t: (row.target===null||row.target===undefined)?'No fixed target':fmtOne(row.target)};
+}
+function buildReportData(endDate){
+  const filtered = {
+    transport: filterWeekRange(STATE.data.transport, endDate), journey: filterWeekRange(STATE.data.journey, endDate),
+    inspections: filterWeekRange(STATE.data.inspections, endDate), pretrip: filterWeekRange(STATE.data.pretrip, endDate),
+    safety: filterWeekRange(STATE.data.safety, endDate), maintenance: filterWeekRange(STATE.data.maintenance, endDate),
+    maintenanceDaily: filterWeekRange(STATE.data.maintenanceDaily, endDate),
+  };
+  const kpis = {
+    transport: kpisTransport(filtered.transport), journey: kpisJourneyOverall(filtered.journey,'week'),
+    inspections: kpisInspections(filtered.inspections), safety: kpisSafety(filtered.safety,'week'),
+    maintenance: kpisMaintenance(filtered.maintenance, STATE.data.vehicles, filtered.maintenanceDaily,'week'),
+  };
+  const journeyByRoute = kpisJourneyByRoute(filtered.journey,'week');
+  const repairs = repairAnalytics(STATE.data.vehicles, STATE.data.maintenance);
+  const recs = buildRecommendations(filtered);
+  return {filtered, kpis, journeyByRoute, repairs, recs};
+}
+function renderReportsPage(){
+  const endDate = STATE.reportWeekEnding || todayStr();
+  const {kpis, journeyByRoute, repairs, recs} = buildReportData(endDate);
+  const redCount = recs.filter(r=>r.severity==='red').length;
+  const amberCount = recs.filter(r=>r.severity==='amber').length;
+  const deptTitles = {transport:'Transport Operations', journey:'Journey Management', inspections:'Vehicle Inspections', safety:'Safety (HSE)', maintenance:'Maintenance & Predictive Servicing'};
+
+  const deptSection = (key) => {
+    const rows = REPORT_ROW_DEFS[key](kpis[key]);
+    const deptRecs = recs.filter(REPORT_DEPT_MATCH[key]);
+    let extra = '';
+    if(key==='journey'){
+      extra = `<h4>Trips by Route</h4><table class="report-table"><thead><tr><th>Route</th><th>Target</th><th>Actual</th><th>Avg Duration</th><th>Status</th></tr></thead><tbody>
+        ${journeyByRoute.map(r=>`<tr><td>${r.label}</td><td>${fmt(r.target,1)}</td><td>${fmt(r.actual)}</td><td>${r.actual?fmt(r.avgDurActual,1)+'h':'—'}</td><td><span class="tag ${r.status}">${statusLabel(r.status)}</span></td></tr>`).join('')}
+      </tbody></table>`;
+    }
+    if(key==='maintenance' && repairs.repeated.length){
+      extra = `<h4>Repeat Repair Watch (all-time, top 5)</h4><table class="report-table"><thead><tr><th>Reg No.</th><th>Component</th><th>Occurrences</th></tr></thead><tbody>
+        ${repairs.repeated.slice(0,5).map(r=>`<tr><td>${r.regNo}</td><td>${r.component}</td><td>${r.count}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+    return `<div class="report-dept">
+      <h3>${deptTitles[key]}</h3>
+      <table class="report-table"><thead><tr><th>KPI</th><th>Target</th><th>Actual</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(([label,row])=>{ const st=statusOf(row?row.ratio:null); const {a,t}=reportValueStr(row); return `<tr><td>${label}</td><td>${t}</td><td>${a}</td><td><span class="tag ${st}">${statusLabel(st)}</span></td></tr>`; }).join('')}</tbody></table>
+      ${extra}
+      ${deptRecs.length? `<div class="report-notes"><b>Commentary:</b> ${deptRecs.map(r=>r.text).join(' ')}</div>` : `<div class="report-notes"><b>Commentary:</b> No exceptions this week — performance within target.</div>`}
+    </div>`;
+  };
+
+  return `
+  <div class="topbar">
+    <div><h1>Weekly Performance Report</h1><div class="sub">Auto-generated from live KPI data across every department.</div></div>
+    <div class="topbar-right">${syncBadge()}</div>
+  </div>
+  <div class="report-toolbar">
+    <div><label>Week Ending</label><input type="date" id="report-week-ending" value="${endDate}"></div>
+    <div><label>Prepared By</label><input type="text" id="report-prepared-by" placeholder="Name / role" value="${STATE.reportPreparedBy||''}"></div>
+    <div style="margin-left:auto;display:flex;gap:8px;">
+      <button class="btn" data-print-report="1">Print / Save PDF</button>
+      <button class="btn primary" data-download-report="1">Download .md</button>
+    </div>
+  </div>
+  <div id="report-doc">
+    <div class="report-head">
+      <div><div class="rt">FleetDesk — Weekly Fleet Performance Report</div><div class="rs">Week of ${weekRangeLabel(endDate)}</div></div>
+      <div style="text-align:right;"><div class="rs">Generated ${new Date().toLocaleString()}</div><div class="rs">Prepared by: ${STATE.reportPreparedBy||'—'}</div></div>
+    </div>
+    <div class="report-meta">
+      <div><div class="k">Critical Items</div><div class="v" style="color:var(--red)">${redCount}</div></div>
+      <div><div class="k">Watch Items</div><div class="v" style="color:var(--amber)">${amberCount}</div></div>
+      <div><div class="k">Fleet Size</div><div class="v">${STATE.data.vehicles.length}</div></div>
+      <div><div class="k">Predictive Flags</div><div class="v">${STATE.data.vehicles.filter(v=>maintenanceStatusForVehicle(v).status!=='green').length}</div></div>
+    </div>
+    ${deptSection('transport')}${deptSection('journey')}${deptSection('inspections')}${deptSection('safety')}${deptSection('maintenance')}
+    <div class="signoff">
+      <div><div class="line"></div><div class="cap">Operations Manager</div></div>
+      <div><div class="line"></div><div class="cap">HSE Manager</div></div>
+      <div><div class="line"></div><div class="cap">Fleet Manager</div></div>
+    </div>
+  </div>`;
+}
+function generateReportMarkdown(endDate){
+  const {kpis, journeyByRoute, repairs, recs} = buildReportData(endDate);
+  const deptTitles = {transport:'Transport Operations', journey:'Journey Management', inspections:'Vehicle Inspections', safety:'Safety (HSE)', maintenance:'Maintenance & Predictive Servicing'};
+  let md = `# FleetDesk — Weekly Fleet Performance Report\n\n`;
+  md += `**Week:** ${weekRangeLabel(endDate)}  \n**Generated:** ${new Date().toLocaleString()}  \n**Prepared by:** ${STATE.reportPreparedBy||'—'}\n\n`;
+  const redCount = recs.filter(r=>r.severity==='red').length, amberCount = recs.filter(r=>r.severity==='amber').length;
+  md += `**Critical:** ${redCount} &nbsp; **Watch:** ${amberCount} &nbsp; **Fleet size:** ${STATE.data.vehicles.length}\n\n---\n\n`;
+  Object.keys(REPORT_ROW_DEFS).forEach(key=>{
+    md += `## ${deptTitles[key]}\n\n| KPI | Target | Actual | Status |\n|---|---|---|---|\n`;
+    REPORT_ROW_DEFS[key](kpis[key]).forEach(([label,row])=>{
+      const st = statusOf(row?row.ratio:null); const {a,t} = reportValueStr(row);
+      md += `| ${label} | ${t} | ${a} | ${statusLabel(st)} |\n`;
+    });
+    if(key==='journey'){
+      md += `\n**Trips by Route**\n\n| Route | Target | Actual | Avg Duration | Status |\n|---|---|---|---|---|\n`;
+      journeyByRoute.forEach(r=>{ md += `| ${r.label} | ${fmt(r.target,1)} | ${fmt(r.actual)} | ${r.actual?fmt(r.avgDurActual,1)+'h':'—'} | ${statusLabel(r.status)} |\n`; });
+    }
+    if(key==='maintenance' && repairs.repeated.length){
+      md += `\n**Repeat Repair Watch (all-time, top 5)**\n\n| Reg No. | Component | Occurrences |\n|---|---|---|\n`;
+      repairs.repeated.slice(0,5).forEach(r=>{ md += `| ${r.regNo} | ${r.component} | ${r.count} |\n`; });
+    }
+    const deptRecs = recs.filter(REPORT_DEPT_MATCH[key]);
+    md += `\n*Commentary:* ${deptRecs.length? deptRecs.map(r=>r.text).join(' ') : 'No exceptions this week — performance within target.'}\n\n`;
+  });
+  return md;
+}
+
+/* ---------------- settings modal ---------------- */
+function renderSettingsModal(){
+  if(!STATE.settingsOpen) return '';
+  const T = STATE.targets;
+  const rows = [
+    ['tonnagePerTripTarget','Target Load per Trip (MT)'], ['turnaroundTargetHrs','Default Turnaround Target (hrs)'],
+    ['transitTargetHrs','Default Transit Target (hrs)'], ['onTimeTarget','Journey On-Time Target (0–1)'],
+    ['riskAssessmentTarget','Risk Assessment Compliance Target (0–1)'], ['maxDelayHrsTarget','Max Acceptable Avg Delay/Idling (hrs)'],
+    ['inspectionComplianceTarget','Inspection Compliance Target (0–1)'], ['defectRateTarget','Max Acceptable Defect Rate (0–1)'],
+    ['prePostPassRateTarget','Pre/Post-Trip Pass Rate Target (0–1)'], ['ltifrTarget','LTIFR Target'],
+    ['nearMissWeeklyTarget','Near-Miss Reporting Target (per week)'], ['pmComplianceTarget','PM Compliance Target (0–1)'],
+    ['breakdownRateTarget','Max Breakdown Rate (0–1)'], ['mttrTargetHrs','MTTR Target (hrs)'],
+    ['dailyTruckInspectionTarget','Truck Inspections / Day (Safety & Maint.)'], ['roadPatrolWeeklyTarget','Road Patrols / Week (Safety & Maint.)'],
+    ['toolboxTalkWeeklyTarget','Toolbox Talks / Week (Safety & Maint.)'],
+  ];
+  return `<div class="modal-bg" data-close-modal="1"><div class="modal" onclick="event.stopPropagation()">
+    <h3>Fleet-wide KPI Targets</h3>
+    <form data-targets-form="1">
+      <div class="form-grid">${rows.map(([k,l])=>`<div><label>${l}</label><input type="number" step="0.01" name="${k}" value="${T[k]}"></div>`).join('')}</div>
+      <div class="form-actions"><button type="submit" class="btn primary">Save Targets</button><button type="button" class="btn ghost" data-close-modal="1">Cancel</button></div>
+    </form>
+  </div></div>`;
+}
+
+/* ---------------- shell / nav ---------------- */
+const NAV = [
+  ['summary','Summary'], ['transport','Transport Ops'], ['journey','Journey Mgmt'],
+  ['inspections','Inspections'], ['safety','Safety (HSE)'], ['maintenance','Maintenance'], ['reports','Weekly Report'],
+];
+function criticalBadgeFor(key){
+  if(key==='maintenance'){ const n = STATE.data.vehicles.filter(v=>maintenanceStatusForVehicle(v).status==='red').length; return n>0?n:null; }
+  return null;
+}
+function renderShell(){
+  const badgeCounts = {}; NAV.forEach(([k])=>{ badgeCounts[k]=criticalBadgeFor(k); });
+  return `<div id="shell">
+    <aside id="sidebar">
+      <div class="brand"><div class="brand-mark">FD</div><div><div class="brand-name">FleetDesk</div><div class="brand-sub">Vehicle Mgmt ERP</div></div></div>
+      ${NAV.map(([k,l])=>`<button class="navbtn ${STATE.tab===k?'active':''}" data-tab="${k}"><span class="dot"></span>${l}${badgeCounts[k]?`<span class="badge">${badgeCounts[k]}</span>`:''}</button>`).join('')}
+      <div class="sidebar-foot">
+        <div class="sync-row"><span class="sync-dot ${STATE.syncing?'busy':''}"></span>${STATE.syncing?'Syncing…':'Live — backed by Google Sheets'}</div>
+        <div>Data syncs to your shared spreadsheet every 25s, and on Refresh. Send teammates the same link (including the <span class="mono">?api=</span> part) so everyone hits the same sheet.</div>
+      </div>
+      ${STATE.connectionError? `<div class="tag red" style="display:block;margin-top:8px;padding:8px 10px;white-space:normal;line-height:1.4;">${STATE.connectionError}</div>` : ''}
+    </aside>
+    <main id="main">
+      ${STATE.tab==='summary'?renderSummary(): STATE.tab==='journey'?renderJourneyPage(): STATE.tab==='inspections'?renderInspectionsPage(): STATE.tab==='maintenance'?renderMaintenancePage(): STATE.tab==='reports'?renderReportsPage(): renderDeptPage(STATE.tab)}
+    </main>
+  </div>
+  ${renderSettingsModal()}
+  ${STATE.toast? `<div class="toast">${STATE.toast}</div>` : ''}`;
+}
+/* ---------------- connect / setup screen (shown until backend URL is configured) ---------------- */
+const GAS_CODE_ESCAPED = `function doGet(e){var a=e.parameter.action;if(a=='get')return J_({key:e.parameter.key,value:V_(e.parameter.key)});if(a=='getAll'){var ks=e.parameter.keys?e.parameter.keys.split(','):[];var o={};ks.forEach(function(k){o[k]=V_(k)});return J_(o)}return J_({error:'bad action'})}
+function doPost(e){var b=JSON.parse(e.postData.contents);if(b.action=='set'){S_(b.key,b.value);return J_({ok:true})}return J_({error:'bad action'})}
+function S_(k,v){var sh=SH_();var d=sh.getDataRange().getValues();for(var i=1;i<d.length;i++){if(d[i][0]==k){sh.getRange(i+1,2).setValue(v);return}}sh.appendRow([k,v,new Date()])}
+function V_(k){var sh=SH_();var d=sh.getDataRange().getValues();for(var i=1;i<d.length;i++){if(d[i][0]==k)return d[i][1]}return null}
+function SH_(){var ss=SpreadsheetApp.getActiveSpreadsheet();var sh=ss.getSheetByName('Data');if(!sh){sh=ss.insertSheet('Data');sh.appendRow(['key','value','updated_at'])}return sh}
+function J_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON)}`;
+
+function renderSetupScreen(){
+  return `<div style="min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;">
+    <div style="max-width:640px;width:100%;">
+      <div class="brand" style="padding:0 0 22px 0;">
+        <div class="brand-mark">FD</div>
+        <div><div class="brand-name" style="font-size:20px;">FleetDesk</div><div class="brand-sub">Connect your shared spreadsheet</div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px;">
+        <p style="margin:0 0 10px;">FleetDesk stores its data in a Google Sheet so your whole team can read and write it in real time — no Claude account or paid plan needed to use it, and you can see the raw data any time by opening the sheet.</p>
+        <p class="dim small" style="margin:0;">One-time setup, takes about 2 minutes.</p>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="label" style="margin-bottom:8px;">Step 1 — Create the backend</div>
+        <ol style="margin:0 0 12px 18px;padding:0;font-size:13px;line-height:1.8;">
+          <li>Open <a href="https://sheets.google.com" target="_blank" rel="noopener">sheets.google.com</a> and create a new blank spreadsheet.</li>
+          <li>Click <b>Extensions → Apps Script</b>.</li>
+          <li>Delete any starter code, paste in the code below, and save (Ctrl/Cmd+S).</li>
+          <li>Click <b>Deploy → New deployment → Web app</b>. Set "Execute as" = Me, "Who has access" = Anyone. Click Deploy and authorize it.</li>
+          <li>Copy the Web app URL (ends in <span class="mono">/exec</span>).</li>
+        </ol>
+        <textarea readonly style="width:100%;height:110px;font-size:11px;resize:vertical;" id="gas-code-box">${GAS_CODE_ESCAPED}</textarea>
+        <div class="form-actions"><button class="btn small" data-copy-code="1">Copy code</button></div>
+      </div>
+
+      <div class="card">
+        <div class="label" style="margin-bottom:8px;">Step 2 — Connect it</div>
+        <label>Paste your Web App URL</label>
+        <input type="text" id="gas-url-input" placeholder="https://script.google.com/macros/s/XXXX/exec" style="width:100%;margin-bottom:12px;">
+        <button class="btn primary" data-connect="1">Connect &amp; Reload</button>
+        <p class="dim small" style="margin-top:12px;">This reloads the page with <span class="mono">?api=&lt;your url&gt;</span> added to the address bar. Share that exact link with your team — everyone who opens it will read and write the same shared sheet.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+function render(){
+  const app = document.getElementById('app');
+  if(!GAS_CONFIGURED){ app.innerHTML = renderSetupScreen(); attachSetupEvents(); return; }
+  if(STATE.loading){ app.innerHTML = `<div style="height:100vh;display:flex;align-items:center;justify-content:center;color:#8996A6;font-family:'IBM Plex Mono',monospace;">Loading fleet data…</div>`; return; }
+  app.innerHTML = renderShell();
+  attachEvents();
+}
+function attachSetupEvents(){
+  const app = document.getElementById('app');
+  const copyBtn = app.querySelector('[data-copy-code]');
+  if(copyBtn) copyBtn.addEventListener('click', ()=>{
+    const box = app.querySelector('#gas-code-box');
+    box.select();
+    try{ document.execCommand('copy'); copyBtn.textContent = 'Copied!'; setTimeout(()=>copyBtn.textContent='Copy code', 1800); }catch(e){}
+  });
+  const connectBtn = app.querySelector('[data-connect]');
+  if(connectBtn) connectBtn.addEventListener('click', ()=>{
+    const val = app.querySelector('#gas-url-input').value.trim();
+    if(!val || val.indexOf('http')!==0){ alert('Paste a valid Web App URL first (starts with https://).'); return; }
+    const url = new URL(window.location.href);
+    url.searchParams.set('api', val);
+    window.location.href = url.toString();
+  });
+}
+
+/* ---------------- event delegation ---------------- */
+function attachEvents(){
+  const app = document.getElementById('app');
+  app.querySelectorAll('[data-tab]').forEach(el=>el.addEventListener('click', ()=>{ STATE.tab = el.getAttribute('data-tab'); render(); }));
+  app.querySelectorAll('[data-goto]').forEach(el=>el.addEventListener('click', ()=>{ STATE.tab = el.getAttribute('data-goto'); render(); }));
+  app.querySelectorAll('[data-period-tabs]').forEach(group=>{
+    const dept = group.getAttribute('data-period-tabs');
+    group.querySelectorAll('button').forEach(btn=>btn.addEventListener('click', ()=>{ STATE.periodByDept[dept] = btn.getAttribute('data-period'); render(); }));
+  });
+  const refreshBtn = app.querySelector('[data-refresh]');
+  if(refreshBtn) refreshBtn.addEventListener('click', async ()=>{ await loadAll(); showToast('Refreshed from shared storage.'); });
+  const settingsBtn = app.querySelector('[data-settings]');
+  if(settingsBtn) settingsBtn.addEventListener('click', ()=>{ STATE.settingsOpen = true; render(); });
+  app.querySelectorAll('[data-close-modal]').forEach(el=>el.addEventListener('click', (e)=>{ if(e.target===el){ STATE.settingsOpen=false; render(); } }));
+  const targetsForm = app.querySelector('[data-targets-form]');
+  if(targetsForm) targetsForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(targetsForm);
+    for(const [k,v] of fd.entries()){ STATE.targets[k] = parseFloat(v); }
+    STATE.settingsOpen = false; await persistTargets(); render();
+    showToast('Targets updated for the whole team.');
+  });
+  app.querySelectorAll('[data-log-form]').forEach(form=>{
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const dept = form.getAttribute('data-log-form');
+      const fd = new FormData(form);
+      const rec = {id:uid()};
+      for(const [k,v] of fd.entries()){ rec[k]=v; }
+      STATE.data[dept] = [...STATE.data[dept], rec];
+      form.reset();
+      const dateEl = form.querySelector('input[name="date"]');
+      if(dateEl) dateEl.value = todayStr();
+      await persist(dept);
+      showToast('Entry saved and synced.');
+    });
+  });
+  const vForm = app.querySelector('[data-vehicle-form]');
+  if(vForm) vForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const fd = new FormData(vForm);
+    const v = {id:uid()};
+    for(const [k,val] of fd.entries()){ v[k]=val; }
+    const existingIdx = STATE.data.vehicles.findIndex(x=>x.regNo.toLowerCase()===v.regNo.toLowerCase());
+    if(existingIdx>-1){ v.id = STATE.data.vehicles[existingIdx].id; STATE.data.vehicles[existingIdx]=v; }
+    else STATE.data.vehicles = [...STATE.data.vehicles, v];
+    vForm.reset();
+    await persist('vehicles');
+    showToast('Vehicle registry updated.');
+  });
+  const rwe = app.querySelector('#report-week-ending');
+  if(rwe) rwe.addEventListener('change', ()=>{ STATE.reportWeekEnding = rwe.value; render(); });
+  const rpb = app.querySelector('#report-prepared-by');
+  if(rpb) rpb.addEventListener('change', ()=>{ STATE.reportPreparedBy = rpb.value; render(); });
+  const printBtn = app.querySelector('[data-print-report]');
+  if(printBtn) printBtn.addEventListener('click', ()=>{ window.print(); });
+  const dlBtn = app.querySelector('[data-download-report]');
+  if(dlBtn) dlBtn.addEventListener('click', ()=>{
+    const md = generateReportMarkdown(STATE.reportWeekEnding || todayStr());
+    const blob = new Blob([md], {type:'text/markdown'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `FleetDesk-Weekly-Report-${STATE.reportWeekEnding||todayStr()}.md`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Report downloaded.');
+  });
+  app.querySelectorAll('[data-delete]').forEach(btn=>btn.addEventListener('click', async ()=>{
+    const [dept,id] = btn.getAttribute('data-delete').split(':');
+    if(!confirm('Delete this entry?')) return;
+    STATE.data[dept] = STATE.data[dept].filter(r=>r.id!==id);
+    await persist(dept);
+    showToast('Entry deleted.');
+  }));
+  app.querySelectorAll('[data-delete-vehicle]').forEach(btn=>btn.addEventListener('click', async ()=>{
+    const id = btn.getAttribute('data-delete-vehicle');
+    if(!confirm('Remove this vehicle from the registry?')) return;
+    STATE.data.vehicles = STATE.data.vehicles.filter(v=>v.id!==id);
+    await persist('vehicles');
+    showToast('Vehicle removed.');
+  }));
+}
+
+/* ---------------- polling for "live" shared updates ---------------- */
+function isEditing(){ const el = document.activeElement; return el && (el.tagName==='INPUT' || el.tagName==='SELECT' || el.tagName==='TEXTAREA'); }
+setInterval(async ()=>{ if(!GAS_CONFIGURED || STATE.loading || isEditing() || STATE.settingsOpen) return; await loadAll(); }, 25000);
+
+loadAll();
+</script>
+</body>
+</html>
