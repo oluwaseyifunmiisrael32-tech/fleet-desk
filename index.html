@@ -1585,23 +1585,30 @@ function parseHsseWorkbook(wb,fname){
     const range=((n.match(/\(([^)]+)\)/)||[])[1])||'';
     if(drivers.length && !isNaN(num)) out.weeks.push({n:num,label:'Week '+num,range,drivers});
   });
-  // IVMS 'Driver Scorecard Data' sheet (one week; period read from the Summary title, then the file name)
-  names.filter(n=>/driver scorecard data/i.test(n)).forEach(n=>{
-    const rows=R(n); const hi=headerAt(rows,/^driver$/i); if(hi<0) return;
+  // IVMS driver scorecard. Found by its content (a "Driver" column + a distance column) so it works whatever the sheet is
+  // called ("Driver Scorecard Data", "driver scorecard", "Week 42 scorecard"…) and whichever column wording the IVMS export uses.
+  const durSec=v=>{ if(v===null||v===undefined||v==='') return 0; if(typeof v==='number') return v<1?Math.round(v*86400):v;
+    const m=String(v).trim().match(/^(\d+):(\d{2})(?::(\d{2}))?$/); if(m) return m[3]!==undefined?(+m[1])*3600+(+m[2])*60+(+m[3]):(+m[1])*60+(+m[2]); const x=parseFloat(v); return isNaN(x)?0:x; };
+  const iso3=(y,m,d)=>y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+  const weekFromDates=t=>{ const m=String(t||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:to|-|–)\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m?wkStartNear(iso3(m[3],m[2],m[1])):''; };
+  const sn=names.find(x=>/^summary$/i.test(x)); const sRows=sn?R(sn):[];
+  const sv=(re,def)=>{ const r=sRows.find(x=>re.test(S(x[0]))); const v=r?N(r[1]):null; return v||def; };
+  const minKm=sv(/minimum distance/i,20), hosSec=sv(/hos seconds/i,600);
+  names.filter(n=>!/week\s*\d+\s*raw/i.test(n) && !/high\s*risk|obc|corrective action|top\s*5|^summary$|capa|instructions|dashboard/i.test(n)).forEach(n=>{
+    const rows=R(n); const hi=headerAt(rows,/^driver( name)?$/i); if(hi<0) return;
     const hdr=rows[hi].map(h=>S(h).toLowerCase()); const g=re=>colIdx(hdr,re);
-    const c={d:g(/^distance/),hb:g(/harsh braking pts/),ha:g(/harsh accel.*pts/),osp:g(/over-?speeding pts/),os:g(/over-?speeding \(sec/),hosp:g(/^hos pts/),hos:g(/hos over-limit/),rt:g(/reported total/),pr:g(/^profile/)};
-    const sn=names.find(x=>/^summary$/i.test(x)); const sRows=sn?R(sn):[];
-    const sv=(re,def)=>{ const r=sRows.find(x=>re.test(S(x[0]))); const v=r?N(r[1]):null; return v||def; };
-    const minKm=sv(/minimum distance/i,20), hosSec=sv(/hos seconds/i,600);
-    const start=weekFromTitle(S((sRows[0]||[])[0]))||weekFromTitle(fname)||prevWeekStart();
+    if(g(/^distance/)<0) return;
+    const c={d:g(/^distance/),hb:g(/harsh\s*brak\w*\s*pts/),ha:g(/harsh\s*accel\w*\s*pts/),osp:g(/over-?\s*speed\w*\s*pts/),os:g(/over-?\s*speed\w*\s*(\(sec|dur)/),hosp:g(/^hos\s*pts/),hos:g(/^hos\s*(over|dur)/),rt:g(/reported total|total penalty/),pr:g(/^profile/),el:g(/ranking eligible/)};
+    const title=rows.slice(0,hi).map(r=>S(r[0])).join(' ');
+    const cand=[weekFromTitle(title),weekFromDates(S((sRows[1]||[])[0])),weekFromTitle(S((sRows[0]||[])[0])),weekFromTitle(fname)];
+    const start=cand.find(x=>x&&x<=todayStr())||prevWeekStart();
     const drivers=[]; const v=(r,k)=>c[k]>=0?(N(r[c[k]])||0):0;
     for(let i=hi+1;i<rows.length;i++){
-      const r=rows[i]; const nm=S(r[0]); if(!nm) continue;
-      const o={n:nm,d:v(r,'d'),hb:v(r,'hb'),ha:v(r,'ha'),osp:v(r,'osp'),os:v(r,'os'),hosp:v(r,'hosp'),hos:v(r,'hos'),rt:v(r,'rt'),pr:c.pr>=0?C(r[c.pr],60):''};
+      const r=rows[i]; const nm=S(r[0]); if(!nm || /^(fleet\s*total|total|average|fleet|summary)/i.test(nm)) continue;
+      const o={n:nm,d:v(r,'d'),hb:v(r,'hb'),ha:v(r,'ha'),osp:v(r,'osp'),os:c.os>=0?durSec(r[c.os]):0,hosp:v(r,'hosp'),hos:c.hos>=0?durSec(r[c.hos]):0,rt:v(r,'rt'),pr:c.pr>=0?C(r[c.pr],60):''};
       o.t=o.d>0?Math.round((o.hb+o.ha+o.osp+o.hosp)/o.d*1e5)/1e3:0;
-      if(o.d<minKm) o.na=1;
-      if(o.hosp>0 && o.hosp!==Math.floor(o.hos/hosSec)) o.chk=1;   // points not supported by recorded duration: verify against raw IVMS log
-      const vv=[]; if(o.hb>0) vv.push('HB'); if(o.ha>0) vv.push('HA'); if(o.osp>0) vv.push('OS'); if(o.hosp>0) vv.push('HOS'); if(vv.length) o.v=vv;
+      if(o.d<minKm || (c.el>=0 && /^no/i.test(S(r[c.el])))) o.na=1;
+      if(o.hosp>0 && o.hos>0 && o.hosp!==Math.floor(o.hos/hosSec)) o.chk=1;   // points not supported by recorded duration: verify against raw IVMS log
       drivers.push(o);
     }
     if(drivers.length){ const w={n:ordOf(start),start,label:'Week of '+start,range:wkLabel({start}),drivers}; const i=out.weeks.findIndex(x=>x.n===w.n); if(i>-1) out.weeks[i]=w; else out.weeks.push(w); }
@@ -2094,8 +2101,8 @@ async function handleHsseFile(file){
     const found=p.weeks.length+p.incidents.length+p.inspections.length+p.ppe.length+p.toolbox.length+p.weekly.length;
     if(!found){ STATE.hsseMsg={t:'err',m:'No HSSE data was recognised in '+file.name+'. Expected sheets such as "Week N Raw (…)", "Incident Register", "Vehicle HSSE Inspection".'}; render(); return; }
     mergeHsse(p,file.name);
-    let cmpMsg=''; if(p.weeks.length){ const nn=Math.max(...p.weeks.map(w=>w.n)); STATE.hsseWeek=nn; STATE.hsseTab='overview'; const ws=STATE.data.hsseScores.weeks; const cw=ws.find(w=>w.n===nn), pw=ws.find(w=>w.n===nn-1); cmpMsg=' Showing '+wkLabel(cw)+(pw?' compared with '+wkLabel(pw)+'.':' — no earlier week is stored yet to compare with.'); }
-    STATE.hsseMsg={t:'ok',m:`Loaded from ${file.name}: ${p.weeks.length} weekly scorecard(s) (${p.weeks.reduce((a,w)=>a+w.drivers.length,0)} driver rows), ${p.incidents.length} incident(s), ${p.inspections.length} vehicle inspection(s), ${p.ppe.length} PPE check(s), ${p.toolbox.length} toolbox talk(s).`+cmpMsg};
+    let cmpMsg=''; if(p.weeks.length){ const nn=Math.max(...p.weeks.map(w=>w.n)); STATE.hsseWeek=(nn===ordOf(prevWeekStart()))?null:nn; STATE.hsseTab='overview'; const ws=STATE.data.hsseScores.weeks; const cw=ws.find(w=>w.n===nn), pw=ws.find(w=>w.n===nn-1); cmpMsg=' Showing '+wkLabel(cw)+(pw?' compared with '+wkLabel(pw)+'.':' — no earlier week is stored yet to compare with.'); }
+    STATE.hsseMsg={t:p.weeks.length?'ok':'err',m:(p.weeks.length?'':'⚠ No driver scorecard was found in this workbook, so no driver scores were added. Check that it has a sheet with a "Driver" column and a "Distance (km)" column. ')+`Loaded from ${file.name}: ${p.weeks.length} weekly scorecard(s) (${p.weeks.reduce((a,w)=>a+w.drivers.length,0)} driver rows), ${p.incidents.length} incident(s), ${p.inspections.length} vehicle inspection(s), ${p.ppe.length} PPE check(s), ${p.toolbox.length} toolbox talk(s).`+cmpMsg};
     await persistHsse();
     showToast('HSSE report uploaded and synced.');
   }catch(e){ console.error(e); STATE.hsseMsg={t:'err',m:'Could not read that file: '+(e&&e.message?e.message:e)}; render(); }
