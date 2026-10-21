@@ -2847,6 +2847,7 @@ function renderShell(){
       <div class="sidebar-foot">
         <div class="sync-row"><span class="sync-dot ${STATE.syncing?'busy':''}"></span>${STATE.syncing?'Syncing…':'Live — updates automatically'}</div>
         <div>Shared live with your whole team.</div>
+        <div class="dim small mono" style="margin-top:6px;">Version ${APP_VERSION}</div>
         ${isStandalone()?'':'<button class="btn small" data-install="1">⬇ Install app</button>'}
       </div>
       ${STATE.connectionError? `<div class="tag red" style="display:block;margin-top:8px;padding:8px 10px;white-space:normal;line-height:1.4;">${STATE.connectionError}</div>` : ''}
@@ -5418,7 +5419,12 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
+const APP_VERSION='v10.3 · 21 Oct 2026 08:50';
+if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+  const hadSW=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').then(r=>{ try{ r.update(); }catch(e){} }).catch(()=>{}); });
+}
 
 /* =========================================================================================
    Transport Ops: pick the truck / driver from a list, or type your own when something changes
