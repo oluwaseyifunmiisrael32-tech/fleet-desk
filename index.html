@@ -3957,19 +3957,20 @@ function buildTransportXlsx(dateStr,vs,routes,mats){
   for(let i=0;i<nRows;i++){ const r=i+2; let cells=numc(r,0,serial,2)+(vs[i]?str(r,1,vs[i].regNo,3):blank(r,1,0))+blank(r,2,0)+blank(r,3,0)+blank(r,4,0)+blank(r,5,4)+blank(r,6,4); for(let c=7;c<13;c++) cells+=blank(r,c,5); rows+=`<row r="${r}">${cells}</row>`; }
   const dvs=[
     `<dataValidation type="date" operator="greaterThan" allowBlank="1" showErrorMessage="1" errorTitle="Date" error="Enter a valid date, e.g. ${dateStr}." sqref="A2:A${last}"><formula1>43831</formula1></dataValidation>`,
-    `<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Truck" error="Pick a truck from the list. New trucks must first be added to the registry in FleetDesk (Maintenance tab)." sqref="B2:B${last}"><formula1>Lists!$A$2:$A$${Math.max(vs.length+1,2)}</formula1></dataValidation>`,
+    `<dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="B2:B${last}"><formula1>Lists!$A$2:$A$${Math.max(vs.length+1,2)}</formula1></dataValidation>`,
+    `<dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="C2:C${last}"><formula1>Lists!$D$2:$D$${Math.max(knownDrivers().length+1,2)}</formula1></dataValidation>`,
     `<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Route" error="Pick a route from the list." sqref="D2:D${last}"><formula1>Lists!$B$2:$B$${routes.length+1}</formula1></dataValidation>`,
     `<dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="E2:E${last}"><formula1>Lists!$C$2:$C$${mats.length+1}</formula1></dataValidation>`,
     `<dataValidation type="decimal" operator="greaterThanOrEqual" allowBlank="1" showErrorMessage="1" errorTitle="Number" error="Enter a number (0 or more)." sqref="F2:M${last}"><formula1>0</formula1></dataValidation>`];
   const sheet1=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" tabSelected="1"><pane xSplit="2" ySplit="1" topLeftCell="C2" activePane="bottomRight" state="frozen"/><selection pane="topRight"/><selection pane="bottomLeft"/><selection pane="bottomRight" activeCell="C2" sqref="C2"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${BULK_HEADERS.map((h,i)=>`<col min="${i+1}" max="${i+1}" width="${h[1]}" customWidth="1"/>`).join('')}</cols><sheetData>${rows}</sheetData><dataValidations count="${dvs.length}">${dvs.join('')}</dataValidations></worksheet>`;
   // sheet 2: lists
-  const nL=Math.max(vs.length,routes.length,mats.length); let lr=`<row r="1">${str(1,0,'Trucks',6)}${str(1,1,'Routes',6)}${str(1,2,'Materials',6)}</row>`;
-  for(let i=0;i<nL;i++){ lr+=`<row r="${i+2}">${vs[i]?str(i+2,0,vs[i].regNo):''}${routes[i]?str(i+2,1,routes[i]):''}${mats[i]?str(i+2,2,mats[i]):''}</row>`; }
+  const drv=knownDrivers(); const nL=Math.max(vs.length,routes.length,mats.length,drv.length); let lr=`<row r="1">${str(1,0,'Trucks',6)}${str(1,1,'Routes',6)}${str(1,2,'Materials',6)}${str(1,3,'Drivers',6)}</row>`;
+  for(let i=0;i<nL;i++){ lr+=`<row r="${i+2}">${vs[i]?str(i+2,0,vs[i].regNo):''}${routes[i]?str(i+2,1,routes[i]):''}${mats[i]?str(i+2,2,mats[i]):''}${drv[i]?str(i+2,3,drv[i]):''}</row>`; }
   const sheet2=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="2" width="40" customWidth="1"/><col min="3" max="3" width="20" customWidth="1"/></cols><sheetData>${lr}</sheetData></worksheet>`;
   // sheet 3: how to use
   const help=['FLEETDESK — TRANSPORT OPS BULK ENTRY','',
     '1. Every truck in your registry is already listed on the "Transport Entries" sheet (one row each). Leave a truck\'s row empty if it did not run.',
-    '2. Fill Driver Name, Route, Trips Actual and Tonnage Actual for each truck that ran. Truck, Route and Material have drop-downs.',
+    '2. Fill Driver Name, Route, Trips Actual and Tonnage Actual for each truck that ran. Truck, Driver, Route and Material have drop-downs — you can also TYPE a different truck number or driver name if something has changed.',
     '3. A truck that did two routes in a day? Copy its row and change the Route — one row per truck per route.',
     '4. Leave the Target, Turnaround and Transit columns blank to use the route defaults (Material, Trips Target, Turnaround Target and Tonnage Target are filled in for you).',
     '5. Do not rename the column headings or the sheet name. You can add more rows below the list.',
@@ -4022,7 +4023,7 @@ function parseBulkWorkbook(wb){
   if(hi<0) return {rows:[],err:'Could not find the column headings (Date, Truck Reg No, Driver Name …). Please use the FleetDesk template and do not rename the headings.'};
   const cols={}; grid[hi].forEach((h,i)=>{ const k=hdrKey(h); if(k&&cols[k]===undefined) cols[k]=i; });
   const vmap={}; (STATE.data.vehicles||[]).forEach(v=>{ vmap[normKey(v.regNo)]=v; });
-  const ex={}; (STATE.data.transport||[]).forEach(r=>{ ex[[r.date,r.vehicleId,r.route].join('|')]=r.id; });
+  const ex={}; (STATE.data.transport||[]).forEach(r=>{ ex[[r.date,trKey(r),r.route].join('|')]=r.id; });
   const seen={}; const rows=[];
   for(let i=hi+1;i<grid.length;i++){
     const g=k=>cols[k]===undefined?'':grid[i][cols[k]];
@@ -4031,12 +4032,12 @@ function parseBulkWorkbook(wb){
     const hasData=driver||routeTxt||g('tripsActual')!==''||g('tonnageActual')!==''||g('tonnageTarget')!==''||g('turnaroundActual')!==''||g('transitActual')!=='';
     if(!hasData) continue;                                     // truck listed but did not run: ignore
     const r={line:i+1,date:xlDate(g('date')),truckTxt,driver,routeTxt,errs:[],warns:[]};
-    const v=vmap[normKey(truckTxt)]; r.vehicleId=v?v.id:''; r.regNo=v?v.regNo:truckTxt;
+    const v=vmap[normKey(truckTxt)]; r.vehicleId=v?v.id:''; r.regNo=v?v.regNo:truckTxt; r.regNoText=v?'':truckTxt.toUpperCase();
     r.route=matchRoute(routeTxt);
     r.material=String(g('material')||'').trim();
     nums.forEach(k=>{ const raw=g(k); if(raw===''||raw===null) { r[k]=''; return; } const n=parseFloat(String(raw).replace(/,/g,'')); if(isNaN(n)||n<0){ r.errs.push('“'+raw+'” is not a valid number for '+k.replace(/([A-Z])/g,' $1').toLowerCase()); r[k]=''; } else r[k]=n; });
     if(!r.date) r.errs.push('Date missing or not recognised');
-    if(!truckTxt) r.errs.push('Truck Reg No missing'); else if(!v) r.errs.push('Truck “'+truckTxt+'” is not in the registry');
+    if(!truckTxt) r.errs.push('Truck Reg No missing'); else if(!v) r.warns.push('Truck not in the registry — saved as typed');
     if(!driver) r.errs.push('Driver Name missing');
     if(!routeTxt) r.errs.push('Route missing'); else if(!r.route) r.errs.push('Route “'+routeTxt+'” not recognised — pick it from the drop-down');
     if(r.tripsActual==='') r.errs.push('Trips Actual missing');
@@ -4048,7 +4049,7 @@ function parseBulkWorkbook(wb){
       if(r.tonnageTarget===''&&r.tripsTarget!==''&&num(STATE.targets.tonnagePerTripTarget)>0) r.tonnageTarget=num(r.tripsTarget)*num(STATE.targets.tonnagePerTripTarget);
     }
     if(!r.errs.length){
-      const key=[r.date,r.vehicleId,r.route].join('|');
+      const key=[r.date,r.vehicleId||('~'+normReg(truckTxt)),r.route].join('|');
       if(seen[key]){ r.errs.push('Same date + truck + route appears twice in the file (line '+seen[key]+')'); }
       else { seen[key]=r.line; if(ex[key]){ r.dupId=ex[key]; r.warns.push('Already in Transport Ops'); } }
     }
@@ -4098,7 +4099,7 @@ async function importBulk(){
   let data=[...STATE.data.transport];
   b.rows.forEach(r=>{
     if(r.state==='error'||(r.state==='dup'&&!b.replace)) return;
-    const rec={id:r.dupId||uid(),date:r.date,vehicleId:r.vehicleId,driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
+    const rec={id:r.dupId||uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
     Object.keys(rec).forEach(k=>{ if(typeof rec[k]==='number') rec[k]=String(rec[k]); });
     compactRec(rec);
     if(r.dupId){ data=data.map(x=>x.id===r.dupId?rec:x); replaced++; } else add.push(rec);
@@ -5419,7 +5420,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.3 · 21 Oct 2026 08:50';
+const APP_VERSION='v10.3 · 21 Oct 2026 09:18';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
