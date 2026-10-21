@@ -1101,6 +1101,7 @@ function periodBanner(p){
   return `<div class="pbanner"><b>${esc(PERIOD_WORD[p]?PERIOD_WORD[p].replace(/^./,x=>x.toUpperCase()):'Period')}</b> · ${esc(rangeText(r))}${cr?` <span class="dim">— compared with ${esc(PERIOD_WORD[c])}, ${esc(rangeText(cr))}</span>`:''}${part}</div>`;
 }
 function fieldInput(f, val){
+  if(f.combo) return comboField(f, val);
   const has = val!==undefined && val!==null;
   if(f.type==='vehicle'){
     const req=f.required&&STATE.data.vehicles.length;
@@ -1117,8 +1118,8 @@ const DEPTS = {
   transport:{
     label:'Transport Operations', accent:'#E8A33D',
     fields:[
-      {key:'vehicleId',label:'Truck Reg No',type:'vehicle',required:true},
-      {key:'driverName',label:'Driver Name',type:'text',required:true,list:'dl-drivers',placeholder:'e.g. John Doe'},
+      {key:'vehicleId',label:'Truck Reg No',type:'vehicle',combo:true,required:true},
+      {key:'driverName',label:'Driver Name',type:'text',combo:true,required:true,list:'dl-drivers',placeholder:'e.g. John Doe'},
       {key:'route',label:'Route',type:'select',required:true,options:[['','— Select route —'],...Object.keys(ROUTES).map(k=>[k,ROUTES[k].label])]},
       {key:'material',label:'Material',type:'text',list:'dl-materials',placeholder:'e.g. Clinker, Gypsum'},
       {key:'tripsTarget',label:'Trips Target',type:'number',required:true},
@@ -1916,10 +1917,10 @@ function hsseUploadCard(A){
   return `<div class="card" style="margin-bottom:16px;border-left:3px solid var(--amber);">
     <div class="flex between" style="gap:12px;flex-wrap:wrap;align-items:flex-start;">
       <div style="max-width:720px;"><div style="font-weight:600;font-size:14px;">SKB HSSE Report</div>
-        <div class="dim small" style="margin-top:3px;">Upload the HSSE workbook (.xlsx). Driver scorecards, violators, the incident register, vehicle inspections, PPE, toolbox talks and the corrective action plan are read automatically. Each new week is added to the history; re-uploading a week replaces it. Data is shared with the whole team.</div>
+        <div class="dim small" style="margin-top:3px;">Upload the HSSE workbook (.xlsx). Driver scorecards, violators, the incident register, vehicle inspections, PPE, toolbox talks and the corrective action plan are read automatically. Each new week is added to the history; re-uploading a week replaces it. You can select the previous week’s and the week before’s reports together — the page always opens on the previous week compared with the week before. Data is shared with the whole team.</div>
         ${m?`<div class="dim small mono" style="margin-top:6px;">Last upload: ${esc(m.file)} · ${new Date(m.at).toLocaleString()} · ${(STATE.data.hsseScores.weeks||[]).length} week(s) in history</div>`:''}
       </div>
-      <div class="flex gap8"><button class="btn primary" data-hsse-pick="1">⬆ Upload HSSE Report (.xlsx)</button>${A?'<button class="btn ghost small" data-hsse-clear="1">Clear HSSE data</button>':''}<input type="file" id="hsse-file" data-hsse-file="1" accept=".xlsx,.xls" style="display:none"></div>
+      <div class="flex gap8"><button class="btn primary" data-hsse-pick="1">⬆ Upload HSSE Report(s) (.xlsx)</button>${A?'<button class="btn ghost small" data-hsse-clear="1">Clear HSSE data</button>':''}<input type="file" id="hsse-file" data-hsse-file="1" accept=".xlsx,.xls" multiple style="display:none"></div>
     </div>
     ${msg?`<div class="tag ${msgCls}" style="display:block;margin-top:10px;padding:8px 10px;white-space:normal;text-transform:none;font-size:12px;letter-spacing:0;">${esc(msg.m)}</div>`:''}
   </div>`;
@@ -2590,7 +2591,7 @@ function renderTruckModal(){
 /* ---------------- transport ops: routes & materials ---------------- */
 function applyTransportFilters(recs){
   const tt=STATE.transportTruck||'ALL', td=STATE.transportDriver||'ALL';
-  return recs.filter(r=>(STATE.transportRoute==='ALL'||(r.route||'none')===STATE.transportRoute)&&(STATE.transportMaterial==='ALL'||matKey(r.material)===STATE.transportMaterial)&&(tt==='ALL'||r.vehicleId===tt)&&(td==='ALL'||normName(r.driverName)===td));
+  return recs.filter(r=>(STATE.transportRoute==='ALL'||(r.route||'none')===STATE.transportRoute)&&(STATE.transportMaterial==='ALL'||matKey(r.material)===STATE.transportMaterial)&&(tt==='ALL'||trKey(r)===tt)&&(td==='ALL'||normName(r.driverName)===td));
 }
 function transportFilters(){
   const tt=STATE.transportTruck||'ALL', td=STATE.transportDriver||'ALL';
@@ -2599,7 +2600,7 @@ function transportFilters(){
   return `<div class="filterbar" style="margin:14px 0 4px;">
     <div><label>Route</label><select data-tfilter="route"><option value="ALL">All routes</option>${Object.keys(ROUTES).map(k=>`<option value="${k}" ${STATE.transportRoute===k?'selected':''}>${esc(ROUTES[k].label)}</option>`).join('')}<option value="none" ${STATE.transportRoute==='none'?'selected':''}>Unassigned (older entries)</option></select></div>
     <div><label>Material</label><select data-tfilter="material"><option value="ALL">All materials</option>${materialNames().map(m=>`<option value="${esc(matKey(m))}" ${STATE.transportMaterial===matKey(m)?'selected':''}>${esc(m)}</option>`).join('')}</select></div>
-    <div><label>Truck Reg No</label><select data-tfilter="truck"><option value="ALL">All trucks</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}" ${tt===v.id?'selected':''}>${esc(v.regNo)}</option>`).join('')}</select></div>
+    <div><label>Truck Reg No</label><select data-tfilter="truck"><option value="ALL">All trucks</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}" ${tt===v.id?'selected':''}>${esc(v.regNo)}</option>`).join('')}${typedTrucks().map(([k,n])=>`<option value="${esc(k)}" ${tt===k?'selected':''}>${esc(n)} (not in registry)</option>`).join('')}</select></div>
     <div><label>Driver</label><select data-tfilter="driver"><option value="ALL">All drivers</option>${Object.entries(drv).sort((a,b)=>a[1].localeCompare(b[1])).map(([k,n])=>`<option value="${esc(k)}" ${td===k?'selected':''}>${esc(n)}</option>`).join('')}</select></div>
     ${act?'<button class="btn ghost small" data-tfilter-clear="1">Clear filters</button>':''}
   </div>`;
@@ -2629,7 +2630,7 @@ function transportBreakdown(recs){
 function transportCell(c,r){
   const k=c[0],t=c[2];
   if(k==='date') return esc(r.date);
-  if(t==='truck') return r.vehicleId?'<b>'+esc(vehicleLabel(r.vehicleId))+'</b>':'<span class="dim">—</span>';
+  if(t==='truck') return trLabelCell(r)?'<b>'+esc(trLabelCell(r))+'</b>'+(r.vehicleId?'':' <span class="tag grey">not in registry</span>'):'<span class="dim">—</span>';
   if(t==='route') return r.route&&ROUTES[r.route]?esc(ROUTES[r.route].label):'—';
   if(t==='text') return esc(r[k]||'—');
   return fmt(num(r[k]));
@@ -2964,6 +2965,7 @@ function attachEvents(){
       const fd = new FormData(form);
       const rec = {id:uid()};
       for(const [k,v] of fd.entries()){ rec[k]=v; }
+      if(dept==='transport') normalizeCombo(rec);
       let jobs = 0;
       if(dept==='pretrip' && form.hasAttribute('data-check-form')) finalizeCheck(rec);
       if(dept==='maintInspections') jobs = finalizeMaintInspection(rec);
@@ -2990,7 +2992,7 @@ function attachEvents(){
   app.querySelectorAll('[data-close-driver]').forEach(el=>el.addEventListener('click',(e)=>{ if(e.target===el){ STATE.driverDetail=null; render(); } }));
   const hPick=app.querySelector('[data-hsse-pick]'), hFile=app.querySelector('[data-hsse-file]');
   if(hPick&&hFile) hPick.addEventListener('click',()=>hFile.click());
-  if(hFile) hFile.addEventListener('change',()=>{ const f=hFile.files&&hFile.files[0]; if(f) handleHsseFile(f); });
+  if(hFile) hFile.addEventListener('change',()=>{ const fs=Array.from(hFile.files||[]); hFile.value=''; if(fs.length) handleHsseFiles(fs); });
   const hClear=app.querySelector('[data-hsse-clear]');
   if(hClear) hClear.addEventListener('click',async()=>{
     if(!confirm('Remove all uploaded HSSE report data for the whole team?')) return;
@@ -3564,13 +3566,13 @@ function prepMaintRec(rec){
   return compactRec(rec);
 }
 function tonnageByTruckDriver(recs){
-  const g={}; recs.forEach(r=>{ if(!r.vehicleId&&!r.driverName) return; const dn=normName(r.driverName)||'—'; const k=(r.vehicleId||'none')+'|'+dn; const x=g[k]||(g[k]={vid:r.vehicleId,driver:r.driverName?String(r.driverName).trim():'—',n:0,trips:0,tripsT:0,ton:0,tonT:0}); x.n++; x.trips+=num(r.tripsActual); x.tripsT+=num(r.tripsTarget); x.ton+=num(r.tonnageActual); x.tonT+=num(r.tonnageTarget); });
+  const g={}; recs.forEach(r=>{ if(!trKey(r)&&!r.driverName) return; const dn=normName(r.driverName)||'—'; const k=(trKey(r)||'none')+'|'+dn; const x=g[k]||(g[k]={vid:r.vehicleId,txt:r.regNoText,driver:r.driverName?String(r.driverName).trim():'—',n:0,trips:0,tripsT:0,ton:0,tonT:0}); x.n++; x.trips+=num(r.tripsActual); x.tripsT+=num(r.tripsTarget); x.ton+=num(r.tonnageActual); x.tonT+=num(r.tonnageTarget); });
   const rows=Object.values(g).sort((a,b)=>b.ton-a.ton||b.trips-a.trips);
-  const missing=recs.filter(r=>!r.vehicleId||!r.driverName).length;
+  const missing=recs.filter(r=>!trKey(r)||!r.driverName).length;
   const head=`<div class="section-title"><span>Tonnage by truck &amp; driver</span><div class="line"></div></div>`;
   const note=missing?`<div class="note warn">${missing} entr${missing===1?'y has':'ies have'} no truck or driver (logged before these fields existed). Use <b>Edit</b> in the Entry Log below to add them.</div>`:'';
   if(!rows.length) return head+note+`<div class="card dim" style="text-align:center;padding:18px;">No entries with a truck and driver yet. Pick the truck and type the driver’s name when you log a transport entry.</div>`;
-  return head+note+`<div class="table-wrap"><table><thead><tr><th>Truck Reg No</th><th>Driver Name</th><th>Entries</th><th>Trips (act / tgt)</th><th>Tonnage (act / tgt)</th><th>Avg load / trip</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${x.vid?esc(vehicleLabel(x.vid)):'—'}</b></td><td style="white-space:normal;">${esc(x.driver)}</td><td>${x.n}</td><td>${fmt(x.trips)} / ${fmt(x.tripsT)}</td><td>${fmt(x.ton)} / ${fmt(x.tonT)}</td><td>${x.trips?fmt(x.ton/x.trips,1)+' MT':'—'}</td></tr>`).join('')}</tbody></table></div>`;
+  return head+note+`<div class="table-wrap"><table><thead><tr><th>Truck Reg No</th><th>Driver Name</th><th>Entries</th><th>Trips (act / tgt)</th><th>Tonnage (act / tgt)</th><th>Avg load / trip</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${x.vid?esc(vehicleLabel(x.vid)):(x.txt?esc(String(x.txt).toUpperCase()):'—')}</b></td><td style="white-space:normal;">${esc(x.driver)}</td><td>${x.n}</td><td>${fmt(x.trips)} / ${fmt(x.tripsT)}</td><td>${fmt(x.ton)} / ${fmt(x.tonT)}</td><td>${x.trips?fmt(x.ton/x.trips,1)+' MT':'—'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 /* ---------- Maintenance: Overview & Log page ---------- */
@@ -3721,7 +3723,7 @@ function attachEventsV5(app){
     ef.addEventListener('submit',async(e)=>{
       e.preventDefault(); const ed=STATE.editing; if(!ed) return;
       const arr=STATE.data[ed.coll]||[]; const idx=arr.findIndex(r=>r.id===ed.id); if(idx<0){ STATE.editing=null; render(); return; }
-      const rec={...arr[idx]}; new FormData(ef).forEach((v,k)=>{ rec[k]=v; });
+      const rec={...arr[idx]}; new FormData(ef).forEach((v,k)=>{ rec[k]=v; }); if(ed.coll==='transport') normalizeCombo(rec);
       if(ed.coll==='vehicles'){
         const dup=arr.find(v=>v.id!==rec.id&&String(v.regNo).toLowerCase()===String(rec.regNo).trim().toLowerCase());
         if(dup){ alert('Another vehicle already uses the reg no. '+rec.regNo+'.'); return; }
@@ -3769,7 +3771,7 @@ function genericDesc(r){
 }
 const DAILY_DEPTS=[['Transport Ops','transport'],['Journey Mgmt','journey'],['Inspections','inspections'],['Safety (HSE)','safety'],['Maintenance','maintenance'],['Fuel & Deliveries','fuel'],['Port Files','port']];
 const DAILY_SRC=[
-  {k:'transport',dept:'Transport Ops',what:()=>'Tonnage entry',d:r=>[r.vehicleId&&vehicleLabel(r.vehicleId),r.driverName,ROUTES[r.route]?ROUTES[r.route].label:'',r.material,r.tripsActual!==undefined&&r.tripsActual!==''?r.tripsActual+' trip(s)':'',r.tonnageActual?r.tonnageActual+' MT':'']},
+  {k:'transport',dept:'Transport Ops',what:()=>'Tonnage entry',d:r=>[trLabelCell(r),r.driverName,ROUTES[r.route]?ROUTES[r.route].label:'',r.material,r.tripsActual!==undefined&&r.tripsActual!==''?r.tripsActual+' trip(s)':'',r.tonnageActual?r.tonnageActual+' MT':'']},
   {k:'journey',dept:'Journey Mgmt',what:()=>'Trip',d:r=>[vehicleLabel(r.vehicleId),r.driverName,ROUTES[r.route]?ROUTES[r.route].label:r.route,r.durationActual?r.durationActual+' h':'',r.onTime==='No'?'Late':'On time']},
   {k:'pretrip',dept:'Journey Mgmt',what:r=>(r.type||'Trip')+' check',d:r=>[vehicleLabel(r.vehicleId),r.driverName,r.result,r.defects?splitKeys(r.defects).length+' defect(s)':'']},
   {k:'inspections',dept:'Inspections',what:()=>'Inspection summary',d:genericDesc},
@@ -4684,11 +4686,11 @@ function groupSum(recs,keyFn,fields){
 function repTransport(r,p,L,recs){
   const F=repFiltered(r), G=repFiltered(p), hasCur=F.transport.length>0, hasPrev=G.transport.length>0;
   const blocks=[kpiTableBlock('Transport KPIs',REPORT_ROW_DEFS.transport(kpisTransport(F.transport)),REPORT_ROW_DEFS.transport(kpisTransport(G.transport)),hasCur,hasPrev,L)];
-  const byTruck=(recs)=>groupSum(recs,x=>x.vehicleId||null,['tripsActual','tonnageActual']);
+  const byTruck=(recs)=>groupSum(recs,x=>trKey(x)||null,['tripsActual','tonnageActual']);
   const A=byTruck(F.transport), B=byTruck(G.transport);
   const ids=[...new Set([...Object.keys(A),...Object.keys(B)])].sort((x,y)=>((A[y]||{}).tonnageActual||0)-((A[x]||{}).tonnageActual||0)).slice(0,10);
   if(ids.length) blocks.push(tableBlock('Trucks — trips and tonnage (top 10 by tonnage)',['Truck','Trips',`Trips (${L.prevShort})`,'Tonnage (MT)',`Tonnage (${L.prevShort})`,'Change'],
-    ids.map(id=>{ const a=A[id]||{tripsActual:0,tonnageActual:0}, b=B[id]||{tripsActual:0,tonnageActual:0}; return [vehicleLabel(id),fmt(a.tripsActual),fmt(b.tripsActual),fmt(a.tonnageActual,1),fmt(b.tonnageActual,1),chg(a.tonnageActual,b.tonnageActual,'higher',{dec:1})]; })));
+    ids.map(id=>{ const a=A[id]||{tripsActual:0,tonnageActual:0}, b=B[id]||{tripsActual:0,tonnageActual:0}; return [trKeyLabel(id),fmt(a.tripsActual),fmt(b.tripsActual),fmt(a.tonnageActual,1),fmt(b.tonnageActual,1),chg(a.tonnageActual,b.tonnageActual,'higher',{dec:1})]; })));
   const rt=(recs)=>groupSum(recs,x=>x.route||'other',['tripsActual','tonnageActual']);
   const RA=rt(F.transport), RB=rt(G.transport); const rk=[...new Set([...Object.keys(RA),...Object.keys(RB)])];
   if(rk.length) blocks.push(tableBlock('Routes — trips and tonnage',['Route','Trips',`Trips (${L.prevShort})`,'Tonnage (MT)',`Tonnage (${L.prevShort})`,'Change'],
@@ -5401,7 +5403,9 @@ let DEFERRED_INSTALL=null;
 window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); DEFERRED_INSTALL=e; });
 window.addEventListener('appinstalled',()=>{ DEFERRED_INSTALL=null; try{ showToast('FleetDesk installed.'); }catch(e){} });
 function isStandalone(){ return (window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||window.navigator.standalone===true; }
+function typedTrucks(){ const m={}; (STATE.data.transport||[]).forEach(r=>{ if(!r.vehicleId&&r.regNoText){ const k=trKey(r); if(!m[k]) m[k]=String(r.regNoText).trim().toUpperCase(); } }); return Object.entries(m).sort((a,b)=>a[1]<b[1]?-1:1); }
 function attachEventsV10(app){
+  attachCombos(app);
   attachReportEvents(app);
   attachPortEvents(app);
   app.querySelectorAll('[data-more-toggle]').forEach(b=>b.addEventListener('click',()=>{ STATE.moreOpen=!STATE.moreOpen; render(); }));
@@ -5415,6 +5419,91 @@ function attachEventsV10(app){
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
+
+/* =========================================================================================
+   Transport Ops: pick the truck / driver from a list, or type your own when something changes
+   ========================================================================================= */
+const COMBO_OTHER='__other__';
+function normReg(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+function trKey(r){ return r.vehicleId || (r.regNoText?'~'+normReg(r.regNoText):''); }
+function trKeyLabel(k){
+  if(k&&k[0]==='~'){ const r=(STATE.data.transport||[]).find(x=>!x.vehicleId&&trKey(x)===k); return r?String(r.regNoText).trim().toUpperCase():k.slice(1); }
+  return vehicleLabel(k);
+}
+function trLabelCell(r){ return r.vehicleId?vehicleLabel(r.vehicleId):(r.regNoText?String(r.regNoText).trim().toUpperCase():''); }
+function comboField(f,val){
+  const ed=STATE.editing; const rec=ed?((STATE.data[ed.coll]||[]).find(r=>r.id===ed.id)||{}):{};
+  const req=f.required?'required':'';
+  if(f.key==='vehicleId'){
+    const typed=(!val&&rec.regNoText)?String(rec.regNoText):'';
+    const opts=STATE.data.vehicles.map(v=>`<option value="${esc(v.id)}" ${val&&val===v.id?'selected':''}>${esc(v.regNo)}</option>`).join('');
+    return `<div class="combo" data-combo="1"><label>${esc(f.label)}</label>
+      <select name="vehicleId" data-combo-sel="1" ${req}><option value="">Select truck…</option>${opts}<option value="${COMBO_OTHER}" ${typed?'selected':''}>✎ Not listed — type truck no.</option></select>
+      <input type="text" name="regNoText" data-combo-txt="1" placeholder="Type the truck reg no." value="${esc(typed)}" autocapitalize="characters" style="display:${typed?'block':'none'};margin-top:6px;"></div>`;
+  }
+  const names=knownDrivers(); const cur=String(val||'').trim();
+  const inList=cur&&names.some(n=>n.toUpperCase()===cur.toUpperCase());
+  const typedD=cur&&!inList?cur:'';
+  return `<div class="combo" data-combo="1"><label>${esc(f.label)}</label>
+    <select name="driverName" data-combo-sel="1" ${req}><option value="">Select driver…</option>${names.map(n=>`<option value="${esc(n)}" ${inList&&n.toUpperCase()===cur.toUpperCase()?'selected':''}>${esc(n)}</option>`).join('')}<option value="${COMBO_OTHER}" ${typedD?'selected':''}>✎ New / not listed — type name</option></select>
+    <input type="text" name="driverNameText" data-combo-txt="1" placeholder="Type the driver’s name" value="${esc(typedD)}" style="display:${typedD?'block':'none'};margin-top:6px;"></div>`;
+}
+/* turn the "type it yourself" choices into the saved record */
+function normalizeCombo(rec){
+  if(rec.vehicleId===COMBO_OTHER){
+    const t=String(rec.regNoText||'').trim().toUpperCase(); const hit=t?STATE.data.vehicles.find(v=>normReg(v.regNo)===normReg(t)):null;
+    if(hit){ rec.vehicleId=hit.id; delete rec.regNoText; } else { rec.vehicleId=''; rec.regNoText=t; }
+  } else delete rec.regNoText;
+  if(rec.driverName===COMBO_OTHER){ rec.driverName=String(rec.driverNameText||'').trim(); }
+  delete rec.driverNameText;
+  return rec;
+}
+function syncCombos(root){
+  root.querySelectorAll('[data-combo]').forEach(c=>{
+    const sel=c.querySelector('[data-combo-sel]'), txt=c.querySelector('[data-combo-txt]'); if(!sel||!txt) return;
+    const other=sel.value===COMBO_OTHER; txt.style.display=other?'block':'none'; txt.required=other;
+    if(other&&!txt.__focused){ txt.__focused=1; }
+  });
+}
+function attachCombos(app){
+  syncCombos(app);
+  app.querySelectorAll('[data-combo-sel]').forEach(sel=>sel.addEventListener('change',()=>{ syncCombos(app); if(sel.value===COMBO_OTHER){ const t=sel.closest('[data-combo]').querySelector('[data-combo-txt]'); if(t) t.focus(); } }));
+  app.querySelectorAll('form').forEach(f=>f.addEventListener('reset',()=>setTimeout(()=>syncCombos(app),0)));
+}
+
+/* =========================================================================================
+   HSSE upload: take one or several report files at once; always show the previous week
+   compared with the week before
+   ========================================================================================= */
+async function handleHsseFiles(files){
+  files=(files||[]).filter(Boolean); if(!files.length) return;
+  if(typeof XLSX==='undefined'){ STATE.hsseMsg={t:'err',m:'The spreadsheet reader could not be loaded (check your internet connection) — reload the page and try again.'}; render(); return; }
+  STATE.hsseMsg={t:'info',m:'Reading '+files.map(f=>f.name).join(', ')+'…'}; render();
+  const tot={files:0,weeks:0,rows:0,inc:0,insp:0,ppe:0,tbt:0}, bad=[], seen=[];
+  for(const file of files){
+    try{
+      const buf=file.arrayBuffer?await file.arrayBuffer():await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsArrayBuffer(file); });
+      const p=parseHsseWorkbook(XLSX.read(buf,{type:'array'}),file.name);
+      const found=p.weeks.length+p.incidents.length+p.inspections.length+p.ppe.length+p.toolbox.length+p.weekly.length;
+      if(!found){ bad.push(file.name+' (nothing recognised)'); continue; }
+      mergeHsse(p,file.name); tot.files++; tot.weeks+=p.weeks.length; tot.rows+=p.weeks.reduce((a,w)=>a+w.drivers.length,0);
+      tot.inc+=p.incidents.length; tot.insp+=p.inspections.length; tot.ppe+=p.ppe.length; tot.tbt+=p.toolbox.length;
+      p.weeks.forEach(w=>seen.push(w.n));
+    }catch(e){ console.error(e); bad.push(file.name+' ('+(e&&e.message?e.message:e)+')'); }
+  }
+  if(!tot.files){ STATE.hsseMsg={t:'err',m:'No HSSE data was recognised in '+files.map(f=>f.name).join(', ')+'. Expected a workbook with a driver scorecard sheet (a "Driver" and a "Distance (km)" column), an "Incident Register" or a "Vehicle HSSE Inspection" sheet.'}; render(); return; }
+  // always open on the previous week, compared with the week before it
+  STATE.hsseWeek=null; STATE.hsseTab='overview';
+  const ws=(STATE.data.hsseScores&&STATE.data.hsseScores.weeks)||[], autoN=ordOf(prevWeekStart());
+  const cw=ws.find(w=>w.n===autoN), pw=ws.find(w=>w.n===autoN-1);
+  let tail;
+  if(cw) tail=' Showing the previous week ('+wkLabel(cw)+')'+(pw?' compared with the week before ('+wkLabel(pw)+').':'. The week before ('+wkLabel({start:addDays(prevWeekStart(),-7)})+') has no scorecard yet — you can select both weeks’ reports together when uploading.');
+  else if(tot.weeks) tail=' These scorecards are for other weeks ('+[...new Set(seen)].sort((a,b)=>a-b).map(n=>wkLabel(ws.find(w=>w.n===n))).join(', ')+'), not the previous week ('+wkLabel({start:prevWeekStart()})+'), so the latest uploaded week is shown.';
+  else tail=' No driver scorecard was found, so no driver scores were added — check the workbook has a sheet with a "Driver" column and a "Distance (km)" column.';
+  STATE.hsseMsg={t:(cw||tot.weeks)?'ok':'err',m:`Loaded ${tot.files} file(s): ${tot.weeks} weekly scorecard(s) (${tot.rows} driver rows), ${tot.inc} incident(s), ${tot.insp} vehicle inspection(s), ${tot.ppe} PPE check(s), ${tot.tbt} toolbox talk(s).`+tail+(bad.length?' Skipped: '+bad.join('; ')+'.':'')};
+  await persistHsse(); showToast('HSSE report'+(tot.files>1?'s':'')+' uploaded and synced.');
+}
+async function handleHsseFile(file){ return handleHsseFiles([file]); }
 
 loadAll();
 </script>
