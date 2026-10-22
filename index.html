@@ -414,11 +414,13 @@ const ROUTES = {
   clinker:        {label:'Clinker — Ewekoro ⇄ Sagamu (to & fro)', tripsPerDayTarget:2, durationTargetHrs:8},
   gypsum_ewekoro: {label:'Gypsum — Apapa → Ewekoro',               tripsPerDayTarget:1, durationTargetHrs:24},
   gypsum_sagamu:  {label:'Gypsum — Apapa → Sagamu',                tripsPerDayTarget:1, durationTargetHrs:24},
-  gypsum_adumbu:  {label:'Gypsum — Adumbu',                        tripsPerDayTarget:4, durationTargetHrs:2},
+  gypsum_adumbu:  {label:'Gypsum — Adumbu → Ewekoro',              tripsPerDayTarget:4, durationTargetHrs:2},
+  gypsum_adumbu_sagamu: {label:'Gypsum — Adumbu → Sagamu',         tripsPerDayTarget:0, durationTargetHrs:null},
+  east:           {label:'East Deliveries',                        tripsPerDayTarget:0, durationTargetHrs:null},
   other:          {label:'Other / Ad-hoc',                         tripsPerDayTarget:0, durationTargetHrs:null},
 };
-const ROUTE_KEYS_TARGETED = Object.keys(ROUTES).filter(k=>k!=='other');
-ROUTES.clinker.material='Clinker'; ROUTES.gypsum_ewekoro.material='Gypsum'; ROUTES.gypsum_sagamu.material='Gypsum'; ROUTES.gypsum_adumbu.material='Gypsum';
+const ROUTE_KEYS_TARGETED = Object.keys(ROUTES).filter(k=>['other','east','gypsum_adumbu_sagamu'].indexOf(k)<0);
+ROUTES.clinker.material='Clinker'; ROUTES.gypsum_ewekoro.material='Gypsum'; ROUTES.gypsum_sagamu.material='Gypsum'; ROUTES.gypsum_adumbu.material='Gypsum'; ROUTES.gypsum_adumbu_sagamu.material='Gypsum';
 
 const REPAIR_COMPONENTS = ['Engine','Brakes','Tyres / Wheels','Electrical','Gearbox / Transmission','Suspension','Cooling System','Hydraulics','Body / Chassis','Other'];
 
@@ -1124,6 +1126,8 @@ const DEPTS = {
       {key:'driverName',label:'Driver Name',type:'text',combo:true,required:true,list:'dl-drivers',placeholder:'e.g. John Doe'},
       {key:'route',label:'Route',type:'select',required:true,options:[['','— Select route —'],...Object.keys(ROUTES).map(k=>[k,ROUTES[k].label])]},
       {key:'material',label:'Material',type:'text',list:'dl-materials',placeholder:'e.g. Clinker, Gypsum'},
+      {key:'vessel',label:'Vessel Name (gypsum)',type:'text',list:'dl-vessels',placeholder:'e.g. MV Ocean Star'},
+      {key:'destination',label:'Destination (east deliveries)',type:'text',placeholder:'e.g. Uyo'},
       {key:'tripsTarget',label:'Trips Target',type:'number',required:true},
       {key:'tripsActual',label:'Trips Actual',type:'number',required:true},
       {key:'tonnageTarget',label:'Tonnage Target',type:'number',unit:'MT'},
@@ -1134,7 +1138,7 @@ const DEPTS = {
       {key:'transitActual',label:'Transit Actual',type:'number',unit:'hrs',step:'0.1'},
     ],
     kpis:(recs)=>kpisTransport(recs),
-    tableCols:[['date','Date'],['vehicleId','Truck Reg No','truck'],['driverName','Driver Name','text'],['route','Route','route'],['material','Material','text'],['tripsTarget','Trips Tgt'],['tripsActual','Trips Act'],['tonnageTarget','Ton. Tgt'],['tonnageActual','Ton. Act'],['turnaroundActual','TAT Act (h)'],['transitActual','Transit Act (h)']]
+    tableCols:[['date','Date'],['vehicleId','Truck Reg No','truck'],['driverName','Driver Name','text'],['route','Route','route'],['material','Material','text'],['vessel','Vessel','text'],['tripsTarget','Trips Tgt'],['tripsActual','Trips Act'],['tonnageTarget','Ton. Tgt'],['tonnageActual','Ton. Act'],['turnaroundActual','TAT Act (h)'],['transitActual','Transit Act (h)']]
   },
   safety:{
     label:'Safety (HSE)', accent:'#E1543F',
@@ -1193,7 +1197,7 @@ function renderDeptPage(deptKey){
         <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
         ${cfg.fields.map(f=>fieldInput(f)).join('')}
       </div>
-      ${deptKey==='transport'?driverDatalist():''}
+      ${deptKey==='transport'?driverDatalist()+vesselDatalist():''}
       <div class="form-actions"><button type="submit" class="btn primary">Save Entry</button><span class="dim small">Visible to the whole team instantly.</span></div>
     </form>
   </details>
@@ -1229,7 +1233,7 @@ function renderJourneyPage(){
   ${dailyChecksSection()}
 
   <div class="section-title"><span>Trips by Route — Target vs Actual</span><div class="line"></div></div>
-  <div class="section-sub">Targets: Clinker 2/day (Ewekoro⇄Sagamu, 8h) · Gypsum Apapa→Ewekoro 1/day (24h) · Gypsum Apapa→Sagamu 1/day (24h*) · Gypsum Adumbu 4/day (2h). *Apapa→Sagamu duration assumed same as Apapa→Ewekoro — confirm and adjust if different.</div>
+  <div class="section-sub">Targets: Clinker 2/day (Ewekoro⇄Sagamu, 8h) · Gypsum Apapa→Ewekoro 1/day (24h) · Gypsum Apapa→Sagamu 1/day (24h*) · Gypsum Adumbu → Ewekoro 4/day (2h). *Apapa→Sagamu duration assumed same as Apapa→Ewekoro — confirm and adjust if different.</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Route</th><th>Target Trips</th><th>Actual Trips</th><th>Avg Duration Actual</th><th>Duration Target</th><th>Status</th></tr></thead>
     <tbody>${byRoute.map(r=>`<tr><td style="white-space:normal;">${r.label}</td><td>${fmt(r.target,1)}</td><td>${fmt(r.actual)}</td><td>${r.actual?fmt(r.avgDurActual,1)+' h':'—'}</td><td>${r.durTarget!==null?r.durTarget+' h':'—'}</td><td><span class="tag ${r.status}">${statusLabel(r.status)}</span></td></tr>`).join('')}</tbody>
@@ -1248,7 +1252,7 @@ function renderJourneyPage(){
         <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
         <div><label>Truck No.</label><select name="vehicleId" required><option value="">Select truck…</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}">${v.regNo}</option>`).join('')}</select></div>
         <div><label>Driver Name</label><input type="text" name="driverName" placeholder="e.g. John Doe" required></div>
-        <div><label>Route</label><select name="route" required>${ROUTE_KEYS_TARGETED.concat('other').map(k=>`<option value="${k}">${ROUTES[k].label}</option>`).join('')}</select></div>
+        <div><label>Route</label><select name="route" required>${ROUTE_KEYS_TARGETED.concat(['gypsum_adumbu_sagamu','east','other']).map(k=>`<option value="${k}">${ROUTES[k].label}</option>`).join('')}</select></div>
         <div><label>Material</label><input type="text" name="material" list="dl-materials" placeholder="e.g. Clinker"></div>
         <div><label>Duration Actual (hrs)</label><input type="number" name="durationActual" step="0.1" required></div>
         <div><label>Delay / Idling (hrs)</label><input type="number" name="delayHrs" step="0.1" value="0"></div>
@@ -2616,7 +2620,7 @@ function transportBreakdown(recs){
     acc(R,rk,{name:rl(rk)},r); acc(M,mk,{name:mn},r); acc(RM,rk+'|'+mk,{route:rl(rk),material:mn},r);
   });
   const routes=Object.values(R).sort((a,b)=>b.trips-a.trips), mats=Object.values(M).sort((a,b)=>b.ton-a.ton), combo=Object.values(RM).sort((a,b)=>b.ton-a.ton||b.trips-a.trips);
-  if(!recs.length) return `<div class="section-title"><span>Routes &amp; Materials</span><div class="line"></div></div>${materialDatalist()}<div class="card dim" style="text-align:center;padding:22px;">No entries for this period / filter. Log an entry with a route and material to see the breakdown.</div>`;
+  if(!recs.length) return `<div class="section-title"><span>Routes &amp; Materials</span><div class="line"></div></div>${materialDatalist()}<div class="card dim" style="text-align:center;padding:22px;">No entries for this period / filter. Log an entry with a route and material to see the breakdown.</div>${matRouteCard()}${eastCard()}${vesselCard()}`;
   return `<div class="section-title"><span>Routes &amp; Materials</span><div class="line"></div></div>${materialDatalist()}
   <div class="grid cols-2">
     ${chartCard('Trips by route — target vs actual','From transport entries in this period',pairBars(routes.map(x=>({label:x.name,a:x.trips,t:x.tripsT}))))}
@@ -2624,6 +2628,7 @@ function transportBreakdown(recs){
     ${chartCard('Tonnage by route — target vs actual (MT)','',pairBars(routes.map(x=>({label:x.name,a:x.ton,t:x.tonT}))))}
     ${chartCard('Trips by material','',hbarChart(mats.map(x=>({label:x.name,value:x.trips,color:'var(--amber)'}))))}
   </div>
+  ${matRouteCard()}${eastCard()}${vesselCard()}
   <div class="section-sub" style="margin:14px 0 8px;">Route × material summary</div>
   <div class="table-wrap"><table><thead><tr><th>Route</th><th>Material</th><th>Entries</th><th>Trips (act / tgt)</th><th>Tonnage (act / tgt)</th><th>Avg load / trip</th><th>Avg turnaround</th><th>Avg transit</th></tr></thead>
   <tbody>${combo.map(x=>`<tr><td style="white-space:normal;">${esc(x.route)}</td><td>${esc(x.material)}</td><td>${x.n}</td><td>${fmt(x.trips)} / ${fmt(x.tripsT)}</td><td>${fmt(x.ton)} / ${fmt(x.tonT)}</td><td>${x.trips?fmt(x.ton/x.trips,1)+' MT':'—'}</td><td>${x.n&&x.tat?fmt(x.tat/x.n,1)+' h':'—'}</td><td>${x.n&&x.tr?fmt(x.tr/x.n,1)+' h':'—'}</td></tr>`).join('')}</tbody></table></div>
@@ -2855,7 +2860,7 @@ function renderShell(){
       ${STATE.connectionError? `<div class="tag red" style="display:block;margin-top:8px;padding:8px 10px;white-space:normal;line-height:1.4;">${STATE.connectionError}</div>` : ''}
     </aside>
     <main id="main">
-      ${STATE.tab==='summary'?renderSummary(): STATE.tab==='daily'?renderDailyInputs(): STATE.tab==='journey'?renderJourneyPage(): STATE.tab==='inspections'?renderInspectionsPage(): STATE.tab==='maintenance'?renderMaintenancePage(): STATE.tab==='costkm'?renderCostKmPage(): STATE.tab==='fuel'?renderFuelPage(): STATE.tab==='reports'?renderReportsPage(): STATE.tab==='monthly'?renderMonthlyPage(): STATE.tab==='archive'?renderArchivePage(): STATE.tab==='port'?renderPortPage(): renderDeptPage(STATE.tab)}
+      ${STATE.tab==='summary'?renderSummary(): STATE.tab==='daily'?renderDailyInputs(): STATE.tab==='journey'?renderJourneyPage(): STATE.tab==='inspections'?renderInspectionsPage(): STATE.tab==='maintenance'?regDupCard()+renderMaintenancePage(): STATE.tab==='costkm'?renderCostKmPage(): STATE.tab==='fuel'?renderFuelPage(): STATE.tab==='reports'?renderReportsPage(): STATE.tab==='monthly'?renderMonthlyPage(): STATE.tab==='archive'?renderArchivePage(): STATE.tab==='port'?renderPortPage(): (STATE.tab==='transport'?regDupCard():'')+renderDeptPage(STATE.tab)}
     </main>
   </div>
   ${renderSettingsModal()}
@@ -3192,7 +3197,7 @@ function renderEditModal(){
   const title={maintenance:'Edit maintenance event',vehicles:'Edit vehicle',transport:'Edit transport entry',safety:'Edit safety entry',cngFills:'Edit CNG fill-up',dieselTrips:'Edit diesel trip'}[e.coll]||'Edit entry';
   return `<div class="modal-bg" data-close-edit="1"><div class="modal" style="max-width:660px;" onclick="event.stopPropagation()">
     <h3>${title}</h3>
-    ${materialDatalist()}${driverDatalist()}${otherItemsDatalist()}
+    ${materialDatalist()}${driverDatalist()}${vesselDatalist()}${otherItemsDatalist()}
     <form data-edit-form="1"><div class="form-grid" style="margin-top:0;">${editSchema(e.coll).map(f=>fieldInput(f, f.key==='type'&&rec.type==='Repair'?'Breakdown':rec[f.key])).join('')}</div>
     <div class="form-actions"><button type="submit" class="btn primary">Save changes</button><button type="button" class="btn ghost" data-close-edit="1">Cancel</button></div></form>
   </div></div>`;
@@ -4015,6 +4020,7 @@ function xlDate(v){
 }
 function matchRoute(txt){
   const k=normKey(txt); if(!k) return '';
+  if(k==='gypsumadumbu') return 'gypsum_adumbu'; if(k==='eastdeliveries'||k==='east') return 'east';
   const keys=Object.keys(ROUTES); let hit=keys.find(x=>normKey(x)===k||normKey(ROUTES[x].label)===k); if(hit) return hit;
   const c=keys.filter(x=>normKey(ROUTES[x].label).includes(k)||k.includes(normKey(x))); return c.length===1?c[0]:'';
 }
@@ -4073,7 +4079,7 @@ function bulkCard(){
   return `<div class="card" style="margin:0 0 16px;border-left:3px solid var(--teal);">
     <div class="flex between" style="gap:14px;flex-wrap:wrap;align-items:flex-start;">
       <div style="max-width:700px;"><div style="font-weight:600;font-size:14px;">Bulk entry — Excel template</div>
-        <div class="dim small" style="margin-top:3px;line-height:1.55;">Download the template (all ${n} registered truck${n===1?'':'s'} listed; it also carries the Clinker/Gypsum route tabs and the KPI presets). Fill in the route tabs and/or the Transport Entries sheet, then upload it. Every entry goes into the Entry Log, KPIs, utilisation and reports in one go. You see a preview before anything is saved.</div></div>
+        <div class="dim small" style="margin-top:3px;line-height:1.55;">Download the template (${n} registered truck${n===1?'':'s'} in the drop-downs). The Transport Entries sheet is a summary that reads the Clinker / Gypsum / East route tabs — fill in the tabs, then upload the workbook. Every entry goes into the Entry Log, KPIs, utilisation and reports in one go. You see a preview before anything is saved.</div></div>
       <div class="flex gap8" style="flex-wrap:wrap;align-items:flex-end;">
         <div><label>Template date</label><input type="date" id="bulk-date" value="${todayStr()}" style="width:auto;"></div>
         <button class="btn" data-bulk-download="1">⬇ Download template</button>
@@ -4101,7 +4107,7 @@ async function importBulk(){
   let data=[...STATE.data.transport];
   b.rows.forEach(r=>{
     if(r.state==='error'||(r.state==='dup'&&!b.replace)) return;
-    const rec={id:r.dupId||uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),notes:r.notes||'',driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
+    const rec={id:r.dupId||uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),notes:r.notes||'',vessel:r.vessel||'',destination:r.destination||'',driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
     Object.keys(rec).forEach(k=>{ if(typeof rec[k]==='number') rec[k]=String(rec[k]); });
     compactRec(rec);
     if(r.dupId){ data=data.map(x=>x.id===r.dupId?rec:x); replaced++; } else add.push(rec);
@@ -4143,7 +4149,7 @@ function cngWeights(){
   let L=num(STATE.targets.cngLongTripsPerFill), A=num(STATE.targets.cngAdumbuTripsPerFill); if(!(L>=1)) L=2; if(!(A>=1)) A=5;
   const wl=1/L, wa=Math.max(0,(1-wl)/A); return {L,A,wl,wa};
 }
-function tripKind(route){ return route==='gypsum_adumbu'?'adumbu':((!route||route==='other')?'other':'long'); }
+function tripKind(route){ return route==='gypsum_adumbu'?'adumbu':((!route||route==='other'||route==='east')?'other':'long'); }
 function cngWeek(start,endOpt){
   const end=endOpt||addDays(start,6), W=cngWeights(), inW=d=>!!d&&d>=start&&d<=end;
   const trips=(STATE.data.transport||[]).filter(r=>inW(r.date)), fills=(STATE.data.cngFills||[]).filter(r=>inW(r.date)).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
@@ -4699,6 +4705,9 @@ function repTransport(r,p,L,recs){
   const RA=rt(F.transport), RB=rt(G.transport); const rk=[...new Set([...Object.keys(RA),...Object.keys(RB)])];
   if(rk.length) blocks.push(tableBlock('Routes — trips and tonnage',['Route','Trips',`Trips (${L.prevShort})`,'Tonnage (MT)',`Tonnage (${L.prevShort})`,'Change'],
     rk.map(k=>{ const a=RA[k]||{tripsActual:0,tonnageActual:0}, b=RB[k]||{tripsActual:0,tonnageActual:0}; return [ROUTES[k]?ROUTES[k].label:k,fmt(a.tripsActual),fmt(b.tripsActual),fmt(a.tonnageActual,1),fmt(b.tonnageActual,1),chg(a.tonnageActual,b.tonnageActual,'higher',{dec:1})]; })));
+  { const A2=matGroupTotals(F.transport), B2=matGroupTotals(G.transport);
+    if(hasCur||hasPrev) blocks.push(tableBlock('Tonnage by material & route',['Material / route','Trips','Tonnage (MT)',`Tonnage (${L.prevShort})`,'Change'],
+      A2.map((a,i)=>[a.label,fmt(a.trips),fmt(a.ton,1),fmt(B2[i].ton,1),chg(a.ton,B2[i].ton,'higher',{dec:1})]))); }
   const trips=sumBy(F.transport,'tripsActual'), ton=sumBy(F.transport,'tonnageActual');
   return {blocks,hasData:hasCur,headline:hasCur?`${fmt(trips)} trips · ${fmt(ton)} MT`:'No entries'};
 }
@@ -5412,6 +5421,7 @@ function attachEventsV10(app){
   attachCombos(app);
   attachReportEvents(app);
   attachPortEvents(app);
+  attachBulkExtras(app);
   app.querySelectorAll('[data-more-toggle]').forEach(b=>b.addEventListener('click',()=>{ STATE.moreOpen=!STATE.moreOpen; render(); }));
   app.querySelectorAll('[data-more-close]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el){ STATE.moreOpen=false; render(); } }));
   app.querySelectorAll('[data-m-refresh]').forEach(b=>b.addEventListener('click',async()=>{ STATE.moreOpen=false; await loadAll(); showToast('Refreshed from shared storage.'); }));
@@ -5422,7 +5432,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.3 · 22 Oct 2026 07:26';
+const APP_VERSION='v10.4 · 22 Oct 2026 19:53';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5463,7 +5473,7 @@ function normalizeCombo(rec){
     const t=String(rec.regNoText||'').trim().toUpperCase(); const hit=t?STATE.data.vehicles.find(v=>normReg(v.regNo)===normReg(t)):null;
     if(hit){ rec.vehicleId=hit.id; delete rec.regNoText; } else { rec.vehicleId=''; rec.regNoText=t; }
   } else delete rec.regNoText;
-  if(rec.driverName===COMBO_OTHER){ rec.driverName=String(rec.driverNameText||'').trim(); }
+  if(rec.driverName===COMBO_OTHER){ rec.driverName=canonDriver(rec.driverNameText); }
   delete rec.driverNameText;
   return rec;
 }
@@ -5515,18 +5525,37 @@ async function handleHsseFiles(files){
 async function handleHsseFile(file){ return handleHsseFiles([file]); }
 
 /* ============================================================ bulk.js ============================================================ */
-/* ===== Transport Ops bulk upload v2: Clinker/Gypsum route tabs + presets ===== */
+/* ===== Transport Ops v3: route tabs share the Transport Entries headings; summary page; breakdown cards; vessels; registry clean-up ===== */
 const BULK_CTX={alias:{},tabMap:{}};
+/* Each tab keeps its original columns (orig) and gets any missing Transport-Entries heading appended on the right.
+   dc = date column, tc = truck, drc = driver, wc = tonnage actual (-1 = appended) */
 const TAB_SPECS=[
-  {tab:'clinker',route:'clinker',material:'Clinker',means:'One clinker trip (weight in column L)',heads:{0:'TRUCK NO.',1:'DATE',11:'WEIGHT'},widths:[14,14,4,4,4,4,4,4,4,4,4,12,4,4]},
-  {tab:'APP-EWEK',route:'gypsum_ewekoro',material:'Gypsum',means:'One gypsum trip Apapa → Ewekoro',heads:{0:'TRUCK NUMBER ',1:'DATE',2:'TONNAGE',3:'DRIVER NAME'},widths:[16,14,12,18]},
-  {tab:'APP-SHAGAMU',route:'gypsum_sagamu',material:'Gypsum',means:'One gypsum trip Apapa → Sagamu',heads:{0:'TRUCK NO',1:'DATE',2:'WEIGHT'},widths:[14,14,12]},
-  {tab:'ADUNMBU-EWK',route:'gypsum_adumbu',material:'Gypsum',means:'One gypsum trip Adumbu → Ewekoro',heads:{0:'TRUCK NO',1:'DATE',2:'WEIGHT'},widths:[14,14,12]},
-  {tab:'ITORI  -SHG',route:'clinker',material:'Clinker',means:'One clinker trip Itori → Sagamu (confirm this is clinker)',heads:{0:'TRUCK NO',1:'DATE',2:'WEIGHT'},widths:[14,14,12]},
-  {tab:'SLOUGH',route:'other',material:'',means:'One trip, no weight recorded (confirm route/material)',heads:{0:'TRUCK NO',1:'DATE'},widths:[14,14]},
-  {tab:'EAST',route:'other',material:'',means:'One outward delivery per row, plus its backhaul if filled',heads:{0:'TRUCK DETAILS',1:'LOADING LOCATION',2:'MATERIAL',3:'LOADING DATE',4:'TAKEOFF DATE',5:'ARRIVAL DATE',6:'OFFLOADED DATE',7:'OFFLOADING LOCATION',9:'BACKHAUL DESTINATION',10:'MATERIAL',11:'BACKHAUL LOADING DATE',12:'EXIT DATE',13:'DELIVERY DATE',15:' EXTRA BACKHAUL DESTINATION',16:'BACKHAUL LOADING DATE',17:'EXIT DATE',18:'DELIVERY DATE'},widths:[14,18,16,14,14,14,14,20,4,18,14,16,12,14,4,20,16,12,14]},
-  {tab:'IGBESA',route:'other',material:'',means:'One journey per row (loading date used)',heads:{0:'TRUCK NO',1:'DRIVER',2:'DESTINATION',3:'LOADING DATE',4:'OFFLOADING DATE'},widths:[14,18,22,14,16]}];
+ {tab:'clinker',route:'clinker',material:'Clinker',means:'One clinker trip',orig:['TRUCK NO.','DATE','','','','','','','','','','WEIGHT','',''],widths:{0:14,1:13,11:12}},
+ {tab:'APP-EWEK',route:'gypsum_ewekoro',material:'Gypsum',means:'One gypsum trip Apapa → Ewekoro',orig:['TRUCK NUMBER ','DATE','TONNAGE','DRIVER NAME'],widths:{0:16,1:13,2:12,3:18}},
+ {tab:'APP-SHAGAMU',route:'gypsum_sagamu',material:'Gypsum',means:'One gypsum trip Apapa → Sagamu',orig:['TRUCK NO','DATE','WEIGHT'],widths:{0:14,1:13,2:12}},
+ {tab:'ADUNMBU-EWK',route:'gypsum_adumbu',material:'Gypsum',means:'One gypsum trip Adumbu → Ewekoro',orig:['TRUCK NO','DATE','WEIGHT',''],widths:{0:14,1:13,2:12}},
+ {tab:'ADUNMBU-SHAGAMU',route:'gypsum_adumbu_sagamu',material:'Gypsum',means:'One gypsum trip Adumbu → Sagamu (new tab)',orig:['TRUCK NO','DATE','WEIGHT'],widths:{0:14,1:13,2:12}},
+ {tab:'ITORI  -SHG',route:'clinker',material:'Clinker',means:'One clinker trip Itori → Sagamu (confirm this is clinker)',orig:['TRUCK NO','DATE','WEIGHT',''],widths:{0:14,1:13,2:12}},
+ {tab:'SLOUGH',route:'other',material:'',means:'One trip, no weight recorded (confirm route/material)',orig:['TRUCK NO','DATE'],widths:{0:14,1:13}},
+ {tab:'EAST',route:'east',material:'',means:'One east delivery per row — type the tonnage',orig:['TRUCK DETAILS','LOADING LOCATION','MATERIAL','LOADING DATE','TAKEOFF DATE','ARRIVAL DATE','OFFLOADED DATE','OFFLOADING LOCATION','','BACKHAUL DESTINATION','MATERIAL','BACKHAUL LOADING DATE','EXIT DATE','DELIVERY DATE','',' EXTRA BACKHAUL DESTINATION','BACKHAUL LOADING DATE','EXIT DATE','DELIVERY DATE',''],widths:{0:14,1:18,2:16,3:14,4:14,5:14,6:14,7:20,9:18,10:14,11:16,12:12,13:14,15:20,16:16,17:12,18:14}},
+ {tab:'IGBESA',route:'other',material:'',means:'One journey per row (loading date used)',orig:['TRUCK NO','DRIVER','DESTINATION','LOADING DATE','OFFLOADING DATE'],widths:{0:14,1:18,2:22,3:14,4:16}}];
+const TE_HEADS={date:'Date',truck:'Truck Reg No',driver:'Driver Name',route:'Route',material:'Material',tripsT:'Trips Target',tripsA:'Trips Actual',tonT:'Tonnage Target (MT)',tonA:'Tonnage Actual (MT)',taT:'Turnaround Target (hrs)',taA:'Turnaround Actual (hrs)',trT:'Transit Target (hrs)',trA:'Transit Actual (hrs)',vessel:'Vessel Name'};
+const ENTRY_ROWS=200;
+function tabLayout(sp){
+  const heads=sp.orig.slice(); const nm=h=>String(h||'').toLowerCase().replace(/[^a-z ]/g,'').trim();
+  const find=re=>heads.findIndex(h=>re.test(nm(h)));
+  const idx={truck:find(/^truck/),date:find(/^date$/)}; if(idx.date<0) idx.date=find(/^loading date$/);
+  idx.driver=find(/^driver/); idx.material=find(/^material$/); idx.tonA=find(/^(weight|tonnage)$/);
+  idx.dest=find(/^offloading location$|^destination$/);
+  ['driver','route','material','tripsT','tripsA','tonT','tonA','taT','taA','trT','trA','vessel'].forEach(k=>{ if(idx[k]===undefined||idx[k]<0){ idx[k]=heads.length; heads.push(TE_HEADS[k]); } });
+  idx.n=heads.length; return {heads,idx};
+}
+function colL(i){ return xlCol(i); }
+function vesselNames(){ const s={}; (STATE.data.transport||[]).forEach(r=>{ const v=String(r.vessel||'').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); return Object.values(s).sort(); }
+function vesselDatalist(){ return `<datalist id="dl-vessels">${vesselNames().map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`; }
+function uniqTrucks(){ const s={}; (STATE.data.vehicles||[]).forEach(v=>{ const k=normReg(v.regNo); if(k&&!s[k]) s[k]=v.regNo; }); return Object.values(s).sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true})); }
 
+/* ---------- truck matching ---------- */
 function matchTruck(txt){
   const k=normKey(txt), vs=STATE.data.vehicles||[], out={v:null,amb:null}; if(!k) return out;
   const al=BULK_CTX.alias[k]; if(al){ const h=vs.find(v=>normKey(v.regNo)===al); if(h){ out.v=h; return out; } }
@@ -5534,9 +5563,8 @@ function matchTruck(txt){
   if(k.length>=4){ const c=vs.filter(v=>normKey(v.regNo).startsWith(k)); if(c.length===1){ out.v=c[0]; return out; } if(c.length>1) out.amb=c.map(v=>v.regNo); }
   return out;
 }
-function lastDriverOf(key){
-  let best=null; (STATE.data.transport||[]).forEach(r=>{ if(trKey(r)===key&&r.driverName&&(!best||r.date>best.date)) best=r; }); return best?best.driverName:'';
-}
+function lastDriverOf(key){ let best=null; (STATE.data.transport||[]).forEach(r=>{ if(trKey(r)===key&&r.driverName&&(!best||r.date>best.date)) best=r; }); return best?best.driverName:''; }
+function canonDriver(n){ const t=String(n||'').trim(); if(!t) return ''; const hit=knownDrivers().find(x=>x.toUpperCase()===t.toUpperCase()); return hit||t.replace(/\w\S*/g,w=>w[0].toUpperCase()+w.slice(1).toLowerCase()); }
 function readPresets(wb){
   BULK_CTX.alias={}; BULK_CTX.tabMap={};
   const ws=wb.Sheets['KPI Presets']; if(!ws) return;
@@ -5553,66 +5581,67 @@ function fillRouteDefaults(r){
   if(r.turnaroundTarget===''&&rt.durationTargetHrs!==null&&rt.durationTargetHrs!==undefined) r.turnaroundTarget=rt.durationTargetHrs;
   if(r.tonnageTarget===''&&r.tripsTarget!==''&&num(STATE.targets.tonnagePerTripTarget)>0) r.tonnageTarget=num(r.tripsTarget)*num(STATE.targets.tonnagePerTripTarget);
 }
-/* turn one route tab into trip entries: {date,truck,w,driver,material,line,dest,fix} */
-function readTabTrips(grid,tab){
-  const head=(grid[0]||[]).map(h=>String(h||'').toLowerCase().replace(/[^a-z ]/g,'').trim());
-  const idx=re=>head.findIndex(h=>re.test(h)); const all=re=>head.map((h,i)=>re.test(h)?i:-1).filter(i=>i>=0);
-  const cT=idx(/^truck/), cD=idx(/^date$/), cW=idx(/weight|tonnage/), cDr=idx(/^driver/);
-  const cLoad=all(/^loading date$|^backhaul loading date$|^extra backhaul loading date$/), cMat=all(/^material/), cDest=idx(/^offloading location|^destination/);
-  const out={trips:[],notes:[]};
-  if(cT<0){ out.notes.push('no truck column'); return out; }
-  if(cD>=0){                                    // list layout: date typed once per day, rows below carry it
-    const years={}; grid.slice(1).forEach(r=>{ const d=xlDate(r[cD]); if(d) years[d.slice(0,4)]=(years[d.slice(0,4)]||0)+1; });
-    const mod=Object.keys(years).sort((a,b)=>years[b]-years[a])[0]; let cur='', fix='';
-    for(let i=1;i<grid.length;i++){ const r=grid[i]; const dv=r[cD];
-      if(dv!==''&&dv!==null){ const d=xlDate(dv); if(d){ if(mod&&d.slice(0,4)!==mod){ fix='Date '+d+' read as '+mod+d.slice(4); cur=mod+d.slice(4); } else { cur=d; fix=''; } } }
-      const t=String(r[cT]||'').trim(); if(!t||/^total/i.test(t)) continue;
-      const w=cW>=0&&r[cW]!==''?parseFloat(String(r[cW]).replace(/,/g,'')):NaN;
-      out.trips.push({date:cur,truck:t,w:isNaN(w)?null:w,driver:cDr>=0?String(r[cDr]||'').trim():'',material:'',line:i+1,fix:(dv!==''&&dv!==null)?fix:''}); }
-  } else if(cLoad.length){                      // journey layout: a loading date on every row (+ backhauls)
-    for(let i=1;i<grid.length;i++){ const r=grid[i]; const t=String(r[cT]||'').trim(); if(!t) continue;
-      const dest=cDest>=0?String(r[cDest]||'').trim():'';
-      cLoad.forEach((c,k)=>{ const d=xlDate(r[c]); if(!d&&k===0&&r[c]!=='') out.trips.push({date:'',truck:t,w:null,driver:cDr>=0?String(r[cDr]||'').trim():'',material:'',line:i+1}); if(!d) return;
-        const m=cMat[k]!==undefined?String(r[cMat[k]]||'').trim():''; out.trips.push({date:d,truck:t,w:null,driver:cDr>=0?String(r[cDr]||'').trim():'',material:m,line:i+1,dest:k===0?dest:'backhaul'}); });
-    }
-  } else out.notes.push('no date column');
+/* ---------- read one route tab (old layout or new layout — headings are found by name) ---------- */
+function readTabTrips(grid){
+  const nm=h=>String(h||'').toLowerCase().replace(/[^a-z ]/g,'').trim(); const head=(grid[0]||[]).map(nm);
+  const first=re=>head.findIndex(h=>re.test(h)); const out={trips:[],notes:[]};
+  const c={truck:first(/^truck/),date:first(/^date$/),load:first(/^loading date$/),w:first(/^(weight|tonnage|tonnage actual( mt)?)$/),tripsA:first(/^trips actual/),tripsT:first(/^trips target/),tonT:first(/^tonnage target/),
+    taT:first(/^turnaround target/),taA:first(/^turnaround actual/),trT:first(/^transit target/),trA:first(/^transit actual/),driver:first(/^driver/),route:first(/^route$/),mat:first(/^material$/),vessel:first(/^vessel/),dest:first(/^offloading location$|^destination$/)};
+  const carry=c.date>=0; const dc=carry?c.date:c.load;
+  if(c.truck<0){ out.notes.push('no truck column'); return out; } if(dc<0){ out.notes.push('no date column'); return out; }
+  const years={}; grid.slice(1).forEach(r=>{ const d=xlDate(r[dc]); if(d) years[d.slice(0,4)]=(years[d.slice(0,4)]||0)+1; });
+  const mod=Object.keys(years).sort((a,b)=>years[b]-years[a])[0]; let cur='', fix='';
+  const nv=(r,k)=>{ if(c[k]<0) return ''; const v=r[c[k]]; if(v===''||v===null||v===undefined) return ''; const n=parseFloat(String(v).replace(/,/g,'')); return isNaN(n)?'':n; };
+  const tv=(r,k)=>c[k]<0?'':String(r[c[k]]===null||r[c[k]]===undefined?'':r[c[k]]).trim();
+  for(let i=1;i<grid.length;i++){ const r=grid[i]; const dv=r[dc]; let rowFix='';
+    if(dv!==''&&dv!==null&&dv!==undefined){ const d=xlDate(dv); if(d){ if(mod&&d.slice(0,4)!==mod){ fix='Date '+d+' read as '+mod+d.slice(4); cur=mod+d.slice(4); } else { cur=d; fix=''; } rowFix=fix; } else cur=carry?cur:''; }
+    else if(!carry) cur='';
+    const t=tv(r,'truck'); if(!t||/^total/i.test(t)) continue;
+    const w=nv(r,'w'), ta=nv(r,'tripsA');
+    out.trips.push({date:cur,truck:t,w:w===''?null:w,trips:ta===''?1:ta,driver:tv(r,'driver'),material:tv(r,'mat'),routeTxt:tv(r,'route'),vessel:tv(r,'vessel'),dest:tv(r,'dest'),
+      tripsT:nv(r,'tripsT'),tonT:nv(r,'tonT'),taT:nv(r,'taT'),taA:nv(r,'taA'),trT:nv(r,'trT'),trA:nv(r,'trA'),line:i+1,fix:rowFix});
+  }
   return out;
 }
 function parseRouteTabs(wb,manual){
   readPresets(wb);
   const known={}; TAB_SPECS.forEach(s=>{ known[normKey(s.tab)]=s; });
   Object.keys(BULK_CTX.tabMap).forEach(k=>{ if(!known[k]) known[k]={tab:k,route:'other',material:'',generic:true}; });
-  const groups={}, order=[], per={}; let fallbackDrv=0, fixed=0, unmatched={}, amb={};
-  const manualSeen={}; manual.forEach(r=>{ if(r.date) manualSeen[[r.date,r.vehicleId||('~'+normReg(r.truckTxt)),r.route].join('|')]=1; });
+  const groups={}, order=[], per={}; let fallbackDrv=0, fixed=0; const unmatched={}, amb={};
+  const manualSeen={}; (manual||[]).forEach(r=>{ if(r.date) manualSeen[[r.date,r.vehicleId||('~'+normReg(r.truckTxt)),r.route].join('|')]=1; });
   let found=false, skippedManual=0;
   wb.SheetNames.forEach(name=>{
     const spec=known[normKey(name)]; if(!spec) return; found=true;
-    const ov=BULK_CTX.tabMap[normKey(name)]||{}; const route=ov.route||spec.route; const mat=(ov.material!==undefined&&ov.material!==''?ov.material:spec.material)||'';
+    const ov=BULK_CTX.tabMap[normKey(name)]||{}; const tabRoute=ov.route||spec.route; const mat=(ov.material!==undefined&&ov.material!==''?ov.material:spec.material)||'';
     const grid=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:true,defval:''});
-    const rd=readTabTrips(grid,name); per[name]={trips:0,t:0,rows:0};
+    const rd=readTabTrips(grid); per[name]={trips:0,t:0};
     rd.trips.forEach(tr=>{
+      const route=(tr.routeTxt&&matchRoute(tr.routeTxt))||tabRoute;
       const m=matchTruck(tr.truck); const tk=m.v?m.v.id:('~'+normReg(tr.truck)); const label=m.v?m.v.regNo:String(tr.truck).trim().toUpperCase();
       const key=[tr.date,tk,route].join('|');
-      let g=groups[key]; if(!g){ g=groups[key]={date:tr.date,tk,v:m.v,label,amb:m.amb,route,material:'',drivers:[],tabs:{},trips:0,t:0,noW:0,fixes:{},dests:{}}; order.push(key); }
-      g.trips++; if(tr.w!==null) g.t+=tr.w; else if(!/^(other)$/.test(route)||spec.tab==='SLOUGH') g.noW++;
+      let g=groups[key]; if(!g){ g=groups[key]={date:tr.date,tk,v:m.v,label,amb:m.amb,route,material:'',vessel:'',dest:'',drivers:[],tabs:{},trips:0,t:0,noW:0,fixes:{},tg:{}}; order.push(key); }
+      g.trips+=tr.trips; if(tr.w!==null) g.t+=tr.w; else g.noW+=tr.trips;
       const mm=tr.material||mat; if(mm&&!g.material) g.material=mm;
+      if(tr.vessel&&!g.vessel) g.vessel=tr.vessel; if(tr.dest&&!g.dest) g.dest=tr.dest;
+      ['tripsT','tonT','taT','taA','trT','trA'].forEach(k=>{ if(tr[k]!==''&&g.tg[k]===undefined) g.tg[k]=tr[k]; });
       if(tr.driver&&g.drivers.indexOf(tr.driver)<0) g.drivers.push(tr.driver);
       const t=g.tabs[name]||(g.tabs[name]={a:tr.line,b:tr.line}); t.a=Math.min(t.a,tr.line); t.b=Math.max(t.b,tr.line);
-      if(tr.fix) g.fixes[tr.fix]=1; if(tr.dest) g.dests[tr.dest]=1;
-      per[name].trips++; per[name].t+=tr.w||0;
+      if(tr.fix) g.fixes[tr.fix]=1;
+      per[name].trips+=tr.trips; per[name].t+=tr.w||0;
     });
   });
   const rows=[];
   order.forEach(key=>{
-    const g=groups[key]; const r={line:Object.keys(g.tabs).map(n=>n.trim()+' r'+(g.tabs[n].a===g.tabs[n].b?g.tabs[n].a:g.tabs[n].a+'–'+g.tabs[n].b)).join(' + '),tab:Object.keys(g.tabs)[0],date:g.date,truckTxt:g.label,errs:[],warns:[]};
+    const g=groups[key]; const names=Object.keys(g.tabs);
+    const r={line:names.map(n=>n.trim()+' r'+(g.tabs[n].a===g.tabs[n].b?g.tabs[n].a:g.tabs[n].a+'–'+g.tabs[n].b)).join(' + '),tab:names[0],date:g.date,truckTxt:g.label,errs:[],warns:[]};
     r.vehicleId=g.v?g.v.id:''; r.regNo=g.label; r.regNoText=g.v?'':g.label.toUpperCase();
-    r.route=g.route; r.routeTxt=ROUTES[g.route]?ROUTES[g.route].label:g.route; r.material=g.material;
-    r.driver=(g.drivers[0]?g.drivers[0].replace(/\w\S*/g,w=>w[0].toUpperCase()+w.slice(1).toLowerCase()):'')||lastDriverOf(g.tk)||'Not recorded'; if(!g.drivers.length) fallbackDrv++;
-    r.tripsActual=g.trips; r.tonnageActual=g.t>0?Math.round(g.t*100)/100:''; ['tripsTarget','tonnageTarget','turnaroundTarget','turnaroundActual','transitTarget','transitActual'].forEach(k=>{ r[k]=''; });
-    const dests=Object.keys(g.dests).filter(x=>x!=='backhaul'); r.notes='Imported from route tab '+Object.keys(g.tabs).join(', ').trim()+(dests.length?' — to '+dests.join(', '):'');
-    if(!r.date) r.errs.push('No date for this row (type the date on the first row of the day)');
-    if(!g.v){ if(g.amb){ r.warns.push('Matches '+g.amb.join(' / ')+' — saved as typed (pick one on KPI Presets)'); amb[g.label]=1; } else { r.warns.push('Truck not in the registry — saved as typed'); unmatched[g.label]=1; } }
-    else if(normKey(g.v.regNo)!==normKey(g.label)) {}
+    r.route=g.route; r.routeTxt=ROUTES[g.route]?ROUTES[g.route].label:g.route; r.material=g.material; r.vessel=g.vessel; r.destination=g.dest;
+    r.driver=canonDriver(g.drivers[0])||lastDriverOf(g.tk)||'Not recorded'; if(!g.drivers.length) fallbackDrv++;
+    r.tripsActual=g.trips; r.tonnageActual=g.t>0?Math.round(g.t*100)/100:'';
+    r.tripsTarget=g.tg.tripsT!==undefined?g.tg.tripsT:''; r.tonnageTarget=g.tg.tonT!==undefined?g.tg.tonT:''; r.turnaroundTarget=g.tg.taT!==undefined?g.tg.taT:''; r.turnaroundActual=g.tg.taA!==undefined?g.tg.taA:''; r.transitTarget=g.tg.trT!==undefined?g.tg.trT:''; r.transitActual=g.tg.trA!==undefined?g.tg.trA:'';
+    r.notes='Imported from route tab '+names.join(', ').trim();
+    if(!r.date) r.errs.push('No date for this row');
+    if(!g.v){ if(g.amb){ r.warns.push('Matches '+g.amb.join(' / ')+' — saved as typed'); amb[g.label]=1; } else { r.warns.push('Truck not in the registry — saved as typed'); unmatched[g.label]=1; } }
     if(g.noW&&r.route!=='other') r.warns.push(g.noW+' trip'+(g.noW>1?'s':'')+' without a weight');
     Object.keys(g.fixes).forEach(f=>{ r.warns.push(f); fixed++; });
     fillRouteDefaults(r);
@@ -5622,65 +5651,172 @@ function parseRouteTabs(wb,manual){
   const keyOf=r=>[r.date,r.vehicleId||('~'+normReg(r.truckTxt)),r.route].join('|');
   const ex={}; (STATE.data.transport||[]).forEach(r=>{ ex[[r.date,trKey(r),r.route].join('|')]=r.id; });
   rows.forEach(r=>{ const k=keyOf(r); if(!r.errs.length&&ex[k]){ r.dupId=ex[k]; r.warns.push('Already in Transport Ops'); } r.state=r.errs.length?'error':(r.dupId?'dup':'ok'); });
-  const tabsHtml=Object.keys(per).map(n=>`<span class="tag teal" style="margin:0 6px 6px 0;">${esc(n.trim())}: ${per[n].trips} trip${per[n].trips===1?'':'s'}${per[n].t?' · '+fmt(per[n].t,1)+' MT':''}</span>`).join('');
+  const tabsHtml=Object.keys(per).map(n=>`<span class="tag teal" style="margin:0 6px 6px 0;">${esc(n.trim())}: ${fmt(per[n].trips)} trip${per[n].trips===1?'':'s'}${per[n].t?' · '+fmt(per[n].t,1)+' MT':''}</span>`).join('');
   const notes=[];
   if(fallbackDrv) notes.push(fallbackDrv+' row'+(fallbackDrv>1?'s have':' has')+' no driver in the tab — filled with the truck’s last known driver, or “Not recorded”.');
   if(fixed) notes.push(fixed+' date'+(fixed>1?'s':'')+' looked like a year typo and were read in the same year as the rest of the tab.');
-  if(skippedManual) notes.push(skippedManual+' route-tab line'+(skippedManual>1?'s were':' was')+' already on the Transport Entries sheet — the Transport Entries line was used.');
+  if(skippedManual) notes.push(skippedManual+' line'+(skippedManual>1?'s were':' was')+' already on the Transport Entries sheet — that one was used.');
   const un=Object.keys(unmatched).concat(Object.keys(amb)); if(un.length) notes.push('Trucks saved as typed (not matched to one registry truck): '+un.join(', ')+'. Add them to the registry, or pick the truck on the KPI Presets sheet and upload again.');
   const summary=Object.keys(per).length?`<div style="margin:0 0 12px;"><div class="dim small" style="margin-bottom:6px;">Read from the route tabs — trips are grouped by date + truck + route and the route’s preset KPIs (trips/day, turnaround, tonnage targets) are applied automatically.</div>${tabsHtml}${notes.map(n=>`<div class="note" style="margin-top:6px;">${esc(n)}</div>`).join('')}</div>`:'';
   return {rows,found,summary};
 }
 function parseBulkWorkbook(wb){
-  const hasEntries=!!wb.Sheets['Transport Entries'];
-  const man=hasEntries||!wb.SheetNames.some(n=>/^(clinker|appewek|appshagamu|adunmbuewk|itorishg|slough|east|igbesa)$/.test(normKey(n)))?parseBulkManual(wb):{rows:[],err:''};
+  const tabNames=/^(clinker|appewek|appshagamu|adunmbuewk|adunmbushagamu|itorishg|slough|east|igbesa)$/;
+  const hasTabs=wb.SheetNames.some(n=>tabNames.test(normKey(n)));
+  const man=(wb.Sheets['Transport Entries']||!hasTabs)?parseBulkManual(wb):{rows:[],err:''};
   const manRows=man.rows||[];
   const tabs=parseRouteTabs(wb,manRows);
   const rows=manRows.concat(tabs.rows);
-  const err=rows.length?'':(tabs.found?'The route tabs have no trips with a date and a truck yet.':(man.err||'The template has no filled-in rows. Fill in the driver, route, trips and tonnage for each truck that ran.'));
+  const err=rows.length?'':(tabs.found?'The route tabs have no trips with a date and a truck yet.':(man.err||'The template has no filled-in rows. Fill in the route tabs (date, truck, tonnage) and upload again.'));
   return {rows,err,summary:tabs.summary};
 }
-/* in-app template: add the route tabs (exact headings) + KPI Presets to the workbook */
+
+/* ---------- Breakdown cards (Transport Ops) ---------- */
+const MAT_GROUPS=[['Clinker',['clinker']],['Gypsum — Adumbu → Ewekoro',['gypsum_adumbu']],['Gypsum — Adumbu → Sagamu',['gypsum_adumbu_sagamu']],['Gypsum — Apapa → Ewekoro',['gypsum_ewekoro']],['Gypsum — Apapa → Sagamu',['gypsum_sagamu']]];
+function matGroupTotals(recs){
+  const rows=MAT_GROUPS.map(g=>({label:g[0],routes:g[1],trips:0,ton:0}));
+  const east={label:'East deliveries',trips:0,ton:0,kind:'east'}, other={label:'Other routes',trips:0,ton:0,kind:'other'}, tot={label:'All routes',trips:0,ton:0,kind:'total'};
+  recs.forEach(r=>{ const t=num(r.tripsActual), w=num(r.tonnageActual); const g=rows.find(x=>x.routes.indexOf(r.route)>=0)||(r.route==='east'?east:other); g.trips+=t; g.ton+=w; tot.trips+=t; tot.ton+=w; });
+  const gyp={label:'Total gypsum delivered',trips:0,ton:0,kind:'gypsum'}; rows.slice(1).forEach(x=>{ gyp.trips+=x.trips; gyp.ton+=x.ton; });
+  return rows.concat([gyp,east,other,tot]);
+}
+const MAT_PERIODS=[['lastweek','Last week'],['prevweek','Week before'],['month','This month'],['lastmonth','Last month'],['all','All time (so far)']];
+function matRouteCard(){
+  const recs=STATE.data.transport||[];
+  const T=MAT_PERIODS.map(p=>matGroupTotals(p[0]==='all'?recs:recs.filter(r=>inPeriod(r.date,p[0]))));
+  const cell=x=>x.trips||x.ton?`<b>${fmt(x.ton,1)} MT</b><div class="dim small">${fmt(x.trips)} trip${x.trips===1?'':'s'}</div>`:'<span class="dim">—</span>';
+  const heads=MAT_PERIODS.map(p=>`<th>${p[1]}${p[0]==='all'?'':`<div class="dim small" style="font-weight:400;text-transform:none;">${esc(rangeText(periodRange(p[0])))}</div>`}</th>`).join('');
+  const gy=T[4].find(x=>x.kind==='gypsum');
+  return `<div class="section-sub" style="margin:18px 0 8px;">Tonnage by material &amp; route — weekly and monthly</div>
+  <div class="table-wrap"><table><thead><tr><th>Material / route</th>${heads}</tr></thead><tbody>${T[0].map((x,i)=>{ const st=x.kind==='gypsum'?' style="font-weight:700;background:rgba(232,163,61,.12);"':(x.kind==='total'?' style="font-weight:700;"':''); return `<tr${st}><td style="white-space:normal;">${esc(x.label)}</td>${T.map(t=>`<td>${cell(t[i])}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>
+  <div class="card" style="margin:10px 0 4px;border-left:3px solid var(--amber);"><span class="dim small">Total gypsum delivered so far</span><div style="font-size:22px;font-weight:700;">${fmt(gy.ton,1)} MT <span class="dim small" style="font-weight:400;">· ${fmt(gy.trips)} trip${gy.trips===1?'':'s'} across the four gypsum routes</span></div></div>
+  <div class="dim small" style="margin:6px 0 14px;">Weeks run Monday–Sunday. “This month” is the calendar month so far; the filters above do not apply to this table.</div>`;
+}
+function destOf(r){ return String(r.destination||'').trim()||((String(r.notes||'').match(/ — to (.+)$/)||[])[1]||'').trim(); }
+function eastCard(){
+  const E=(STATE.data.transport||[]).filter(r=>r.route==='east');
+  const by={}; E.forEach(r=>{ const d=destOf(r)||'Not recorded'; const k=d.toUpperCase(); const x=by[k]||(by[k]={d,trips:0,ton:0,mt:0,mtt:0,last:''}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); if(inPeriod(r.date,'month')){ x.mt+=num(r.tonnageActual); x.mtt+=num(r.tripsActual); } if(r.date>x.last) x.last=r.date; });
+  const rows=Object.values(by).sort((a,b)=>b.ton-a.ton||b.trips-a.trips); const tt=rows.reduce((a,x)=>a+x.trips,0), tw=rows.reduce((a,x)=>a+x.ton,0);
+  return `<div class="section-sub" style="margin:18px 0 8px;">East deliveries — tonnage by destination</div>
+  ${rows.length?`<div class="table-wrap"><table><thead><tr><th>Destination</th><th>Trips (all)</th><th>Tonnage (MT, all)</th><th>This month (MT)</th><th>Last delivery</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.d)}</td><td>${fmt(x.trips)}</td><td>${x.ton?fmt(x.ton,1):'<span class="dim">no tonnage entered</span>'}</td><td>${fmt(x.mt,1)}</td><td>${esc(x.last?fmtDate(x.last):'—')}</td></tr>`).join('')}<tr style="font-weight:700;"><td>Total east deliveries</td><td>${fmt(tt)}</td><td>${fmt(tw,1)}</td><td>${fmt(rows.reduce((a,x)=>a+x.mt,0),1)}</td><td></td></tr></tbody></table></div>`:'<div class="card dim" style="padding:14px;">No east deliveries yet. Log an entry with the route “East Deliveries” (destination + tonnage), or fill the EAST tab and upload the workbook.</div>'}`;
+}
+const GYP_ROUTE_KEYS=['gypsum_adumbu','gypsum_adumbu_sagamu','gypsum_ewekoro','gypsum_sagamu'];
+function vesselCard(){
+  const G=(STATE.data.transport||[]).filter(r=>GYP_ROUTE_KEYS.indexOf(r.route)>=0); if(!G.length&&!vesselNames().length) return '';
+  const by={}; G.forEach(r=>{ const v=String(r.vessel||'').trim(); const k=v?v.toUpperCase():'~'; const x=by[k]||(by[k]={v:v||'No vessel recorded',none:!v,trips:0,ton:0,R:{},first:r.date,last:r.date}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); x.R[r.route]=(x.R[r.route]||0)+num(r.tonnageActual); if(r.date<x.first) x.first=r.date; if(r.date>x.last) x.last=r.date; });
+  const rows=Object.values(by).sort((a,b)=>(a.none?1:0)-(b.none?1:0)||b.ton-a.ton);
+  return `<div class="section-sub" style="margin:18px 0 8px;">Gypsum delivered by vessel</div>
+  <div class="table-wrap"><table><thead><tr><th>Vessel</th><th>Adumbu → Ewekoro</th><th>Adumbu → Sagamu</th><th>Apapa → Ewekoro</th><th>Apapa → Sagamu</th><th>Total (MT)</th><th>Trips</th><th>First – last delivery</th></tr></thead><tbody>${rows.map(x=>`<tr${x.none?' style="opacity:.8;"':''}><td><b>${esc(x.v)}</b></td>${GYP_ROUTE_KEYS.map(k=>`<td>${x.R[k]?fmt(x.R[k],1):'<span class="dim">—</span>'}</td>`).join('')}<td><b>${fmt(x.ton,1)}</b></td><td>${fmt(x.trips)}</td><td>${esc(fmtDate(x.first)+(x.last!==x.first?' – '+fmtDate(x.last):''))}</td></tr>`).join('')}</tbody></table></div>
+  <div class="dim small" style="margin:6px 0 14px;">Type the vessel name in the “Vessel Name” field when you log a gypsum delivery, or in the Vessel Name column of the route tabs. Entries without one are grouped under “No vessel recorded” — edit them to link them to a vessel.</div>`;
+}
+
+/* ---------- Registry clean-up: same truck entered twice ---------- */
+const VEH_REF_COLLS=['transport','journey','inspections','pretrip','safety','maintenance','maintenanceDaily','fuel','maintInspections','cngFills','dieselTrips'];
+function dupGroups(){
+  const ign=((STATE.data.seeds||{}).dupIgnore)||[]; const by={};
+  (STATE.data.vehicles||[]).forEach(v=>{ const d=String(v.regNo||'').replace(/[^0-9]/g,''); const k=d.length>=3?d:normReg(v.regNo); (by[k]||(by[k]=[])).push(v); });
+  return Object.keys(by).filter(k=>by[k].length>1&&ign.indexOf(k)<0).map(k=>({key:k,list:by[k]}));
+}
+function vehUse(id){ let n=0; VEH_REF_COLLS.forEach(c=>(STATE.data[c]||[]).forEach(r=>{ if(r.vehicleId===id) n++; })); return n; }
+function regDupCard(){
+  const g=dupGroups(); if(!g.length) return '';
+  const total=(STATE.data.vehicles||[]).length;
+  return `<div class="card" style="margin:0 0 16px;border-left:3px solid var(--red);"><div style="font-weight:600;font-size:14px;">Registry check — ${g.length} truck${g.length>1?'s look':' looks'} like duplicates</div>
+  <div class="dim small" style="margin:3px 0 10px;line-height:1.5;">The registry has ${total} trucks. Trucks with the same plate number are probably one truck entered twice. Choose the one to keep — all its history, entries and maintenance from the other are moved across.</div>
+  ${g.map(x=>{ const best=x.list.slice().sort((a,b)=>vehUse(b.id)-vehUse(a.id))[0]; return `<div style="border-top:1px solid var(--line);padding:10px 0;" data-dupg="${esc(x.key)}"><div class="flex gap8" style="flex-wrap:wrap;align-items:center;">${x.list.map(v=>`<label style="display:flex;gap:6px;align-items:center;text-transform:none;font-size:13px;color:var(--text);"><input type="radio" name="dup-${esc(x.key)}" value="${esc(v.id)}" ${v.id===best.id?'checked':''} style="width:auto;"> Keep <b>${esc(v.regNo)}</b> <span class="dim small">(${vehUse(v.id)} records)</span></label>`).join('')}
+  <button type="button" class="btn small primary" data-dup-merge="${esc(x.key)}">Merge</button><button type="button" class="btn small ghost" data-dup-ignore="${esc(x.key)}">They are different trucks</button></div></div>`; }).join('')}</div>`;
+}
+async function mergeDup(key){
+  const g=dupGroups().find(x=>x.key===key); if(!g) return;
+  const sel=document.querySelector(`input[name="dup-${CSS.escape(key)}"]:checked`); const keepId=sel?sel.value:g.list[0].id; const lose=g.list.filter(v=>v.id!==keepId).map(v=>v.id);
+  const keep=g.list.find(v=>v.id===keepId); const touched=[];
+  VEH_REF_COLLS.forEach(c=>{ let ch=false; (STATE.data[c]||[]).forEach(r=>{ if(lose.indexOf(r.vehicleId)>=0){ r.vehicleId=keepId; ch=true; } }); if(ch) touched.push(c); });
+  g.list.filter(v=>lose.indexOf(v.id)>=0).forEach(v=>{ ['currentOdometer','lastServiceOdometer','lastServiceDate','model'].forEach(f=>{ if((keep[f]===undefined||keep[f]===''||keep[f]===null)&&v[f]) keep[f]=v[f]; }); });
+  STATE.data.vehicles=STATE.data.vehicles.filter(v=>lose.indexOf(v.id)<0);
+  for(const c of touched) await persist(c); await persist('vehicles');
+  showToast('Merged into '+keep.regNo+'. The registry now has '+STATE.data.vehicles.length+' trucks.'); render();
+}
+async function ignoreDup(key){ const s=STATE.data.seeds||(STATE.data.seeds={}); s.dupIgnore=(s.dupIgnore||[]).concat(key); await persist('seeds'); render(); }
+function attachBulkExtras(app){
+  app.querySelectorAll('[data-dup-merge]').forEach(b=>b.addEventListener('click',()=>{ b.disabled=true; mergeDup(b.getAttribute('data-dup-merge')); }));
+  app.querySelectorAll('[data-dup-ignore]').forEach(b=>b.addEventListener('click',()=>{ b.disabled=true; ignoreDup(b.getAttribute('data-dup-ignore')); }));
+}
+
+/* ---------- In-app Excel template: Summary page + route tabs (with Transport-Entries headings) + presets ---------- */
 function addRouteTabs(files){
-  const get=n=>files.find(f=>f.name===n); const n=TAB_SPECS.length;
+  const get=n=>files.find(f=>f.name===n);
   const str=(r,c,t,st)=>`<c r="${xlCol(c)}${r}" t="inlineStr"${st?` s="${st}"`:''}><is><t xml:space="preserve">${xmlEsc(t)}</t></is></c>`;
+  const num_=(r,c,v,st)=>`<c r="${xlCol(c)}${r}"${st?` s="${st}"`:''}><v>${v}</v></c>`;
+  const fx=(r,c,f,st)=>`<c r="${xlCol(c)}${r}"${st?` s="${st}"`:''}><f>${xmlEsc(f)}</f></c>`;
   const hdr='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
-  const sheets=[]; // [name, xml]
+  const trucks=uniqTrucks(), routes=Object.keys(ROUTES).map(k=>ROUTES[k].label), mats=materialNames(), drivers=knownDrivers(), vessels=vesselNames();
+  const LI={trucks:`OFFSET(Lists!$A$2,0,0,MAX(1,COUNTA(Lists!$A$2:$A$200)),1)`,routes:`Lists!$B$2:$B$${routes.length+1}`,mats:`OFFSET(Lists!$C$2,0,0,MAX(1,COUNTA(Lists!$C$2:$C$100)),1)`,drivers:`OFFSET(Lists!$D$2,0,0,MAX(1,COUNTA(Lists!$D$2:$D$300)),1)`,vessels:`OFFSET(Lists!$E$2,0,0,MAX(1,COUNTA(Lists!$E$2:$E$100)),1)`};
+  const sheets=[]; const lay={};
   TAB_SPECS.forEach(s=>{
-    const cells=Object.keys(s.heads).map(c=>str(1,+c,s.heads[c],1)).join('');
-    sheets.push([s.tab,`${hdr}<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${s.widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData><row r="1" ht="30" customHeight="1">${cells}</row></sheetData></worksheet>`]);
+    const L=tabLayout(s); lay[s.tab]=L; const ix=L.idx; const last=ENTRY_ROWS+1;
+    let cols=''; L.heads.forEach((h,i)=>{ const w=(s.widths&&s.widths[i])||(i<s.orig.length?(h?14:4):({tripsT:12,tripsA:12,tonT:16,tonA:16,taT:18,taA:18,trT:16,trA:16,driver:20,route:34,material:16,vessel:22})[Object.keys(ix).find(k=>ix[k]===i)]||14); const isDate=i===ix.date; cols+=`<col min="${i+1}" max="${i+1}" width="${w}"${isDate?' style="2"':''} customWidth="1"/>`; });
+    const hrow=`<row r="1" ht="32" customHeight="1">${L.heads.map((h,i)=>h===''?'':str(1,i,h,1)).join('')}</row>`;
+    let body=''; for(let r=2;r<=last;r++){ let c=''; if(ix.route>=0) c+=str(r,ix.route,ROUTES[s.route].label); if(s.material&&ix.material>=0&&ix.material>=s.orig.length) c+=str(r,ix.material,s.material); body+=`<row r="${r}">${c}</row>`; }
+    const col=k=>xlCol(ix[k]); const dv=[];
+    const lst=(k,f,err)=>dv.push(`<dataValidation type="list" allowBlank="1" showErrorMessage="${err?1:0}"${err?` errorTitle="Route" error="Pick a route from the list."`:''} sqref="${col(k)}2:${col(k)}${last}"><formula1>${xmlEsc(f)}</formula1></dataValidation>`);
+    dv.push(`<dataValidation type="date" operator="greaterThan" allowBlank="1" showErrorMessage="1" errorTitle="Date" error="Enter a valid date, e.g. ${todayStr()}." sqref="${col('date')}2:${col('date')}${last}"><formula1>43831</formula1></dataValidation>`);
+    lst('truck',LI.trucks); lst('driver',LI.drivers); lst('route',LI.routes,true); lst('material',LI.mats); lst('vessel',LI.vessels);
+    const numK=['tripsT','tripsA','tonT','tonA','taT','taA','trT','trA'].filter(k=>true); numK.forEach(k=>dv.push(`<dataValidation type="decimal" operator="greaterThanOrEqual" allowBlank="1" showErrorMessage="1" errorTitle="Number" error="Enter a number (0 or more)." sqref="${col(k)}2:${col(k)}${last}"><formula1>0</formula1></dataValidation>`));
+    sheets.push([s.tab,`${hdr}<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${cols}</cols><sheetData>${hrow}${body}</sheetData><dataValidations count="${dv.length}">${dv.join('')}</dataValidations></worksheet>`]);
   });
-  // KPI Presets
-  const L=[]; let r=1; const row=(cells)=>{ L.push(`<row r="${r}">${cells}</row>`); r++; };
-  row(str(r,0,'KPI PRESETS — what each tab feeds in FleetDesk',7)); row(str(r,0,'Section A is read on upload (you may change columns B and C). Section C is for reference — change targets in FleetDesk → Settings.',0)); r++;
-  row(['A. Tab name','FleetDesk route','Material','What one row means','Trips/day target','Turnaround target (hrs)'].map((h,i)=>str(r,i,h,1)).join(''));
-  const aStart=r;
-  TAB_SPECS.forEach(s=>{ const rt=ROUTES[s.route]; row(str(r,0,s.tab)+str(r,1,rt.label)+str(r,2,s.material)+str(r,3,s.means)+str(r,4,rt.tripsPerDayTarget?String(rt.tripsPerDayTarget):'—')+str(r,5,rt.durationTargetHrs?String(rt.durationTargetHrs):'—')); });
-  const aEnd=r-1; r++;
-  row(str(r,0,'B. Truck short names (only trucks that could not be matched automatically)',6));
-  row(['Name as written in the tabs','Registry truck (pick)','','Why it needs you'].map((h,i)=>str(r,i,h,1)).join(''));
-  for(let i=0;i<10;i++) row('');
-  r++; row(str(r,0,'C. KPIs already set in FleetDesk (for reference)',6)); row(['KPI','Target','','Applies to'].map((h,i)=>str(r,i,h,1)).join(''));
-  const T=STATE.targets||{};
-  [['Clinker — trips per truck per day',ROUTES.clinker.tripsPerDayTarget+' ('+ROUTES.clinker.durationTargetHrs+' hrs each)','Ewekoro ⇄ Sagamu'],['Gypsum Apapa → Ewekoro — trips per day',ROUTES.gypsum_ewekoro.tripsPerDayTarget+' ('+ROUTES.gypsum_ewekoro.durationTargetHrs+' hrs)','APP-EWEK'],['Gypsum Apapa → Sagamu — trips per day',ROUTES.gypsum_sagamu.tripsPerDayTarget+' ('+ROUTES.gypsum_sagamu.durationTargetHrs+' hrs)','APP-SHAGAMU'],['Gypsum Adumbu — trips per day',ROUTES.gypsum_adumbu.tripsPerDayTarget+' ('+ROUTES.gypsum_adumbu.durationTargetHrs+' hrs each)','ADUNMBU-EWK'],['Tonnage per trip',(T.tonnagePerTripTarget||30)+' MT','Tonnage target = trips target × this'],['Turnaround target',(T.turnaroundTargetHrs||6)+' hrs','Where a route has no duration target'],['Transit target',(T.transitTargetHrs||4)+' hrs',''],['On-time delivery',Math.round((T.onTimeTarget||0.95)*100)+'%','']].forEach(x=>row(str(r,0,x[0])+str(r,1,x[1])+str(r,3,x[2])));
-  const nR=routes=>Object.keys(ROUTES).length;
-  sheets.push(['KPI Presets',`${hdr}<cols><col min="1" max="1" width="34" customWidth="1"/><col min="2" max="2" width="40" customWidth="1"/><col min="3" max="3" width="18" customWidth="1"/><col min="4" max="4" width="46" customWidth="1"/><col min="5" max="6" width="20" customWidth="1"/></cols><sheetData>${L.join('')}</sheetData><dataValidations count="1"><dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="B${aStart+1}:B${aEnd}"><formula1>Lists!$B$2:$B$${Object.keys(ROUTES).length+1}</formula1></dataValidation></dataValidations></worksheet>`]);
-  // rewrite help sheet
-  const help=['FLEETDESK — TRANSPORT OPS BULK ENTRY  +  CLINKER / GYPSUM ROUTE TABS','',
-    'TWO WAYS TO FILL THIS WORKBOOK (use either, or both):',
-    'A. Fill the route tabs: clinker, APP-EWEK, APP-SHAGAMU, ADUNMBU-EWK, ITORI  -SHG, SLOUGH, EAST, IGBESA. One row = one trip. Type the date on the first row of each day; rows below it take the same date.',
-    'B. Use the "Transport Entries" sheet for anything that needs a driver, targets or turnaround/transit hours: one row per truck per route per day. Truck, Driver, Route and Material have drop-downs — you can also TYPE a different truck number or driver name if something has changed.','',
-    'Upload: FleetDesk → Transport Ops → "Upload filled template". You see a preview first; nothing is saved until you confirm.',
-    'On upload FleetDesk groups the route-tab trips by date + truck + route (trips = number of rows, tonnage = sum of weights) and fills in the route\'s preset KPIs: trips/day target, turnaround target, material and tonnage target.',
-    'The KPI Presets sheet shows which FleetDesk route each tab feeds. You can change a tab\'s route or material there, and add short-name → registry-truck lines for trucks written differently in the tabs.',
-    'Trucks written short (e.g. "AKM 285") are matched to the registry (AKM285XG) when only one truck fits. If more than one fits, or none, the truck is saved exactly as typed and flagged in the preview.',
-    'A truck + date + route that is on BOTH a route tab and the Transport Entries sheet is taken from Transport Entries only (no double counting).',
-    'Rows already in FleetDesk for the same date + truck + route are skipped unless you tick "Replace existing entries" in the preview.',
-    'Driver: the route tabs only carry a driver on some rows (APP-EWEK). Where it is blank, FleetDesk uses that truck\'s last known driver, otherwise "Not recorded".',
-    'Do not rename the tabs, the column headings or the sheet names. Totals/SUM rows at the bottom of a tab are ignored.'];
+  /* ---- Summary page (replaces the old entry sheet; it only reads from the route tabs) ---- */
+  const R=2999, q=t=>`'${t}'`; const rg=(t,k)=>`${q(t)}!$${xlCol(lay[t].idx[k])}$2:$${xlCol(lay[t].idx[k])}$${R}`;
+  const tonF=(tabs,a,b)=>tabs.map(t=>a?`SUMIFS(${rg(t,'tonA')},${rg(t,'truck')},"<>",${rg(t,'date')},">="&${a},${rg(t,'date')},"<="&${b})`:`SUMIFS(${rg(t,'tonA')},${rg(t,'truck')},"<>")`).join('+');
+  const tripF=(tabs,a,b)=>tabs.map(t=>{ const dd=a?`,${rg(t,'date')},">="&${a},${rg(t,'date')},"<="&${b}`:''; return `SUMIFS(${rg(t,'tripsA')},${rg(t,'truck')},"<>"${dd})+COUNTIFS(${rg(t,'truck')},"<>",${rg(t,'tripsA')},""${dd})`; }).join('+');
+  const grp=[['Clinker',['clinker','ITORI  -SHG']],['Gypsum — Adumbu → Ewekoro',['ADUNMBU-EWK']],['Gypsum — Adumbu → Sagamu',['ADUNMBU-SHAGAMU']],['Gypsum — Apapa → Ewekoro',['APP-EWEK']],['Gypsum — Apapa → Sagamu',['APP-SHAGAMU']]];
+  const rowsX=[]; let r=1; const line=(cells,ht)=>{ rowsX.push(`<row r="${r}"${ht?` ht="${ht}" customHeight="1"`:''}>${cells}</row>`); r++; };
+  line(str(1,0,'FLEETDESK — TRANSPORT SUMMARY',7)); line(str(2,0,'This page fills itself from the route tabs — type nothing here unless you want a different week or month (change the two dates). Enter trips on the route tabs (one row per trip, date on every row).',0));
+  r=4; line(str(4,0,'Week starting (Monday)',3)+fx(4,1,'TODAY()-WEEKDAY(TODAY(),3)-7',2)+str(4,2,'Week ending',3)+fx(4,3,'B4+6',2)+str(4,4,'Week before starts',3)+fx(4,5,'B4-7',2));
+  line(str(5,0,'Month starting',3)+fx(5,1,'DATE(YEAR(TODAY()),MONTH(TODAY()),1)',2)+str(5,2,'Month ending',3)+fx(5,3,'EOMONTH(B5,0)',2));
+  r=7; line(str(7,0,'Tonnage by material & route',6));
+  line(['Material / route','Weekly trips','Weekly MT','Week before MT','Weekly change MT','Monthly trips','Monthly MT','All-time trips','All-time MT (so far)'].map((h,i)=>str(8,i,h,1)).join(''),32);
+  const rowFor=(label,tabs,rr,st)=>{ const lbl=st?13:3, nstyle=st?10:5, istyle=st?9:4; line(str(rr,0,label,lbl)+fx(rr,1,tripF(tabs,'$B$4','$D$4'),istyle)+fx(rr,2,tonF(tabs,'$B$4','$D$4'),nstyle)+fx(rr,3,tonF(tabs,'$F$4','$B$4-1'),nstyle)+fx(rr,4,`C${rr}-D${rr}`,nstyle)+fx(rr,5,tripF(tabs,'$B$5','$D$5'),istyle)+fx(rr,6,tonF(tabs,'$B$5','$D$5'),nstyle)+fx(rr,7,tripF(tabs,null),istyle)+fx(rr,8,tonF(tabs,null),nstyle)); };
+  grp.forEach((g,i)=>rowFor(g[0],g[1],9+i,false));
+  const sumRow=(label,rr,from,to)=>line(str(rr,0,label,13)+[1,2,3,4,5,6,7,8].map(c=>fx(rr,c,`SUM(${xlCol(c)}${from}:${xlCol(c)}${to})`,(c===1||c===5||c===7)?9:10)).join(''));
+  sumRow('Total gypsum delivered',14,10,13);
+  rowFor('East deliveries',['EAST'],15,false); rowFor('Other (Slough, Igbesa)',['SLOUGH','IGBESA'],16,false);
+  line(str(17,0,'All routes',13)+[1,2,3,4,5,6,7,8].map(c=>fx(17,c,`${xlCol(c)}9+${xlCol(c)}14+${xlCol(c)}15+${xlCol(c)}16`,(c===1||c===5||c===7)?9:10)).join(''));
+  r=19; line(str(19,0,'Gypsum delivered by vessel (all time) — add vessel names on the Lists sheet',6));
+  line(['Vessel','Adumbu → Ewekoro','Adumbu → Sagamu','Apapa → Ewekoro','Apapa → Sagamu','Total MT','Trips'].map((h,i)=>str(20,i,h,1)).join(''),32);
+  const gtabs=['ADUNMBU-EWK','ADUNMBU-SHAGAMU','APP-EWEK','APP-SHAGAMU'];
+  for(let i=0;i<20;i++){ const rr=21+i; const vt=t=>`SUMIFS(${rg(t,'tonA')},${rg(t,'vessel')},$A${rr})`; const vtr=t=>`SUMIFS(${rg(t,'tripsA')},${rg(t,'vessel')},$A${rr})+COUNTIFS(${rg(t,'vessel')},$A${rr},${rg(t,'tripsA')},"",${rg(t,'truck')},"<>")`;
+    line(fx(rr,0,`IF(Lists!E${i+2}="","",Lists!E${i+2})`,3)+gtabs.map((t,j)=>fx(rr,1+j,`IF($A${rr}="","",${vt(t)})`,5)).join('')+fx(rr,5,`IF($A${rr}="","",SUM(B${rr}:E${rr}))`,10)+fx(rr,6,`IF($A${rr}="","",${gtabs.map(vtr).join('+')})`,4)); }
+  line(str(41,0,'No vessel recorded',13)+[1,2,3,4].map(c=>fx(41,c,`${tonF([gtabs[c-1]],null)}-SUM(${xlCol(c)}21:${xlCol(c)}40)`,10)).join('')+fx(41,5,'SUM(B41:E41)',10));
+  const sumSheet=`${hdr}<sheetViews><sheetView workbookViewId="0" tabSelected="1"/></sheetViews><cols><col min="1" max="1" width="40" customWidth="1"/><col min="2" max="9" width="18" customWidth="1"/></cols><sheetData>${rowsX.join('')}</sheetData></worksheet>`;
+  get('xl/worksheets/sheet1.xml').data=sumSheet;
+  /* ---- Lists ---- */
+  const nL=Math.max(trucks.length,routes.length,mats.length,drivers.length,vessels.length,1); let lr=`<row r="1">${['Trucks','Routes','Materials','Drivers','Vessels'].map((h,i)=>str(1,i,h,6)).join('')}</row>`;
+  for(let i=0;i<nL;i++) lr+=`<row r="${i+2}">${[trucks,routes,mats,drivers,vessels].map((a,c)=>a[i]?str(i+2,c,a[i]):'').join('')}</row>`;
+  get('xl/worksheets/sheet2.xml').data=`${hdr}<cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="2" width="40" customWidth="1"/><col min="3" max="3" width="20" customWidth="1"/><col min="4" max="5" width="24" customWidth="1"/></cols><sheetData>${lr}</sheetData></worksheet>`;
+  /* ---- KPI presets ---- */
+  const Lr=[]; let pr=1; const row=cells=>{ Lr.push(`<row r="${pr}">${cells}</row>`); pr++; };
+  row(str(pr,0,'KPI PRESETS — what each tab feeds in FleetDesk',7)); row(str(pr,0,'Section A is read on upload (you may change columns B and C). Section C is for reference — change targets in FleetDesk → Settings.',0)); pr++;
+  row(['A. Tab name','FleetDesk route','Material','What one row means','Trips/day target','Turnaround target (hrs)'].map((h,i)=>str(pr,i,h,1)).join(''));
+  const aStart=pr; TAB_SPECS.forEach(s=>{ const rt=ROUTES[s.route]; row(str(pr,0,s.tab)+str(pr,1,rt.label)+str(pr,2,s.material)+str(pr,3,s.means)+str(pr,4,rt.tripsPerDayTarget?String(rt.tripsPerDayTarget):'—')+str(pr,5,rt.durationTargetHrs?String(rt.durationTargetHrs):'—')); }); const aEnd=pr-1; pr++;
+  row(str(pr,0,'B. Truck short names (only trucks that could not be matched automatically)',6));
+  row(['Name as written in the tabs','Registry truck (pick)','','Why it needs you'].map((h,i)=>str(pr,i,h,1)).join('')); for(let i=0;i<10;i++) row('');
+  pr++; row(str(pr,0,'C. KPIs already set in FleetDesk (for reference)',6)); row(['KPI','Target','','Applies to'].map((h,i)=>str(pr,i,h,1)).join(''));
+  const T=STATE.targets||{}; const rtl=k=>ROUTES[k].tripsPerDayTarget+' trip'+(ROUTES[k].tripsPerDayTarget===1?'':'s')+'/day ('+ROUTES[k].durationTargetHrs+' hrs)';
+  [['Clinker — per truck',rtl('clinker'),'clinker, ITORI  -SHG'],['Gypsum Apapa → Ewekoro',rtl('gypsum_ewekoro'),'APP-EWEK'],['Gypsum Apapa → Sagamu',rtl('gypsum_sagamu'),'APP-SHAGAMU'],['Gypsum Adumbu → Ewekoro',rtl('gypsum_adumbu'),'ADUNMBU-EWK'],['Gypsum Adumbu → Sagamu','no target set yet','ADUNMBU-SHAGAMU'],['East deliveries','no daily target','EAST'],['Tonnage per trip',(T.tonnagePerTripTarget||30)+' MT','Tonnage target = trips target × this'],['Turnaround target',(T.turnaroundTargetHrs||6)+' hrs','Where a route has no duration target'],['Transit target',(T.transitTargetHrs||4)+' hrs',''],['On-time delivery',Math.round((T.onTimeTarget||0.95)*100)+'%','']].forEach(x=>row(str(pr,0,x[0])+str(pr,1,x[1])+str(pr,3,x[2])));
+  sheets.push(['KPI Presets',`${hdr}<cols><col min="1" max="1" width="34" customWidth="1"/><col min="2" max="2" width="40" customWidth="1"/><col min="3" max="3" width="18" customWidth="1"/><col min="4" max="4" width="46" customWidth="1"/><col min="5" max="6" width="20" customWidth="1"/></cols><sheetData>${Lr.join('')}</sheetData><dataValidations count="2"><dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="B${aStart+1}:B${aEnd}"><formula1>Lists!$B$2:$B$${routes.length+1}</formula1></dataValidation><dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="B${aEnd+5}:B${aEnd+14}"><formula1>OFFSET(Lists!$A$2,0,0,MAX(1,COUNTA(Lists!$A$2:$A$200)),1)</formula1></dataValidation></dataValidations></worksheet>`]);
+  const help=['FLEETDESK — TRANSPORT SUMMARY + CLINKER / GYPSUM / EAST ROUTE TABS','',
+    'HOW IT WORKS:',
+    '1. Each route tab keeps its own columns and also has the Transport Entries headings (Driver Name, Route, Material, Trips Target/Actual, Tonnage Target/Actual, Turnaround, Transit, Vessel Name). Where a tab already had the column (Date, Truck, Weight/Tonnage, Driver) that column is used.',
+    '2. One row = one trip. Put the date on EVERY row (copy it down). Trips Actual may be left blank — it counts as 1 trip.',
+    '3. Truck and Driver cells have drop-downs (from the Lists sheet), but you can also TYPE any truck number or driver name. To add one to the drop-down permanently, add it on the Lists sheet.',
+    '4. Gypsum rows: type the Vessel Name (drop-down from Lists, or type a new one). The Transport Entries page then shows gypsum per vessel.',
+    '5. The "Transport Entries" sheet is now a SUMMARY. It reads every route tab: weekly and monthly tonnage by route, total gypsum delivered so far, east deliveries, and gypsum by vessel. Do not type in it except the two period dates at the top (defaults: previous week, current month).',
+    '6. Leave Target / Turnaround / Transit blank to use the route presets on the KPI Presets sheet.','',
+    'UPLOAD: FleetDesk → Transport Ops → "Upload filled template". You see a preview first; nothing is saved until you confirm. Rows already in FleetDesk (same date + truck + route) are skipped unless you tick "Replace existing entries".',
+    'Trucks written short (e.g. "AKM 285") are matched to the registry when only one truck fits; otherwise they are saved as typed and flagged in the preview.',
+    'Do not rename the tabs or the column headings. SUM/total rows at the bottom of a tab are ignored.'];
   get('xl/worksheets/sheet3.xml').data=`${hdr}<cols><col min="1" max="1" width="125" customWidth="1"/></cols><sheetData>${help.map((t,i)=>t?`<row r="${i+1}">${str(i+1,0,t,i===0?7:8)}</row>`:'').join('')}</sheetData></worksheet>`;
-  // register the new parts
-  let ct='',rl='',nm=[]; sheets.forEach((s,i)=>{ const fn=4+i, rid=5+i; files.push({name:'xl/worksheets/sheet'+fn+'.xml',data:s[1]});
+  let ct='',rl=''; sheets.forEach((s,i)=>{ const fn=4+i, rid=5+i; files.push({name:'xl/worksheets/sheet'+fn+'.xml',data:s[1]});
     ct+=`<Override PartName="/xl/worksheets/sheet${fn}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
     rl+=`<Relationship Id="rId${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${fn}.xml"/>`; s.push(rid); });
   const c=get('[Content_Types].xml'); c.data=c.data.replace('</Types>',ct+'</Types>');
@@ -5688,24 +5824,31 @@ function addRouteTabs(files){
   const byName={}; sheets.forEach(s=>{ byName[s[0]]=s[2]; });
   const tag=(name,rid,id)=>`<sheet name="${xmlEsc(name)}" sheetId="${id}" r:id="rId${rid}"/>`;
   let id=10; const list=[tag('Transport Entries',1,1)].concat(TAB_SPECS.map(s=>tag(s.tab,byName[s.tab],id++)),[tag('Lists',2,2),tag('How to use',3,3),tag('KPI Presets',byName['KPI Presets'],id++)]);
-  const wb=get('xl/workbook.xml'); wb.data=wb.data.replace(/<sheets>[\s\S]*?<\/sheets>/,'<sheets>'+list.join('')+'</sheets>');
+  const wb=get('xl/workbook.xml'); wb.data=wb.data.replace(/<sheets>[\s\S]*?<\/sheets>/,'<sheets>'+list.join('')+'</sheets>').replace('</sheets>','</sheets><calcPr fullCalcOnLoad="1"/>');
   return files;
 }
 
-/* ===== one-time data seed: October 2026 clinker / gypsum report (applied once to the shared sheet) ===== */
+/* ===== one-time data seeds ===== */
 const SEEDS={oct26:{"names":["clinker","APP-EWEK","APP-SHAGAMU","ADUNMBU-EWK","ITORI  -SHG","SLOUGH","EAST","IGBESA"],"sheets":{"clinker":[["TRUCK NO.","DATE","","","","","","","","","","WEIGHT","",""]],"APP-EWEK":[["TRUCK NUMBER ","DATE","TONNAGE","DRIVER NAME"],["AKM 285","2026-10-03",52.88,"julius"],["AKM 286","",50.06,"raimi"],["AKM 290","",51.74,"ayinde"],["AKM 848","",48.92,"ahmed"],["AKM 851","",53.04,"silas"],["AKM 854","",52.56,"okiki"],["T562","",49.48,"zubeiru"],["AKM 291","",46.5,""],["AKM 628","",45,""],["AKM 288","",44,""],["AKM 854","2026-10-04",49.58,""],["AKM 852","",47.52,""],["AKM 851","",51.44,""],["AKM 849","",51.4,""],["AKM 289","",48.02,""],["AKM 286","",52.24,""],["AKM 285","2026-10-06",44.58,""],["AKM 291","",46.76,""],["AKM 284","",47.38,""],["AKM 290","",48.74,""],["AKM 628","",47.86,""],["AKM 851","",50.94,""],["AKM 562","",50.64,""],["AKM 848","",44.7,""],["AKM 286","",51.18,""],["AKM 854","",50.14,""],["AKM 850","",46.64,""],["AKM 562","2026-10-08",41.52,""],["AKM 852","",37.7,""],["AKM 291","",48.58,""],["AKM 289","",50.8,""],["AKM 283","",43.86,""],["AKM 851","",49.14,""],["AKM 850","2026-10-09",42.84,""],["AKM 285","",42.26,""],["AKM 854","",47.06,""],["AKM 628","",38.16,""],["AKM 286","",47.5,""],["AKM 290","",48.38,""],["AKM 288","",49.76,""],["AKM 848","2026-10-11",50.98,""],["AKM 283","",46.36,""],["AKM 851","",45.12,""],["AKM 854","",46.16,""],["AKM 286","",48.26,""],["AKM 291","",44.74,""],["AKM 562","",47.74,""],["AKM 285","",45.22,""],["AKM 850","",47.1,""],["AKM 292","",49.42,""],["AKM 852","","",""],["AKM 562","2026-10-20",46.68,""],["AKM 854","",51.08,""],["AKM 291","",47.78,""],["AKM 283","",54.62,""],["AKM 851","",52.78,""],["","","=SUM(C2:C57)",""]],"APP-SHAGAMU":[["TRUCK NO","DATE","WEIGHT"],["AKM 854","2026-10-12",45.72],["AKM 851","",48.18],["AKM 283","",45.88],["AKM 291","",47.48],["AKM 562","",47.4],["","","=SUM(C2:C6)"]],"ADUNMBU-EWK":[["TRUCK NO","DATE","WEIGHT",""],["AKM 288","2026-10-01",42,""],["AKM 288","",46.54,""],["AKM 288","",44.2,""],["AKM 286","",45.1,""],["AKM 286","",47.74,""],["AKM 286","",44.3,""],["AKM 562","",48.8,""],["AKM 562","",43.4,""],["AKM 562","",47.26,""],["AKM 290","",42.42,""],["AKM 290","",40.64,""],["AKM 290","",46.38,""],["AKM 291","",46.08,""],["AKM 291","",42.44,""],["AKM 291","",45.24,""],["AKM 848","",44.82,""],["AKM 848","",42.9,""],["AKM 848","",53.02,""],["AKM 285","",47.08,""],["AKM 285","",44.32,""],["AKM 285","",47.48,""],["AKM 849","",44.7,""],["AKM 849","",39.26,""],["AKM 849","",44.94,""],["AKM 854","",41.3,""],["AKM 854","",40.4,""],["AKM 854","",45.16,""],["AKM 851","",38.72,""],["AKM 849","2026-10-02",43.96,""],["AKM 849","",42.56,""],["AKM 289","",42.94,""],["AKM 289","",45.94,""],["AKM 286","2026-10-03",52.68,""],["AKM 286","",53.48,""],["AKM 849","",49.58,""],["AKM 849","",51.02,""],["AKM 849","",44.56,""],["AKM 854","",48.88,""],["AKM 854","",52.56,""],["AKM 851","",47,""],["AKM 851","",48.54,""],["AKM 291","",51.26,""],["AKM 849","2026-10-05",46.48,""],["AKM 854","",49,""],["AKM 628","",51.78,""],["AKM 291","",42.52,""],["AKM 285","2026-10-07",48,""],["AKM 285","",44.72,""],["AKM 285","",46.2,""],["AKM 286","",52.5,""],["AKM 289","",46.52,""],["AKM 289","",45.52,""],["AKM 289","",47.74,""],["AKM 562","",46.2,""],["AKM 628","",42.18,""],["AKM 628","",45.9,""],["AKM 848","",40.12,""],["AKM 848","",42.36,""],["AKM 849","",51.5,""],["AKM 849","",41.48,""],["AKM 849","",44.04,""],["AKM 849","",48.16,""],["AKM 850","",45.66,""],["AKM 851","",49.44,""],["AKM 851","",44.12,""],["AKM 851","",46.52,""],["AKM 854","",47.06,""],["AKM 854","",47.34,""],["AKM 854","",44.04,""],["AKM 854","",46.98,""],["AKM 849","2026-10-09",48.26,""],["AKM 849","",51.5,""],["AKM 848","",45.5,""],["AKM 850","",43.14,""],["AKM 291","",40.42,""],["AKM 283","",44.68,""],["AKM 851","",47.8,""],["AKM 849","2026-10-10",49.42,""],["AKM 291","",45.04,""],["AKM 851","",49.1,""],["AKM 283","",50.86,""],["AKM285XG","2026-10-11","",""],["AKM851ZX","",45.12,""],[" AKM291XG","",44.74,""],["AKM286XG","",48.26,""],["AKM850ZX","",47.1,""],["AKM283XG","",46.36,""],["AKM854ZX","",46.16,""],["T27562LA","",47.74,""],["AKM848ZX","",50.98,""],["AKM292XG","",49.42,""],["AKM852ZX","","",""],["AKM 854","2026-10-12",44.06,""],["AKM 854","",47.26,""],["AKM 851","",46.26,""],["AKM 848","",53.62,""],["AKM 283","",43.8,""],["","","=SUM(C2:C98)",""]],"ITORI  -SHG":[["TRUCK NO","DATE","WEIGHT",""],["AKM 283","2026-10-14",43.74,""],["AKM 284","",38.92,""],["AKM 285","",41.84,""],["AKM 286","",39.94,""],["AKM 291","",34.42,""],["AKM 562","",38.7,""],["AKM 848","",39.18,""],["AKM 851","",36.88,""],["AKM 854","",39.16,""],["AKM 283","2026-10-15",40.2,""],["AKM 284","",40.22,""],["AKM 285","",33.98,""],["AKM 286","",35.72,""],["AKM 288","",34.16,""],["AKM 289","",36.16,""],["AKM 290","",38.62,""],["AKM 291","",42.68,""],["AKM 292","",40.56,""],["AKM 628","",37.66,""],["AKM 848","",40.2,""],["AKM 853","",32.74,""],["AKM 854","",37.6,""],["","2026-10-16","","RTSS"],["AKM 288","2026-10-17",43.8,""],["AKM 292","",41.44,""],["AKM 628","",42.63,""],["AKM 286","",43.02,""],["AKM 289","",44.26,""],["AKM 848","",40.08,""],["AKM 285","",42.2,""],["AKM 284","",44.18,""],["AKM 290","",40.16,""],["AKM 853","",42.26,""],["AKM 562","",40.3,""],["AKM 850","2026-10-18",40.5,""],["AKM 289","",45.4,""],["AKM 286","",43.18,""],["AKM 854","",47.82,""],["AKM 285","",51.84,""],["AKM 290","",40.38,""],["AKM 284","",43.62,""],["AKM 851","",43.58,""],["AKM 283","",51.7,""],["AKM 291","",46.02,""],["AKM 853","",42.18,""],["AKM 628","",45.2,""],["AKM 285","2026-10-19",49.02,""],["AKM 289","",48.14,""],["AKM 290","",47.12,1],["AKM 288","",40.02,""],["AKM 849","",48.9,""],["AKM 850","",46.8,""],["AKM 853","",45.12,""],["AKM 284","",46.24,""],["AKM 290","",49.04,2],["AKM 628","",48.8,1],["AKM 628","",41.94,2],["AKM 286","",39.84,""],["AKM 850","2026-10-20",46.72,""],["AKM 853","",48.46,1],["AKM 849","",39.46,1],["AKM 283","",47.78,""],["AKM 286","",47.46,1],["AKM 289","",45.02,""],["AKM 285","",48.34,""],["AKM 288","",48.6,""],["AKM 849","",43.7,2],["AKM 853","",46.38,2],["AKM 286","",46.22,2],["AKM 851","",50.12,""],["AKM 562","",45.3,""],["AKM 291","",39.32,""]],"SLOUGH":[["TRUCK NO","DATE"],["AKM 290","2026-10-11"],["AKM 284","2024-10-11"],["",""],["AKM 850","2026-10-20"],["AKM 284",""],["AKM 292",""]],"EAST":[["TRUCK DETAILS","LOADING LOCATION","MATERIAL","LOADING DATE","TAKEOFF DATE","ARRIVAL DATE","OFFLOADED DATE","OFFLOADING LOCATION","","BACKHAUL DESTINATION","MATERIAL","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""," EXTRA BACKHAUL DESTINATION","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""],["T23639LA","SHAGAMU","ANIMAL FEEDS","2026-10-05","2026-10-06","2026-10-08","2026-10-09","PHC","","PHC","FLOUR","2026-10-10","2026-10-10","","","","","","",""],["T23640LA","OGERE","ANIMAL FEEDS","2026-10-08","2026-10-09","","","UYO","","","","","","","","","","","",""],["T23641LA","SHAGAMU","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""],["T23642LA","IBADAN","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""]],"IGBESA":[["TRUCK NO","DRIVER","DESTINATION","LOADING DATE","OFFLOADING DATE"]]}}};
 async function applySeeds(){
-  if(!SEEDS.oct26||typeof XLSX==='undefined') return;
-  const done=STATE.data.seeds||{}; if(done.oct26||!(STATE.data.vehicles||[]).length) return;
-  const keep=window.XLSX; window.XLSX={utils:{sheet_to_json:ws=>ws},SSF:keep&&keep.SSF};
-  let out; try{ out=parseRouteTabs({SheetNames:SEEDS.oct26.names,Sheets:SEEDS.oct26.sheets},[]); } finally{ window.XLSX=keep; }
-  const add=out.rows.filter(r=>r.state==='ok').map(r=>{
-    const rec={id:uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),notes:r.notes||'',driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
-    Object.keys(rec).forEach(k=>{ if(typeof rec[k]==='number') rec[k]=String(rec[k]); }); return compactRec(rec); });
-  STATE.data.seeds=Object.assign({},done,{oct26:{at:new Date().toISOString(),added:add.length}});
-  if(add.length){ STATE.data.transport=[...STATE.data.transport,...add]; await persist('transport'); }
-  await persist('seeds');
-  showToast('October clinker/gypsum report loaded: '+add.length+' transport entries added.');
+  if(typeof XLSX==='undefined'||!(STATE.data.vehicles||[]).length) return;
+  const done=STATE.data.seeds||{}; let changed=false;
+  if(SEEDS.oct26&&!done.oct26){
+    const keep=window.XLSX; window.XLSX={utils:{sheet_to_json:ws=>ws},SSF:keep&&keep.SSF};
+    let out; try{ out=parseRouteTabs({SheetNames:SEEDS.oct26.names,Sheets:SEEDS.oct26.sheets},[]); } finally{ window.XLSX=keep; }
+    const add=out.rows.filter(r=>r.state==='ok').map(r=>{
+      const rec={id:uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),notes:r.notes||'',destination:r.destination||'',driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
+      Object.keys(rec).forEach(k=>{ if(typeof rec[k]==='number') rec[k]=String(rec[k]); }); return compactRec(rec); });
+    STATE.data.seeds=Object.assign({},STATE.data.seeds||{},{oct26:{at:new Date().toISOString(),added:add.length}});
+    if(add.length){ STATE.data.transport=[...STATE.data.transport,...add]; await persist('transport'); }
+    await persist('seeds'); changed=true;
+    showToast('October clinker/gypsum report loaded: '+add.length+' transport entries added.');
+  }
+  if(!(STATE.data.seeds||{}).eastfix){          // earlier East entries were saved as "Other"; move them to East Deliveries
+    let n=0; (STATE.data.transport||[]).forEach(r=>{ if(r.route==='other'&&/route tab EAST/i.test(r.notes||'')){ r.route='east'; n++; const d=(String(r.notes).match(/ — to (.+)$/)||[])[1]; if(d&&!r.destination) r.destination=d; } });
+    STATE.data.seeds=Object.assign({},STATE.data.seeds||{},{eastfix:{at:new Date().toISOString(),moved:n}});
+    if(n) await persist('transport'); await persist('seeds');
+  }
 }
 
 loadAll();
