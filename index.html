@@ -2838,7 +2838,7 @@ function renderSettingsModal(){
 /* ---------------- shell / nav ---------------- */
 const NAV = [
   ['summary','Summary'], ['daily','Daily Inputs'], ['transport','Transport Ops'], ['journey','Journey Mgmt'],
-  ['inspections','Inspections'], ['port','Port Files'], ['safety','Safety (HSE)'], ['maintenance','Maintenance'], ['costkm','Cost per KM'], ['fuel','Fuel & Deliveries'],
+  ['inspections','Inspections'], ['live','Live Map'], ['port','Port Files'], ['safety','Safety (HSE)'], ['maintenance','Maintenance'], ['costkm','Cost per KM'], ['fuel','Fuel & Deliveries'],
   ['reports','Weekly Report'], ['monthly','Monthly Report'], ['archive','Report Folders'],
 ];
 function criticalBadgeFor(key){
@@ -2860,7 +2860,7 @@ function renderShell(){
       ${STATE.connectionError? `<div class="tag red" style="display:block;margin-top:8px;padding:8px 10px;white-space:normal;line-height:1.4;">${STATE.connectionError}</div>` : ''}
     </aside>
     <main id="main">
-      ${STATE.tab==='summary'?renderSummary(): STATE.tab==='daily'?renderDailyInputs(): STATE.tab==='journey'?renderJourneyPage(): STATE.tab==='inspections'?renderInspectionsPage(): STATE.tab==='maintenance'?regDupCard()+renderMaintenancePage(): STATE.tab==='costkm'?renderCostKmPage(): STATE.tab==='fuel'?renderFuelPage(): STATE.tab==='reports'?renderReportsPage(): STATE.tab==='monthly'?renderMonthlyPage(): STATE.tab==='archive'?renderArchivePage(): STATE.tab==='port'?renderPortPage(): (STATE.tab==='transport'?regDupCard():'')+renderDeptPage(STATE.tab)}
+      ${STATE.tab==='summary'?renderSummary(): STATE.tab==='daily'?renderDailyInputs(): STATE.tab==='journey'?renderJourneyPage(): STATE.tab==='inspections'?renderInspectionsPage(): STATE.tab==='maintenance'?regDupCard()+renderMaintenancePage(): STATE.tab==='costkm'?renderCostKmPage(): STATE.tab==='fuel'?renderFuelPage(): STATE.tab==='reports'?renderReportsPage(): STATE.tab==='monthly'?renderMonthlyPage(): STATE.tab==='archive'?renderArchivePage(): STATE.tab==='live'?renderLivePage(): STATE.tab==='port'?renderPortPage(): (STATE.tab==='transport'?regDupCard():'')+renderDeptPage(STATE.tab)}
     </main>
   </div>
   ${renderSettingsModal()}
@@ -3118,7 +3118,7 @@ function attachEvents(){
   attachEventsV10(app);
 }
 
-const NAV_GROUP = {summary:'Overview', daily:'Overview', transport:'Operations', journey:'Operations', inspections:'Operations', port:'Operations', safety:'Safety & Maintenance', maintenance:'Safety & Maintenance', costkm:'Fuel & Costs', fuel:'Fuel & Costs', reports:'Reports', monthly:'Reports', archive:'Reports'};
+const NAV_GROUP = {summary:'Overview', daily:'Overview', transport:'Operations', journey:'Operations', inspections:'Operations', port:'Operations', live:'Operations', safety:'Safety & Maintenance', maintenance:'Safety & Maintenance', costkm:'Fuel & Costs', fuel:'Fuel & Costs', reports:'Reports', monthly:'Reports', archive:'Reports'};
 function navHTML(badgeCounts){
   let last='';
   return NAV.map(([k,l])=>{ const g=NAV_GROUP[k]||''; const head=(g&&g!==last)?`<div class="navgroup">${g.replace('&','&amp;')}</div>`:''; last=g||last;
@@ -5352,8 +5352,8 @@ function attachPortEvents(app){
    last completed week, install-to-home-screen, service worker.
    ========================================================================================= */
 
-const NAV_ICON = {summary:'🏠',daily:'📝',transport:'🚚',journey:'🧭',inspections:'🔍',port:'🚢',safety:'🦺',maintenance:'🔧',costkm:'💲',fuel:'⛽',reports:'📅',monthly:'🗓️',archive:'📁'};
-const NAV_LABEL = {summary:'Summary',daily:'Daily Inputs',transport:'Transport Ops',journey:'Journey Mgmt',inspections:'Inspections',port:'Port Files',safety:'Safety (HSE)',maintenance:'Maintenance',costkm:'Cost per KM',fuel:'Fuel & Deliveries',reports:'Weekly Report',monthly:'Monthly Report',archive:'Report Folders'};
+const NAV_ICON = {summary:'🏠',daily:'📝',transport:'🚚',live:'📍',journey:'🧭',inspections:'🔍',port:'🚢',safety:'🦺',maintenance:'🔧',costkm:'💲',fuel:'⛽',reports:'📅',monthly:'🗓️',archive:'📁'};
+const NAV_LABEL = {summary:'Summary',daily:'Daily Inputs',transport:'Transport Ops',live:'Live Map',journey:'Journey Mgmt',inspections:'Inspections',port:'Port Files',safety:'Safety (HSE)',maintenance:'Maintenance',costkm:'Cost per KM',fuel:'Fuel & Deliveries',reports:'Weekly Report',monthly:'Monthly Report',archive:'Report Folders'};
 const NAV_BOTTOM = ['summary','daily','maintenance','reports'];   // + "More"
 
 /* ---------- desktop sidebar ---------- */
@@ -5422,6 +5422,7 @@ function attachEventsV10(app){
   attachReportEvents(app);
   attachPortEvents(app);
   attachBulkExtras(app);
+  attachLiveEvents(app);
   app.querySelectorAll('[data-more-toggle]').forEach(b=>b.addEventListener('click',()=>{ STATE.moreOpen=!STATE.moreOpen; render(); }));
   app.querySelectorAll('[data-more-close]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el){ STATE.moreOpen=false; render(); } }));
   app.querySelectorAll('[data-m-refresh]').forEach(b=>b.addEventListener('click',async()=>{ STATE.moreOpen=false; await loadAll(); showToast('Refreshed from shared storage.'); }));
@@ -5432,7 +5433,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.4 · 22 Oct 2026 19:53';
+const APP_VERSION='v10.4 · 22 Oct 2026 20:27';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5850,6 +5851,70 @@ async function applySeeds(){
     if(n) await persist('transport'); await persist('seeds');
   }
 }
+
+/* ============================================================ live.js ============================================================ */
+/* ===== Live Map: current truck positions from the MiX Telematics feed (via the Google Apps Script backend) ===== */
+STATE.live=STATE.live||{status:'idle',rows:[],at:null,msg:'',busy:false};
+let LIVE_TIMER=null, LIVE_MAP=null;
+function liveAge(ts){ const t=Date.parse(ts); return isNaN(t)?null:(Date.now()-t)/60000; }
+function liveStatus(p){ const a=liveAge(p.ts); if(a===null) return {k:'grey',t:'No time'}; if(a<=30) return num(p.speed)>=5?{k:'green',t:'Moving'}:{k:'amber',t:'Stopped / idle'}; if(a<=360) return {k:'amber',t:'No signal 30m+'}; return {k:'red',t:'Offline'}; }
+function liveAgo(ts){ const a=liveAge(ts); if(a===null) return '—'; if(a<1) return 'just now'; if(a<60) return Math.round(a)+' min ago'; if(a<1440) return Math.round(a/60)+' h ago'; return Math.round(a/1440)+' d ago'; }
+async function fetchLive(manual){
+  if(!GAS_CONFIGURED) return; const L=STATE.live; if(L.busy) return; L.busy=true; if(manual||!L.rows.length){ L.status='loading'; if(STATE.tab==='live') render(); }
+  try{
+    const res=await fetch(`${GAS_URL}?action=positions&_=${Date.now()}`); const txt=await res.text(); let j=null; try{ j=JSON.parse(txt); }catch(e){}
+    if(j&&j.ok&&Array.isArray(j.positions)){ L.rows=j.positions; L.at=j.at||new Date().toISOString(); L.status='ok'; L.msg=''; }
+    else if(j&&j.ok===false){ L.status='error'; L.msg=String(j.error||'The tracking feed returned an error.'); }
+    else { L.status='notset'; L.msg=''; }
+  }catch(e){ L.status='error'; L.msg='Could not reach the backend: '+(e&&e.message?e.message:e); }
+  L.busy=false; if(STATE.tab==='live') render();
+}
+function liveRows(){
+  return (STATE.live.rows||[]).map(p=>{ const m=matchTruck(p.reg||p.name||''); const v=m.v; const key=v?v.id:('~'+normReg(p.reg||p.name));
+    return Object.assign({},p,{label:v?v.regNo:String(p.reg||p.name||'—').toUpperCase(),inReg:!!v,st:liveStatus(p),driver:lastDriverOf(key)||''}); })
+    .sort((a,b)=>({green:0,amber:1,red:2,grey:3})[a.st.k]-({green:0,amber:1,red:2,grey:3})[b.st.k]||String(a.label).localeCompare(String(b.label),undefined,{numeric:true}));
+}
+function renderLivePage(){
+  const L=STATE.live; const rows=liveRows(); const c={green:0,amber:0,red:0};
+  rows.forEach(r=>{ if(c[r.st.k]!==undefined) c[r.st.k]++; });
+  const reg=(STATE.data.vehicles||[]); const seen={}; rows.forEach(r=>{ if(r.inReg) seen[normReg(r.label)]=1; });
+  const missing=reg.filter(v=>!seen[normReg(v.regNo)]);
+  const setup=`<div class="card" style="border-left:3px solid var(--amber);"><div style="font-weight:600;">Live tracking is not connected yet</div>
+    <div class="dim small" style="margin-top:6px;line-height:1.7;">This page shows where every truck is right now, straight from MiX Telematics. It needs a one-time set-up on the shared spreadsheet’s script:<br>
+    1. Ask MiX support (Support SR) for a <b>MiX Integrate Client Id &amp; Secret</b> — data centre <b>ZA</b>. Save the secret when it is shown, it cannot be shown again.<br>
+    2. Open the FleetDesk script (Google Sheet → Extensions → Apps Script). Paste the supplied <b>FleetDesk_MiX_Positions.gs</b> code and follow the 3 lines at its top.<br>
+    3. Add your MiX login, Client Id/Secret and group id in <i>Project Settings → Script properties</i>, then deploy a new version of the web app.<br>
+    Then press “Refresh now” — the trucks appear here.</div></div>`;
+  const body=L.status==='notset'?setup:(L.status==='error'?`<div class="note warn">${esc(L.msg)}</div>${setup}`:(!rows.length?`<div class="card dim" style="padding:22px;text-align:center;">${L.status==='loading'?'Loading positions…':'No positions yet — press Refresh now.'}</div>`:`
+    <div class="grid cols-3" style="margin-bottom:12px;"><div class="card kpi"><div class="label">Moving</div><div class="value" style="color:var(--green);">${c.green}</div></div><div class="card kpi"><div class="label">Stopped / no recent signal</div><div class="value" style="color:var(--amber);">${c.amber}</div></div><div class="card kpi"><div class="label">Offline (6h+)</div><div class="value" style="color:${c.red?'var(--red)':'var(--dim)'};">${c.red}</div></div></div>
+    <div id="live-map" style="height:380px;border-radius:12px;overflow:hidden;margin-bottom:14px;background:var(--panel2,#111);display:flex;align-items:center;justify-content:center;"><span class="dim small">Loading map…</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Status</th><th>Speed</th><th>Last update</th><th>Position</th><th>Last driver</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.label)}</b>${r.inReg?'':' <span class="tag amber">not in registry</span>'}</td><td><span class="tag ${r.st.k}">${esc(r.st.t)}</span></td><td>${r.speed===undefined||r.speed===null?'—':fmt(num(r.speed))+' km/h'}</td><td>${esc(liveAgo(r.ts))}</td><td>${r.lat!=null&&r.lon!=null?`<a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" rel="noopener" style="color:var(--teal);">${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)}</a>`:'—'}</td><td>${esc(r.driver||'—')}</td></tr>`).join('')}</tbody></table></div>
+    ${missing.length?`<div class="dim small" style="margin-top:8px;">Not seen in the tracking feed: ${esc(missing.map(v=>v.regNo).join(', '))}</div>`:''}`));
+  return `<div class="topbar"><div><h1>Live Map</h1><div class="sub">Current position of every truck, from MiX Telematics. Refreshes every minute while this page is open.</div></div>
+    <div class="topbar-right"><span class="dim small">${L.at?'Updated '+esc(liveAgo(L.at)):''}</span> <button class="btn small" data-live-refresh="1">${L.busy?'Refreshing…':'↻ Refresh now'}</button></div></div>${body}`;
+}
+function loadLeaflet(){
+  if(window.L&&window.L.map) return Promise.resolve(true);
+  if(loadLeaflet.p) return loadLeaflet.p;
+  loadLeaflet.p=new Promise(res=>{ const css=document.createElement('link'); css.rel='stylesheet'; css.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'; document.head.appendChild(css);
+    const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'; s.onload=()=>res(true); s.onerror=()=>{ loadLeaflet.p=null; res(false); }; document.head.appendChild(s); });
+  return loadLeaflet.p;
+}
+async function drawLiveMap(){
+  const el=document.getElementById('live-map'); if(!el) return; const pts=liveRows().filter(r=>r.lat!=null&&r.lon!=null&&!isNaN(r.lat)&&!isNaN(r.lon));
+  const ok=await loadLeaflet(); const el2=document.getElementById('live-map'); if(!el2) return;
+  if(!ok||!pts.length){ el2.innerHTML=`<span class="dim small">${ok?'No positions to show.':'The map could not be loaded (check your connection) — the table below still shows every position.'}</span>`; return; }
+  el2.innerHTML=''; if(LIVE_MAP){ try{ LIVE_MAP.remove(); }catch(e){} }
+  const map=LIVE_MAP=L.map(el2,{scrollWheelZoom:false}); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
+  const col={green:'#3fb950',amber:'#e8a33d',red:'#e1543f',grey:'#8b949e'}; const b=[];
+  pts.forEach(r=>{ const m=L.circleMarker([r.lat,r.lon],{radius:8,color:'#0b0e13',weight:1.5,fillColor:col[r.st.k],fillOpacity:.95}).addTo(map); m.bindPopup(`<b>${esc(r.label)}</b><br>${esc(r.st.t)}${r.speed!=null?' · '+fmt(num(r.speed))+' km/h':''}<br>${esc(liveAgo(r.ts))}${r.driver?'<br>Driver: '+esc(r.driver):''}`); m.bindTooltip(r.label,{direction:'top'}); b.push([r.lat,r.lon]); });
+  map.fitBounds(b,{padding:[30,30],maxZoom:13});
+}
+function attachLiveEvents(app){
+  const b=app.querySelector('[data-live-refresh]'); if(b) b.addEventListener('click',()=>fetchLive(true));
+  if(STATE.tab==='live'){ drawLiveMap(); if(STATE.live.status==='idle') fetchLive(); }
+}
+if(!LIVE_TIMER) LIVE_TIMER=setInterval(()=>{ if(STATE.tab==='live'&&!document.hidden) fetchLive(); },60000);
 
 loadAll();
 </script>
