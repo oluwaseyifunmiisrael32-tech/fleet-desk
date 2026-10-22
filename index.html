@@ -403,7 +403,7 @@
 const STORAGE_KEYS = {
   transport:'vms:transport', journey:'vms:journey', inspections:'vms:inspections',
   pretrip:'vms:pretrip', safety:'vms:safety', vehicles:'vms:vehicles',
-  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', targets:'vms:targets'
+  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', seeds:'vms:seeds', targets:'vms:targets'
 };
 
 // Route definitions per the fleet's fixed daily trip & duration targets.
@@ -444,7 +444,7 @@ const FUEL_CALC_URL = "https://claude.ai/public/artifacts/d45cbde1-5358-4c10-875
 let STATE = {
   loading:true, tab:'summary', maintView:'ops', repairWindow:30, truckDetail:null, transportRoute:'ALL', transportMaterial:'ALL', safetyView:'kpi', hsseTab:'overview', hsseWeek:null, hsseBand:'ALL', driverDetail:null, hsseMsg:null,
   periodByDept:{transport:'lastweek', journey:'lastweek', inspections:'lastweek', safety:'lastweek', maintenance:'lastweek', costkm:'lastweek'},
-  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[] },
+  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{} },
   targets:{...DEFAULT_TARGETS},
   toast:null, settingsOpen:false, syncing:false, lastSync:null, connectionError:null,
   reportWeekEnding: null, reportPreparedBy:'', fuelWeekEnding:null
@@ -547,6 +547,7 @@ async function loadAll(opts){
       dieselTrips: safeParseJSON(json[STORAGE_KEYS.dieselTrips], []),
       portFlags: safeParseJSON(json[STORAGE_KEYS.portFlags], {}),
       portUpdates: safeParseJSON(json[STORAGE_KEYS.portUpdates], []),
+      seeds: safeParseJSON(json[STORAGE_KEYS.seeds], {}),
     };
     normalizeHsseWeeks(newData.hsseScores);
     const newTargets = {...DEFAULT_TARGETS, ...safeParseJSON(json[STORAGE_KEYS.targets], {})};
@@ -555,6 +556,7 @@ async function loadAll(opts){
     STATE.data = newData; STATE.targets = newTargets; STATE.connectionError = null; STATE.pollFails = 0;
     let regChanged = false; try{ regChanged = reconcileServices(); }catch(e){ console.error('reconcile failed', e); }
     if(regChanged) await persist('vehicles');
+    try{ await applySeeds(); }catch(e){ console.error('seed failed', e); }
     if(silent){
       STATE.lastSync = new Date();
       if(changed){ showToast('Updated — new entries from your team are now showing.'); } else touchSyncBadge();
@@ -5420,7 +5422,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.3 · 22 Oct 2026 07:23';
+const APP_VERSION='v10.3 · 22 Oct 2026 07:26';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5688,6 +5690,22 @@ function addRouteTabs(files){
   let id=10; const list=[tag('Transport Entries',1,1)].concat(TAB_SPECS.map(s=>tag(s.tab,byName[s.tab],id++)),[tag('Lists',2,2),tag('How to use',3,3),tag('KPI Presets',byName['KPI Presets'],id++)]);
   const wb=get('xl/workbook.xml'); wb.data=wb.data.replace(/<sheets>[\s\S]*?<\/sheets>/,'<sheets>'+list.join('')+'</sheets>');
   return files;
+}
+
+/* ===== one-time data seed: October 2026 clinker / gypsum report (applied once to the shared sheet) ===== */
+const SEEDS={oct26:{"names":["clinker","APP-EWEK","APP-SHAGAMU","ADUNMBU-EWK","ITORI  -SHG","SLOUGH","EAST","IGBESA"],"sheets":{"clinker":[["TRUCK NO.","DATE","","","","","","","","","","WEIGHT","",""]],"APP-EWEK":[["TRUCK NUMBER ","DATE","TONNAGE","DRIVER NAME"],["AKM 285","2026-10-03",52.88,"julius"],["AKM 286","",50.06,"raimi"],["AKM 290","",51.74,"ayinde"],["AKM 848","",48.92,"ahmed"],["AKM 851","",53.04,"silas"],["AKM 854","",52.56,"okiki"],["T562","",49.48,"zubeiru"],["AKM 291","",46.5,""],["AKM 628","",45,""],["AKM 288","",44,""],["AKM 854","2026-10-04",49.58,""],["AKM 852","",47.52,""],["AKM 851","",51.44,""],["AKM 849","",51.4,""],["AKM 289","",48.02,""],["AKM 286","",52.24,""],["AKM 285","2026-10-06",44.58,""],["AKM 291","",46.76,""],["AKM 284","",47.38,""],["AKM 290","",48.74,""],["AKM 628","",47.86,""],["AKM 851","",50.94,""],["AKM 562","",50.64,""],["AKM 848","",44.7,""],["AKM 286","",51.18,""],["AKM 854","",50.14,""],["AKM 850","",46.64,""],["AKM 562","2026-10-08",41.52,""],["AKM 852","",37.7,""],["AKM 291","",48.58,""],["AKM 289","",50.8,""],["AKM 283","",43.86,""],["AKM 851","",49.14,""],["AKM 850","2026-10-09",42.84,""],["AKM 285","",42.26,""],["AKM 854","",47.06,""],["AKM 628","",38.16,""],["AKM 286","",47.5,""],["AKM 290","",48.38,""],["AKM 288","",49.76,""],["AKM 848","2026-10-11",50.98,""],["AKM 283","",46.36,""],["AKM 851","",45.12,""],["AKM 854","",46.16,""],["AKM 286","",48.26,""],["AKM 291","",44.74,""],["AKM 562","",47.74,""],["AKM 285","",45.22,""],["AKM 850","",47.1,""],["AKM 292","",49.42,""],["AKM 852","","",""],["AKM 562","2026-10-20",46.68,""],["AKM 854","",51.08,""],["AKM 291","",47.78,""],["AKM 283","",54.62,""],["AKM 851","",52.78,""],["","","=SUM(C2:C57)",""]],"APP-SHAGAMU":[["TRUCK NO","DATE","WEIGHT"],["AKM 854","2026-10-12",45.72],["AKM 851","",48.18],["AKM 283","",45.88],["AKM 291","",47.48],["AKM 562","",47.4],["","","=SUM(C2:C6)"]],"ADUNMBU-EWK":[["TRUCK NO","DATE","WEIGHT",""],["AKM 288","2026-10-01",42,""],["AKM 288","",46.54,""],["AKM 288","",44.2,""],["AKM 286","",45.1,""],["AKM 286","",47.74,""],["AKM 286","",44.3,""],["AKM 562","",48.8,""],["AKM 562","",43.4,""],["AKM 562","",47.26,""],["AKM 290","",42.42,""],["AKM 290","",40.64,""],["AKM 290","",46.38,""],["AKM 291","",46.08,""],["AKM 291","",42.44,""],["AKM 291","",45.24,""],["AKM 848","",44.82,""],["AKM 848","",42.9,""],["AKM 848","",53.02,""],["AKM 285","",47.08,""],["AKM 285","",44.32,""],["AKM 285","",47.48,""],["AKM 849","",44.7,""],["AKM 849","",39.26,""],["AKM 849","",44.94,""],["AKM 854","",41.3,""],["AKM 854","",40.4,""],["AKM 854","",45.16,""],["AKM 851","",38.72,""],["AKM 849","2026-10-02",43.96,""],["AKM 849","",42.56,""],["AKM 289","",42.94,""],["AKM 289","",45.94,""],["AKM 286","2026-10-03",52.68,""],["AKM 286","",53.48,""],["AKM 849","",49.58,""],["AKM 849","",51.02,""],["AKM 849","",44.56,""],["AKM 854","",48.88,""],["AKM 854","",52.56,""],["AKM 851","",47,""],["AKM 851","",48.54,""],["AKM 291","",51.26,""],["AKM 849","2026-10-05",46.48,""],["AKM 854","",49,""],["AKM 628","",51.78,""],["AKM 291","",42.52,""],["AKM 285","2026-10-07",48,""],["AKM 285","",44.72,""],["AKM 285","",46.2,""],["AKM 286","",52.5,""],["AKM 289","",46.52,""],["AKM 289","",45.52,""],["AKM 289","",47.74,""],["AKM 562","",46.2,""],["AKM 628","",42.18,""],["AKM 628","",45.9,""],["AKM 848","",40.12,""],["AKM 848","",42.36,""],["AKM 849","",51.5,""],["AKM 849","",41.48,""],["AKM 849","",44.04,""],["AKM 849","",48.16,""],["AKM 850","",45.66,""],["AKM 851","",49.44,""],["AKM 851","",44.12,""],["AKM 851","",46.52,""],["AKM 854","",47.06,""],["AKM 854","",47.34,""],["AKM 854","",44.04,""],["AKM 854","",46.98,""],["AKM 849","2026-10-09",48.26,""],["AKM 849","",51.5,""],["AKM 848","",45.5,""],["AKM 850","",43.14,""],["AKM 291","",40.42,""],["AKM 283","",44.68,""],["AKM 851","",47.8,""],["AKM 849","2026-10-10",49.42,""],["AKM 291","",45.04,""],["AKM 851","",49.1,""],["AKM 283","",50.86,""],["AKM285XG","2026-10-11","",""],["AKM851ZX","",45.12,""],[" AKM291XG","",44.74,""],["AKM286XG","",48.26,""],["AKM850ZX","",47.1,""],["AKM283XG","",46.36,""],["AKM854ZX","",46.16,""],["T27562LA","",47.74,""],["AKM848ZX","",50.98,""],["AKM292XG","",49.42,""],["AKM852ZX","","",""],["AKM 854","2026-10-12",44.06,""],["AKM 854","",47.26,""],["AKM 851","",46.26,""],["AKM 848","",53.62,""],["AKM 283","",43.8,""],["","","=SUM(C2:C98)",""]],"ITORI  -SHG":[["TRUCK NO","DATE","WEIGHT",""],["AKM 283","2026-10-14",43.74,""],["AKM 284","",38.92,""],["AKM 285","",41.84,""],["AKM 286","",39.94,""],["AKM 291","",34.42,""],["AKM 562","",38.7,""],["AKM 848","",39.18,""],["AKM 851","",36.88,""],["AKM 854","",39.16,""],["AKM 283","2026-10-15",40.2,""],["AKM 284","",40.22,""],["AKM 285","",33.98,""],["AKM 286","",35.72,""],["AKM 288","",34.16,""],["AKM 289","",36.16,""],["AKM 290","",38.62,""],["AKM 291","",42.68,""],["AKM 292","",40.56,""],["AKM 628","",37.66,""],["AKM 848","",40.2,""],["AKM 853","",32.74,""],["AKM 854","",37.6,""],["","2026-10-16","","RTSS"],["AKM 288","2026-10-17",43.8,""],["AKM 292","",41.44,""],["AKM 628","",42.63,""],["AKM 286","",43.02,""],["AKM 289","",44.26,""],["AKM 848","",40.08,""],["AKM 285","",42.2,""],["AKM 284","",44.18,""],["AKM 290","",40.16,""],["AKM 853","",42.26,""],["AKM 562","",40.3,""],["AKM 850","2026-10-18",40.5,""],["AKM 289","",45.4,""],["AKM 286","",43.18,""],["AKM 854","",47.82,""],["AKM 285","",51.84,""],["AKM 290","",40.38,""],["AKM 284","",43.62,""],["AKM 851","",43.58,""],["AKM 283","",51.7,""],["AKM 291","",46.02,""],["AKM 853","",42.18,""],["AKM 628","",45.2,""],["AKM 285","2026-10-19",49.02,""],["AKM 289","",48.14,""],["AKM 290","",47.12,1],["AKM 288","",40.02,""],["AKM 849","",48.9,""],["AKM 850","",46.8,""],["AKM 853","",45.12,""],["AKM 284","",46.24,""],["AKM 290","",49.04,2],["AKM 628","",48.8,1],["AKM 628","",41.94,2],["AKM 286","",39.84,""],["AKM 850","2026-10-20",46.72,""],["AKM 853","",48.46,1],["AKM 849","",39.46,1],["AKM 283","",47.78,""],["AKM 286","",47.46,1],["AKM 289","",45.02,""],["AKM 285","",48.34,""],["AKM 288","",48.6,""],["AKM 849","",43.7,2],["AKM 853","",46.38,2],["AKM 286","",46.22,2],["AKM 851","",50.12,""],["AKM 562","",45.3,""],["AKM 291","",39.32,""]],"SLOUGH":[["TRUCK NO","DATE"],["AKM 290","2026-10-11"],["AKM 284","2024-10-11"],["",""],["AKM 850","2026-10-20"],["AKM 284",""],["AKM 292",""]],"EAST":[["TRUCK DETAILS","LOADING LOCATION","MATERIAL","LOADING DATE","TAKEOFF DATE","ARRIVAL DATE","OFFLOADED DATE","OFFLOADING LOCATION","","BACKHAUL DESTINATION","MATERIAL","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""," EXTRA BACKHAUL DESTINATION","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""],["T23639LA","SHAGAMU","ANIMAL FEEDS","2026-10-05","2026-10-06","2026-10-08","2026-10-09","PHC","","PHC","FLOUR","2026-10-10","2026-10-10","","","","","","",""],["T23640LA","OGERE","ANIMAL FEEDS","2026-10-08","2026-10-09","","","UYO","","","","","","","","","","","",""],["T23641LA","SHAGAMU","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""],["T23642LA","IBADAN","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""]],"IGBESA":[["TRUCK NO","DRIVER","DESTINATION","LOADING DATE","OFFLOADING DATE"]]}}};
+async function applySeeds(){
+  if(!SEEDS.oct26||typeof XLSX==='undefined') return;
+  const done=STATE.data.seeds||{}; if(done.oct26||!(STATE.data.vehicles||[]).length) return;
+  const keep=window.XLSX; window.XLSX={utils:{sheet_to_json:ws=>ws},SSF:keep&&keep.SSF};
+  let out; try{ out=parseRouteTabs({SheetNames:SEEDS.oct26.names,Sheets:SEEDS.oct26.sheets},[]); } finally{ window.XLSX=keep; }
+  const add=out.rows.filter(r=>r.state==='ok').map(r=>{
+    const rec={id:uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),notes:r.notes||'',driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
+    Object.keys(rec).forEach(k=>{ if(typeof rec[k]==='number') rec[k]=String(rec[k]); }); return compactRec(rec); });
+  STATE.data.seeds=Object.assign({},done,{oct26:{at:new Date().toISOString(),added:add.length}});
+  if(add.length){ STATE.data.transport=[...STATE.data.transport,...add]; await persist('transport'); }
+  await persist('seeds');
+  showToast('October clinker/gypsum report loaded: '+add.length+' transport entries added.');
 }
 
 loadAll();
