@@ -403,7 +403,7 @@
 const STORAGE_KEYS = {
   transport:'vms:transport', journey:'vms:journey', inspections:'vms:inspections',
   pretrip:'vms:pretrip', safety:'vms:safety', vehicles:'vms:vehicles',
-  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', seeds:'vms:seeds', targets:'vms:targets'
+  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', seeds:'vms:seeds', portFiles:'vms:portFiles', targets:'vms:targets'
 };
 
 // Route definitions per the fleet's fixed daily trip & duration targets.
@@ -446,7 +446,7 @@ const FUEL_CALC_URL = "https://claude.ai/public/artifacts/d45cbde1-5358-4c10-875
 let STATE = {
   loading:true, tab:'summary', maintView:'ops', repairWindow:30, truckDetail:null, transportRoute:'ALL', transportMaterial:'ALL', safetyView:'kpi', hsseTab:'overview', hsseWeek:null, hsseBand:'ALL', driverDetail:null, hsseMsg:null,
   periodByDept:{transport:'lastweek', journey:'lastweek', inspections:'lastweek', safety:'lastweek', maintenance:'lastweek', costkm:'lastweek'},
-  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{} },
+  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{}, portFiles:[] },
   targets:{...DEFAULT_TARGETS},
   toast:null, settingsOpen:false, syncing:false, lastSync:null, connectionError:null,
   reportWeekEnding: null, reportPreparedBy:'', fuelWeekEnding:null
@@ -550,6 +550,7 @@ async function loadAll(opts){
       portFlags: safeParseJSON(json[STORAGE_KEYS.portFlags], {}),
       portUpdates: safeParseJSON(json[STORAGE_KEYS.portUpdates], []),
       seeds: safeParseJSON(json[STORAGE_KEYS.seeds], {}),
+      portFiles: safeParseJSON(json[STORAGE_KEYS.portFiles], []),
     };
     normalizeHsseWeeks(newData.hsseScores);
     const newTargets = {...DEFAULT_TARGETS, ...safeParseJSON(json[STORAGE_KEYS.targets], {})};
@@ -5088,12 +5089,15 @@ function portIsExport(rec){ return 'containerNo' in rec; }
 /* ---------- build the live records = base data + every saved daily update ---------- */
 function portUpdates(){ return (STATE.data&&STATE.data.portUpdates)||[]; }
 function portFlags(){ return (STATE.data&&STATE.data.portFlags)||{}; }
-function portClientOf(ref){ for(const c of PORT_CLIENTS){ if((PORT_BASE[c]||[]).some(r=>r.fileRef===ref)) return c; } return ''; }
+function dmyToDatePort(s){ const m=/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(String(s||'').trim()); if(!m) return null; const y=m[3].length===2?2000+(+m[3]):+m[3]; const d=new Date(y,+m[2]-1,+m[1]); return isNaN(d)?null:d; }
+function portCustomFiles(){ return (STATE.data&&STATE.data.portFiles)||[]; }
+function portBaseList(c){ return (PORT_BASE[c]||[]).concat(portCustomFiles().filter(f=>f.client===c).map(f=>{ const r=Object.assign({},f,{_custom:true}); if(PORT_EXPORT.has(c)&&!('containerNo' in r)) r.containerNo=''; if(f.delivered) r._delivered=true; if(r.daysAtPort==null||r.daysAtPort===''){ const a=dmyToDatePort(r.ata||r.truckOnSite); if(a&&!f.delivered) r.daysAtPort=Math.max(0,Math.round((Date.now()-a.getTime())/864e5)); } return r; })); }
+function portClientOf(ref){ for(const c of PORT_CLIENTS){ if(portBaseList(c).some(r=>r.fileRef===ref)) return c; } return ''; }
 function portRecords(includeArchived){
   const ups=portUpdates(); const out={};
   PORT_CLIENTS.forEach(c=>{
-    out[c]=(PORT_BASE[c]||[]).filter(r=>includeArchived||!portArchived(r)).map(r=>{
-      const copy=Object.assign({},r,{_client:c,updates:[]});
+    out[c]=portBaseList(c).filter(r=>includeArchived||!portArchived(r)).map(r=>{
+      const copy=Object.assign({},r,{_client:c,updates:[]}); if(r._delivered) copy._delivered=true;
       ups.filter(u=>u.ref===r.fileRef).sort((a,b)=>a.date===b.date?(String(a.id)<String(b.id)?-1:1):(a.date<b.date?-1:1)).forEach(u=>{
         Object.entries(u.fields||{}).forEach(([k,v])=>{ if(v!==''&&v!=null) copy[k]=v; });
         if(u.delivered) copy._delivered=true;
@@ -5196,7 +5200,7 @@ function portFileCard(rec,flags,showClient){
       <div class="pf-ms-grid">${ms.map(([l,v])=>portMilestone(l,v)).join('')}</div>
       <div class="pf-block"><div class="k">Remarks / activity log</div><div class="pf-remarks">${esc(rec.remarks||'No remarks logged.')}</div></div>
       ${ups}
-      <div class="pf-actions"><button type="button" class="btn small" data-pf-update="${esc(rec.fileRef)}">＋ Add update</button><button type="button" class="btn small ${flagged?'primary':''}" data-pf-flag="${esc(rec.fileRef)}">${flagged?'Remove flag':'⚑ Flag for attention'}</button></div>
+      <div class="pf-actions"><button type="button" class="btn small" data-pf-update="${esc(rec.fileRef)}">＋ Add update</button><button type="button" class="btn small ${flagged?'primary':''}" data-pf-flag="${esc(rec.fileRef)}">${flagged?'Remove flag':'⚑ Flag for attention'}</button>${rec._custom?`<button type="button" class="btn small ghost" data-pf-delfile="${esc(rec.fileRef)}">Delete file</button>`:''}</div>
     </div></div>`;
 }
 function portListHTML(){
@@ -5299,8 +5303,8 @@ function renderPortPage(){
   portState();
   const V=[['board','Files board'],['update','Daily update'],['kpis','KPIs & advice']];
   const body=STATE.portView==='update'?portUpdateHTML():STATE.portView==='kpis'?portKpiHTML():portBoardHTML();
-  return `<div class="topbar"><div><h1>Port Files</h1><div class="sub">SKB Logistics clearing &amp; delivery — every file, its milestones and daily updates. Reported each week and month with the other departments.</div></div><div class="topbar-right">${syncBadge()}</div></div>
-    <div class="tabs">${V.map(([k,l])=>`<button type="button" data-pf-view="${k}" class="${STATE.portView===k?'active':''}">${esc(l)}</button>`).join('')}</div>${body}`;
+  return `<div class="topbar"><div><h1>Port Files</h1><div class="sub">SKB Logistics clearing &amp; delivery — every file, its milestones and daily updates. Reported each week and month with the other departments.</div></div><div class="topbar-right">${syncBadge()} <button type="button" class="btn primary small" data-pf-addopen="1">＋ Add new file</button></div></div>
+    <div class="tabs">${V.map(([k,l])=>`<button type="button" data-pf-view="${k}" class="${STATE.portView===k?'active':''}">${esc(l)}</button>`).join('')}</div>${body}${renderPortAddModal()}`;
 }
 
 /* ---------- events ---------- */
@@ -5321,7 +5325,7 @@ function attachPortEvents(app){
   app.querySelectorAll('[data-pf-archived]').forEach(c=>c.addEventListener('change',()=>{ STATE.portArchived=c.checked; render(); }));
   const sr=app.querySelector('#pf-search');
   if(sr) sr.addEventListener('input',()=>{ STATE.portSearch=sr.value; const box=app.querySelector('#pf-list'); if(box){ box.innerHTML=portListHTML(); portBindList(box); } });
-  portBindList(app);
+  portBindList(app); attachPortAdd(app);
   // daily update form
   const form=app.querySelector('#pf-form');
   if(form){
@@ -5344,6 +5348,53 @@ function attachPortEvents(app){
     if(!confirm('Delete this update?')) return;
     STATE.data.portUpdates=portUpdates().filter(u=>u.id!==b.getAttribute('data-pf-del')); await persist('portUpdates'); showToast('Update deleted.');
   }));
+}
+
+/* ---------- Add a new file: placed under its client and stage automatically ---------- */
+const PORT_PREFIX=(function(){ const m={}; PORT_CLIENTS.forEach(c=>{ const cnt={}; (PORT_BASE[c]||[]).forEach(r=>{ const p=String(r.fileRef||'').replace(/\s*\d+\s*$/,'').trim(); if(p) cnt[p]=(cnt[p]||0)+1; }); m[c]=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]||''; }); return m; })();
+function portClientFromRef(ref){ const p=String(ref||'').replace(/\s*\d+\s*$/,'').trim().toUpperCase(); if(!p) return ''; return PORT_CLIENTS.find(c=>(PORT_PREFIX[c]||'').toUpperCase()===p)||''; }
+function portNextRef(c){ const pre=PORT_PREFIX[c]; if(!pre) return ''; let mx=0, w=0; portBaseList(c).forEach(r=>{ const m=/(\d+)\s*$/.exec(r.fileRef||''); if(m&&String(r.fileRef).toUpperCase().indexOf(pre.toUpperCase())===0&&+m[1]>=mx){ mx=+m[1]; w=m[1].length; } }); return pre+' '+String(mx+1).padStart(w,'0'); }
+function portAddFieldsHTML(c){
+  const exp=PORT_EXPORT.has(c);
+  const det=(exp?PORT_EXP_DETAILS:PORT_STD_DETAILS), ms=(exp?PORT_EXP_FIELDS:PORT_STD_FIELDS);
+  return `<div class="section-sub" style="margin:12px 0 6px;">File details</div><div class="form-grid">${exp?'<div><label>Container no(s)</label><input type="text" data-pf-fkey="containerNo" data-pf-ftype="text" placeholder="e.g. MSKU1234567; TGHU7654321"></div>':'<div><label>BOL / reference</label><input type="text" data-pf-fkey="bol" data-pf-ftype="text"></div>'}${portFieldInputs(det,null)}</div>
+    <div class="section-sub" style="margin:12px 0 6px;">Milestones reached so far (leave blank if none yet — you can add them later with Add update)</div><div class="form-grid">${portFieldInputs(ms,null)}</div>`;
+}
+function renderPortAddModal(){
+  if(!STATE.portAdd) return ''; const c=STATE.portAdd.client||STATE.portClient||PORT_CLIENTS[0];
+  const cl=PORT_CLIENTS.includes(c)?c:PORT_CLIENTS[0];
+  return `<div class="modal-bg" data-pf-addclose="1"><div class="modal" style="max-width:760px;" onclick="event.stopPropagation()">
+    <h3>Add new port file</h3>
+    <form id="pf-addform"><div class="form-grid"><div><label>Client</label><select name="client" id="pf-addclient">${PORT_CLIENTS.map(x=>`<option ${x===cl?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+      <div><label>File reference</label><input type="text" name="ref" id="pf-addref" required value="${esc(portNextRef(cl))}" placeholder="e.g. ${esc(portNextRef(cl)||'LFG 536')}"><span class="pf-cur">The client is picked from the reference (LFG → Lafarge, TPPP → Tempo …)</span></div></div>
+      <div id="pf-addfields">${portAddFieldsHTML(cl)}</div>
+      <div style="margin-top:10px;"><label>Remarks</label><textarea name="remarks" rows="2" placeholder="Anything worth noting about this file"></textarea></div>
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none;font-size:13px;color:var(--text);margin-top:10px;"><input type="checkbox" name="delivered" style="width:auto;"> This file is already delivered</label>
+      <div class="dim small" style="margin-top:8px;">The file is placed automatically: under its client, and in <b>Ongoing files</b>, <b>In process</b> or <b>Delivered</b> depending on the milestones you fill in.</div>
+      <div class="form-actions"><button type="submit" class="btn primary">Add file</button><button type="button" class="btn ghost" data-pf-addclose="1">Cancel</button></div></form></div></div>`;
+}
+function attachPortAdd(app){
+  app.querySelectorAll('[data-pf-addopen]').forEach(b=>b.addEventListener('click',()=>{ STATE.portAdd={client:STATE.portClient&&STATE.portClient!==PORT_DELIVERED?STATE.portClient:PORT_CLIENTS[0]}; render(); }));
+  app.querySelectorAll('[data-pf-addclose]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el){ STATE.portAdd=null; render(); } }));
+  const f=app.querySelector('#pf-addform'); if(!f) return;
+  const cs=f.querySelector('#pf-addclient'), rf=f.querySelector('#pf-addref'), box=f.querySelector('#pf-addfields'); let auto=true;
+  rf.addEventListener('input',()=>{ auto=false; const c=portClientFromRef(rf.value); if(c&&c!==cs.value){ cs.value=c; box.innerHTML=portAddFieldsHTML(c); } });
+  cs.addEventListener('change',()=>{ box.innerHTML=portAddFieldsHTML(cs.value); if(auto||!rf.value.trim()){ rf.value=portNextRef(cs.value); auto=true; } });
+  f.addEventListener('submit',async e=>{
+    e.preventDefault(); const client=cs.value, ref=rf.value.trim().replace(/\s+/g,' ').toUpperCase();
+    if(!ref){ showToast('Enter the file reference.'); return; }
+    const all=portRecords(true); const dup=PORT_CLIENTS.some(c=>all[c].some(r=>String(r.fileRef).toUpperCase()===ref));
+    if(dup){ showToast(ref+' already exists — use Add update on that file instead.'); return; }
+    const rec={fileRef:ref,client,created:todayStr()};
+    f.querySelectorAll('[data-pf-fkey]').forEach(inp=>{ const v=inp.value.trim(); if(v==='') return; const t=inp.getAttribute('data-pf-ftype'); rec[inp.getAttribute('data-pf-fkey')]=t==='date'?isoToDMYPort(v):(t==='number'?Number(v):v); });
+    const rm=f.elements.remarks.value.trim(); if(rm) rec.remarks=rm; if(f.elements.delivered.checked) rec.delivered=true;
+    STATE.data.portFiles=[...portCustomFiles(),rec]; STATE.portAdd=null;
+    const made=portRecords(true)[client].find(r=>r.fileRef===ref); const st=made?portStage(made):'pending'; const label=made?portStageLabel(made,st):'Ongoing file';
+    STATE.portView='board'; STATE.portStage='all'; STATE.portSearch=''; STATE.portClient=st==='delivered'?PORT_DELIVERED:client; STATE.portOpen[ref]=true;
+    await persist('portFiles'); showToast('Added '+ref+' — placed under '+(st==='delivered'?'Delivered':client)+' as “'+label+'”.');
+  });
+  app.querySelectorAll('[data-pf-delfile]').forEach(b=>b.addEventListener('click',async e=>{ e.stopPropagation(); const ref=b.getAttribute('data-pf-delfile'); if(!confirm('Delete file '+ref+' and its updates? This cannot be undone.')) return;
+    STATE.data.portFiles=portCustomFiles().filter(x=>x.fileRef!==ref); STATE.data.portUpdates=portUpdates().filter(u=>u.ref!==ref); await persist('portFiles'); await persist('portUpdates'); showToast('Deleted '+ref+'.'); }));
 }
 
 /* ============================================================ shell.js ============================================================ */
@@ -5433,7 +5484,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.4 · 22 Oct 2026 20:27';
+const APP_VERSION='v10.5 · 23 Oct 2026 18:45';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
