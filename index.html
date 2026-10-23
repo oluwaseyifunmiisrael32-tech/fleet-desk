@@ -4352,7 +4352,7 @@ async function importCng(){
 /* ---------- Fuel & Deliveries page ---------- */
 function fuelTabs(){
   const v=STATE.fuelView||'cng';
-  return `<div class="tabs" style="margin-bottom:14px;"><button data-fuel-view="cng" class="${v==='cng'?'active':''}">CNG (gas) — fill-ups vs trips</button><button data-fuel-view="diesel" class="${v==='diesel'?'active':''}">Diesel — trip fuel</button></div>`;
+  return `<div class="tabs" style="margin-bottom:14px;"><button data-fuel-view="cng" class="${v==='cng'?'active':''}">CNG (gas) — fill-ups vs trips</button><button data-fuel-view="diesel" class="${v==='diesel'?'active':''}">Diesel — trip fuel</button><button data-fuel-view="routes" class="${v==='routes'?'active':''}">Route insights</button></div>`;
 }
 function fuelToolbar(start){
   const cur=wkStart(todayStr());
@@ -4447,8 +4447,8 @@ function renderDieselView(start){
 function renderFuelPage(){
   const start=fuelWeekStart(), v=STATE.fuelView||'cng';
   return `<div class="topbar"><div><h1>Fuel &amp; Deliveries</h1><div class="sub">CNG fill-ups against the trips each truck did, and the diesel used on each trip.</div></div><div class="topbar-right">${syncBadge()}</div></div>
-  ${fuelTabs()}${fuelToolbar(start)}
-  <div id="fuel-doc" style="margin-top:14px;">${v==='diesel'?renderDieselView(start):renderCngView(start)}</div>`;
+  ${fuelTabs()}${v==='routes'?'':fuelToolbar(start)}
+  <div id="fuel-doc" style="margin-top:14px;">${v==='routes'?renderRouteFuel():v==='diesel'?renderDieselView(start):renderCngView(start)}</div>`;
 }
 function renderDieselModal(){
   if(!STATE.dieselModal) return '';
@@ -5474,6 +5474,7 @@ function attachEventsV10(app){
   attachPortEvents(app);
   attachBulkExtras(app);
   attachLiveEvents(app);
+  attachRouteFuel(app);
   app.querySelectorAll('[data-more-toggle]').forEach(b=>b.addEventListener('click',()=>{ STATE.moreOpen=!STATE.moreOpen; render(); }));
   app.querySelectorAll('[data-more-close]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el){ STATE.moreOpen=false; render(); } }));
   app.querySelectorAll('[data-m-refresh]').forEach(b=>b.addEventListener('click',async()=>{ STATE.moreOpen=false; await loadAll(); showToast('Refreshed from shared storage.'); }));
@@ -5484,7 +5485,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.5 · 23 Oct 2026 18:45';
+const APP_VERSION='v10.6 · 23 Oct 2026 18:54';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5966,6 +5967,63 @@ function attachLiveEvents(app){
   if(STATE.tab==='live'){ drawLiveMap(); if(STATE.live.status==='idle') fetchLive(); }
 }
 if(!LIVE_TIMER) LIVE_TIMER=setInterval(()=>{ if(STATE.tab==='live'&&!document.hidden) fetchLive(); },60000);
+
+/* ============================================================ routefuel.js ============================================================ */
+/* ===== Route fuel insights: diesel litres and gas (SCM) per route, outliers and recommendations ===== */
+const RF_PERIODS=[['lastweek','Last week'],['prevweek','Week before'],['month','This month'],['lastmonth','Last month']];
+function routeOfLocations(l,o){
+  const t=s=>String(s||'').toLowerCase(); const A=t(l)+' | '+t(o);
+  const has=re=>re.test(A); const apapa=has(/apapa/), adu=has(/adu[nm]{1,2}bu/), ew=has(/ewek?oro/), sg=has(/sh?agamu/), it=has(/itori/);
+  if(apapa&&ew) return 'gypsum_ewekoro'; if(apapa&&sg) return 'gypsum_sagamu'; if(adu&&ew) return 'gypsum_adumbu'; if(adu&&sg) return 'gypsum_adumbu_sagamu';
+  if((ew||it)&&sg) return 'clinker'; return 'other';
+}
+function rfLabel(k){ return k==='other'?'Other / unmatched':(ROUTES[k]?ROUTES[k].label:k); }
+function routeFuelStats(period){
+  const inP=r=>inPeriod(r.date,period); const R={}; const get=k=>R[k]||(R[k]={key:k,dTrips:0,dDist:0,dL:0,dCost:0,kmLDist:0,kmLLit:0,dTruck:{},gQty:0,gCost:0,gTrips:0,gTon:0,gTruck:{},trips:0,ton:0});
+  let unmatched=0;
+  (STATE.data.dieselTrips||[]).filter(inP).forEach(r=>{ const k=routeOfLocations(r.loadingLocation,r.offloadingLocation); if(k==='other') unmatched++; const c=dieselCalc(r), x=get(k); x.dTrips++; x.dL+=c.lt; x.dCost+=c.ct; if(c.dist>0){ x.dDist+=c.dist; if(c.lt>0){ x.kmLDist+=c.dist; x.kmLLit+=c.lt; } }
+    const t=x.dTruck[r.vehicleId||'none']||(x.dTruck[r.vehicleId||'none']={vid:r.vehicleId,trips:0,L:0,dist:0}); t.trips++; t.L+=c.lt; t.dist+=c.dist; });
+  const W=cngWeights(); const units={}, trips={}, ton={}; // per truck, per route
+  (STATE.data.transport||[]).filter(inP).forEach(r=>{ const k=r.route||'other'; const x=get(k); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); if(!r.vehicleId) return; const v=r.vehicleId; const u=num(r.tripsActual)*(tripKind(k)==='adumbu'?W.wa:W.wl);
+    (units[v]=units[v]||{})[k]=(units[v][k]||0)+u; (trips[v]=trips[v]||{})[k]=(trips[v][k]||0)+num(r.tripsActual); (ton[v]=ton[v]||{})[k]=(ton[v][k]||0)+num(r.tonnageActual); });
+  const fills={}; (STATE.data.cngFills||[]).filter(inP).forEach(r=>{ if(!r.vehicleId) return; const f=fills[r.vehicleId]||(fills[r.vehicleId]={q:0,c:0,n:0}); f.q+=num(r.quantity); f.c+=num(r.cost); f.n++; });
+  const noFill=[];
+  Object.keys(units).forEach(v=>{ const U=Object.values(units[v]).reduce((a,b)=>a+b,0), f=fills[v]; if(!f){ if(U>0) noFill.push({vid:v,trips:Object.values(trips[v]).reduce((a,b)=>a+b,0)}); return; } if(U<=0) return;
+    Object.keys(units[v]).forEach(k=>{ const share=units[v][k]/U, x=get(k), q=f.q*share, c=f.c*share; x.gQty+=q; x.gCost+=c; x.gTrips+=trips[v][k]; x.gTon+=ton[v][k]; x.gTruck[v]={vid:v,q,c,trips:trips[v][k],ton:ton[v][k]}; }); });
+  const order=MAT_GROUPS.map(g=>g[1][0]).concat(['east','other']); const rows=Object.values(R).sort((a,b)=>(order.indexOf(a.key)<0?99:order.indexOf(a.key))-(order.indexOf(b.key)<0?99:order.indexOf(b.key)));
+  rows.forEach(x=>{ x.kmL=x.kmLLit>0?x.kmLDist/x.kmLLit:null; x.lPerTrip=x.dTrips?x.dL/x.dTrips:null; x.costPerTrip=x.dTrips?x.dCost/x.dTrips:null; x.lPer100=x.kmLDist>0?x.kmLLit/x.kmLDist*100:null; x.scmPerTrip=x.gTrips?x.gQty/x.gTrips:null; x.scmPerTon=x.gTon>0?x.gQty/x.gTon:null; x.gCostPerTrip=x.gTrips?x.gCost/x.gTrips:null; });
+  return {rows,unmatched,noFill};
+}
+function routeFuelInsights(S){
+  const out=[]; const name=v=>v&&v!=='none'?vehicleLabel(v):'Unassigned truck';
+  S.rows.forEach(x=>{
+    const dl=Object.values(x.dTruck).filter(t=>t.trips>=1&&t.L>0);
+    if(x.dTrips>=3&&dl.length>=2){ dl.forEach(t=>{ const p=t.L/t.trips, d=(p/x.lPerTrip-1)*100; if(d>=15) out.push({sev:d>=30?'red':'amber',text:`${name(t.vid)} used ${fmt(p,0)} L per trip on ${rfLabel(x.key)} — ${fmt(d,0)}% above the route average of ${fmt(x.lPerTrip,0)} L. Check for idling, a detour, a fuel leak or fuel drawn outside the trip.`}); }); }
+    if(x.kmL!==null&&x.dTrips>=3){ dl.forEach(t=>{ if(t.dist>0&&t.L>0){ const kl=t.dist/t.L; if(kl<x.kmL*0.8) out.push({sev:'amber',text:`${name(t.vid)} managed ${fmt(kl,2)} km/L on ${rfLabel(x.key)} against ${fmt(x.kmL,2)} km/L for the route. Worth a service check (injectors, filters, tyre pressure) or a driver coaching session.`}); } }); }
+    const gl=Object.values(x.gTruck).filter(t=>t.trips>0);
+    if(gl.length>=2&&x.scmPerTrip>0){ gl.forEach(t=>{ const p=t.q/t.trips, d=(p/x.scmPerTrip-1)*100; if(d>=20) out.push({sev:d>=40?'red':'amber',text:`${name(t.vid)} took ${fmt(p,1)} SCM of gas per trip on ${rfLabel(x.key)} — ${fmt(d,0)}% above the route average of ${fmt(x.scmPerTrip,1)} SCM. Check fill volumes against trips logged and look for regulator or leak problems.`}); }); }
+  });
+  if(S.noFill.length) out.push({sev:'amber',text:`${S.noFill.length} truck${S.noFill.length>1?'s':''} did trips in this period but have no CNG fill-up logged (${S.noFill.slice(0,5).map(n=>vehicleLabel(n.vid)).join(', ')}${S.noFill.length>5?'…':''}). Their gas use is missing from these figures — log the fills or confirm they ran on diesel only.`});
+  if(S.unmatched) out.push({sev:'amber',text:`${S.unmatched} diesel trip${S.unmatched>1?'s':''} could not be matched to a route. Use the place names Apapa, Adumbu, Itori, Ewekoro or Sagamu as the loading/offloading locations so every trip lands on the right route.`});
+  const withC=S.rows.filter(x=>x.costPerTrip>0&&x.dTrips>=3&&x.key!=='other'); if(withC.length>=2){ const hi=withC.slice().sort((a,b)=>b.costPerTrip-a.costPerTrip)[0], lo=withC.slice().sort((a,b)=>a.costPerTrip-b.costPerTrip)[0]; out.push({sev:'info',text:`Diesel cost per trip is highest on ${rfLabel(hi.key)} (${naira(hi.costPerTrip)}) and lowest on ${rfLabel(lo.key)} (${naira(lo.costPerTrip)}). Use this when quoting or reviewing route rates.`}); }
+  return out.sort((a,b)=>({red:0,amber:1,info:2})[a.sev]-({red:0,amber:1,info:2})[b.sev]);
+}
+function renderRouteFuel(){
+  const p=STATE.rfPeriod||'lastweek'; const S=routeFuelStats(p); const rows=S.rows; const ins=routeFuelInsights(S);
+  const tot=rows.reduce((a,x)=>{ a.dL+=x.dL; a.dC+=x.dCost; a.q+=x.gQty; a.gc+=x.gCost; a.dt+=x.dTrips; return a; },{dL:0,dC:0,q:0,gc:0,dt:0});
+  const tabs=`<div class="tabs" style="margin-bottom:12px;">${RF_PERIODS.map(([k,l])=>`<button type="button" data-rf-period="${k}" class="${p===k?'active':''}">${l}<span class="dim small" style="margin-left:6px;">${esc(rangeText(periodRange(k)))}</span></button>`).join('')}</div>`;
+  if(!rows.length) return tabs+`<div class="card dim" style="padding:24px;text-align:center;">No transport, diesel or gas entries in this period.</div>`;
+  const tag=s=>s==='red'?'red':s==='amber'?'amber':'teal'; const dash='<span class="dim">—</span>';
+  return tabs+`<div class="grid cols-3" style="margin-bottom:12px;"><div class="card kpi"><div class="label">Diesel used (logged trips)</div><div class="value">${fmt(tot.dL,0)} L</div><div class="dim small">${fmt(tot.dt)} trips · ${naira(tot.dC)}</div></div><div class="card kpi"><div class="label">Gas used (allocated)</div><div class="value">${fmt(tot.q,0)} SCM</div><div class="dim small">${naira(tot.gc)}</div></div><div class="card kpi"><div class="label">Insights to act on</div><div class="value" style="color:${ins.some(i=>i.sev==='red')?'var(--red)':ins.some(i=>i.sev==='amber')?'var(--amber)':'var(--green)'};">${ins.filter(i=>i.sev!=='info').length}</div></div></div>
+  <div class="section-sub" style="margin:8px 0;">Diesel by route</div>
+  <div class="table-wrap"><table><thead><tr><th>Route</th><th>Diesel trips logged</th><th>Litres</th><th>Litres / trip</th><th>km / L</th><th>L / 100 km</th><th>Cost / trip</th></tr></thead><tbody>${rows.map(x=>`<tr><td style="white-space:normal;">${esc(rfLabel(x.key))}</td><td>${fmt(x.dTrips)}</td><td>${x.dL?fmt(x.dL,0):dash}</td><td>${x.lPerTrip?fmt(x.lPerTrip,0):dash}</td><td>${x.kmL?fmt(x.kmL,2):dash}</td><td>${x.lPer100?fmt(x.lPer100,1):dash}</td><td>${x.costPerTrip?naira(x.costPerTrip):dash}</td></tr>`).join('')}</tbody></table></div>
+  <div class="section-sub" style="margin:16px 0 8px;">Gas (CNG) by route <span class="dim small" style="font-weight:400;">— each truck’s fills are shared across its routes by the trips it did</span></div>
+  <div class="table-wrap"><table><thead><tr><th>Route</th><th>Trips (trucks with fills)</th><th>Gas (SCM)</th><th>SCM / trip</th><th>SCM / tonne</th><th>Cost / trip</th></tr></thead><tbody>${rows.map(x=>`<tr><td style="white-space:normal;">${esc(rfLabel(x.key))}</td><td>${fmt(x.gTrips)} <span class="dim small">of ${fmt(x.trips)}</span></td><td>${x.gQty?fmt(x.gQty,1):dash}</td><td>${x.scmPerTrip?fmt(x.scmPerTrip,1):dash}</td><td>${x.scmPerTon?fmt(x.scmPerTon,2):dash}</td><td>${x.gCostPerTrip?naira(x.gCostPerTrip):dash}</td></tr>`).join('')}</tbody></table></div>
+  <div class="section-sub" style="margin:16px 0 8px;">Insights &amp; recommendations</div>
+  ${ins.length?ins.map(i=>`<div class="card" style="margin-bottom:8px;border-left:3px solid var(--${i.sev==='red'?'red':i.sev==='amber'?'amber':'teal'});padding:12px 14px;">${esc(i.text)}</div>`).join(''):`<div class="card dim" style="padding:16px;">Nothing stands out for this period — fuel use is in line across trucks and routes.</div>`}
+  <div class="dim small" style="margin-top:8px;line-height:1.6;">Insights are calculated from your logged diesel trips, CNG fill-ups and transport entries — they are only as complete as those logs. Diesel is matched to a route from the loading/offloading places; gas is allocated from each truck’s trips.</div>`;
+}
+function attachRouteFuel(app){ app.querySelectorAll('[data-rf-period]').forEach(b=>b.addEventListener('click',()=>{ STATE.rfPeriod=b.getAttribute('data-rf-period'); render(); })); }
 
 loadAll();
 </script>
