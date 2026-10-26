@@ -5485,7 +5485,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.6 · 26 Oct 2026 21:46';
+const APP_VERSION='v10.6 · 26 Oct 2026 21:54';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5910,7 +5910,7 @@ async function applySeeds(){
 STATE.live=STATE.live||{status:'idle',rows:[],at:null,msg:'',busy:false};
 let LIVE_TIMER=null, LIVE_MAP=null;
 function liveAge(ts){ const t=Date.parse(ts); return isNaN(t)?null:(Date.now()-t)/60000; }
-function liveStatus(p){ const a=liveAge(p.ts); if(a===null) return {k:'grey',t:'No time'}; if(a<=30) return num(p.speed)>=5?{k:'green',t:'Moving'}:{k:'amber',t:'Stopped / idle'}; if(a<=360) return {k:'amber',t:'No signal 30m+'}; return {k:'red',t:'Offline'}; }
+function liveStatus(p){ const a=liveAge(p.ts); if(a===null) return {k:'grey',t:'No time'}; if(a<=30) return num(p.speed)>=5?{k:'green',t:'Moving'}:{k:'amber',t:'Stopped / idle'}; if(a<=360) return {k:'amber',t:'No signal 30m+'}; if(a<=4320) return {k:'amber',t:'Parked / ignition off'}; return {k:'red',t:'Offline 3d+'}; }
 function liveAgo(ts){ const a=liveAge(ts); if(a===null) return '—'; if(a<1) return 'just now'; if(a<60) return Math.round(a)+' min ago'; if(a<1440) return Math.round(a/60)+' h ago'; return Math.round(a/1440)+' d ago'; }
 async function fetchLive(manual){
   if(!GAS_CONFIGURED) return; const L=STATE.live; if(L.busy) return; L.busy=true; if(manual||!L.rows.length){ L.status='loading'; if(STATE.tab==='live') render(); }
@@ -5923,8 +5923,18 @@ async function fetchLive(manual){
   L.busy=false; if(STATE.tab==='live') render();
 }
 function liveRows(){
-  return (STATE.live.rows||[]).map(p=>{ const m=matchTruck(p.reg||p.name||''); const v=m.v; const key=v?v.id:('~'+normReg(p.reg||p.name));
-    return Object.assign({},p,{label:v?v.regNo:String(p.reg||p.name||'—').toUpperCase(),inReg:!!v,st:liveStatus(p),driver:lastDriverOf(key)||''}); })
+  const vs=STATE.data.vehicles||[], raw=STATE.live.rows||[];
+  const hit=raw.map(p=>matchTruck(p.reg||p.name||'').v||null);
+  const usedV={}; hit.forEach(v=>{ if(v) usedV[v.id]=1; });
+  const dg=t=>String(t||'').replace(/\D/g,'');
+  // MiX and the registry sometimes spell the same truck differently (AKM853ZX vs AKM853XG, SGM628XC vs AKM628XG):
+  // pair them when the number part is the same and unique on both sides.
+  raw.forEach((p,i)=>{ if(hit[i]) return; const d=dg(p.reg||p.name); if(d.length<3) return;
+    const fc=raw.filter((q,j)=>!hit[j]&&dg(q.reg||q.name)===d), vc=vs.filter(v=>!usedV[v.id]&&dg(v.regNo)===d);
+    if(fc.length===1&&vc.length===1){ hit[i]=vc[0]; usedV[vc[0].id]=1; p._fuzzy=1; } });
+  return raw.map((p,i)=>{ const v=hit[i]; const key=v?v.id:('~'+normReg(p.reg||p.name));
+    const mix=String(p.reg||p.name||'').toUpperCase();
+    return Object.assign({},p,{label:v?v.regNo:mix||'—',mixName:(v&&normReg(v.regNo)!==normReg(mix))?mix:'',inReg:!!v,st:liveStatus(p),driver:lastDriverOf(key)||''}); })
     .sort((a,b)=>({green:0,amber:1,red:2,grey:3})[a.st.k]-({green:0,amber:1,red:2,grey:3})[b.st.k]||String(a.label).localeCompare(String(b.label),undefined,{numeric:true}));
 }
 function renderLivePage(){
@@ -5939,9 +5949,9 @@ function renderLivePage(){
     3. Add your MiX login, Client Id/Secret and group id in <i>Project Settings → Script properties</i>, then deploy a new version of the web app.<br>
     Then press “Refresh now” — the trucks appear here.</div></div>`;
   const body=L.status==='notset'?setup:(L.status==='error'?`<div class="note warn">${esc(L.msg)}</div>${setup}`:(!rows.length?`<div class="card dim" style="padding:22px;text-align:center;">${L.status==='loading'?'Loading positions…':'No positions yet — press Refresh now.'}</div>`:`
-    <div class="grid cols-3" style="margin-bottom:12px;"><div class="card kpi"><div class="label">Moving</div><div class="value" style="color:var(--green);">${c.green}</div></div><div class="card kpi"><div class="label">Stopped / no recent signal</div><div class="value" style="color:var(--amber);">${c.amber}</div></div><div class="card kpi"><div class="label">Offline (6h+)</div><div class="value" style="color:${c.red?'var(--red)':'var(--dim)'};">${c.red}</div></div></div>
+    <div class="grid cols-3" style="margin-bottom:12px;"><div class="card kpi"><div class="label">Moving</div><div class="value" style="color:var(--green);">${c.green}</div></div><div class="card kpi"><div class="label">Stopped / parked</div><div class="value" style="color:var(--amber);">${c.amber}</div></div><div class="card kpi"><div class="label">Offline (3 days+)</div><div class="value" style="color:${c.red?'var(--red)':'var(--dim)'};">${c.red}</div></div></div>
     <div id="live-map" style="height:380px;border-radius:12px;overflow:hidden;margin-bottom:14px;background:var(--panel2,#111);display:flex;align-items:center;justify-content:center;"><span class="dim small">Loading map…</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Status</th><th>Speed</th><th>Last update</th><th>Position</th><th>Last driver</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.label)}</b>${r.inReg?'':' <span class="tag amber">not in registry</span>'}</td><td><span class="tag ${r.st.k}">${esc(r.st.t)}</span></td><td>${r.speed===undefined||r.speed===null?'—':fmt(num(r.speed))+' km/h'}</td><td>${esc(liveAgo(r.ts))}</td><td>${r.lat!=null&&r.lon!=null?`<a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" rel="noopener" style="color:var(--teal);">${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)}</a>`:'—'}</td><td>${esc(r.driver||'—')}</td></tr>`).join('')}${missing.map(v=>`<tr style="opacity:.85"><td><b>${esc(v.regNo)}</b></td><td><span class="tag red">No GPS from tracker</span></td><td>—</td><td>—</td><td class="dim small">MiX has no recent location for this truck — check the tracker</td><td>${esc(lastDriverOf(v.id)||'')}</td></tr>`).join('')}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Status</th><th>Speed</th><th>Last update</th><th>Position</th><th>Last driver</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.label)}</b>${r.mixName?` <span class="dim small">(MiX: ${esc(r.mixName)})</span>`:''}${r.inReg?'':' <span class="tag amber">not in registry</span>'}</td><td><span class="tag ${r.st.k}">${esc(r.st.t)}</span></td><td>${r.speed===undefined||r.speed===null?'—':fmt(num(r.speed))+' km/h'}</td><td>${esc(liveAgo(r.ts))}</td><td>${r.lat!=null&&r.lon!=null?`<a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" rel="noopener" style="color:var(--teal);">${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)}</a>`:'—'}</td><td>${esc(r.driver||'—')}</td></tr>`).join('')}${missing.map(v=>`<tr style="opacity:.85"><td><b>${esc(v.regNo)}</b></td><td><span class="tag red">No GPS from tracker</span></td><td>—</td><td>—</td><td class="dim small">MiX has no recent location for this truck — check the tracker</td><td>${esc(lastDriverOf(v.id)||'')}</td></tr>`).join('')}</tbody></table></div>
     ${missing.length?`<div class="dim small" style="margin-top:8px;">${rows.length} of ${rows.length+missing.length} trucks are reporting a position. ${missing.length} show no GPS data from MiX (tracker not installed, powered or reporting); they appear on the map automatically once they report.</div>`:''}`));
   return `<div class="topbar"><div><h1>Live Map</h1><div class="sub">Current position of every truck, from MiX Telematics. Refreshes every minute while this page is open.</div></div>
     <div class="topbar-right"><span class="dim small">${L.at?'Updated '+esc(liveAgo(L.at)):''}</span> <button class="btn small" data-live-refresh="1">${L.busy?'Refreshing…':'↻ Refresh now'}</button></div></div>${body}`;
