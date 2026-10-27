@@ -403,7 +403,7 @@
 const STORAGE_KEYS = {
   transport:'vms:transport', journey:'vms:journey', inspections:'vms:inspections',
   pretrip:'vms:pretrip', safety:'vms:safety', vehicles:'vms:vehicles',
-  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', seeds:'vms:seeds', portFiles:'vms:portFiles', targets:'vms:targets'
+  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', seeds:'vms:seeds', portFiles:'vms:portFiles', lastSeen:'vms:lastSeen', routeRefs:'vms:routeRefs', targets:'vms:targets'
 };
 
 // Route definitions per the fleet's fixed daily trip & duration targets.
@@ -446,7 +446,7 @@ const FUEL_CALC_URL = "https://claude.ai/public/artifacts/d45cbde1-5358-4c10-875
 let STATE = {
   loading:true, tab:'summary', maintView:'ops', repairWindow:30, truckDetail:null, transportRoute:'ALL', transportMaterial:'ALL', safetyView:'kpi', hsseTab:'overview', hsseWeek:null, hsseBand:'ALL', driverDetail:null, hsseMsg:null,
   periodByDept:{transport:'lastweek', journey:'lastweek', inspections:'lastweek', safety:'lastweek', maintenance:'lastweek', costkm:'lastweek'},
-  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{}, portFiles:[] },
+  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{}, portFiles:[], lastSeen:{}, routeRefs:{} },
   targets:{...DEFAULT_TARGETS},
   toast:null, settingsOpen:false, syncing:false, lastSync:null, connectionError:null,
   reportWeekEnding: null, reportPreparedBy:'', fuelWeekEnding:null
@@ -551,6 +551,8 @@ async function loadAll(opts){
       portUpdates: safeParseJSON(json[STORAGE_KEYS.portUpdates], []),
       seeds: safeParseJSON(json[STORAGE_KEYS.seeds], {}),
       portFiles: safeParseJSON(json[STORAGE_KEYS.portFiles], []),
+      lastSeen: safeParseJSON(json[STORAGE_KEYS.lastSeen], {}),
+      routeRefs: safeParseJSON(json[STORAGE_KEYS.routeRefs], {}),
     };
     normalizeHsseWeeks(newData.hsseScores);
     const newTargets = {...DEFAULT_TARGETS, ...safeParseJSON(json[STORAGE_KEYS.targets], {})};
@@ -5485,7 +5487,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v10.6 · 26 Oct 2026 21:54';
+const APP_VERSION='v11.0 · 27 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5905,57 +5907,258 @@ async function applySeeds(){
   }
 }
 
-/* ============================================================ live.js ============================================================ */
-/* ===== Live Map: current truck positions from the MiX Telematics feed (via the Google Apps Script backend) ===== */
-STATE.live=STATE.live||{status:'idle',rows:[],at:null,msg:'',busy:false};
+/* ============================================================ live.js (v11: Fleet Watch) ============================================================ */
+/* ===== Live Map + Fleet Watch: positions, trails, trips/stops, route deviation, tamper watch, driver events, fuel vs km, insights ===== */
+STATE.live=STATE.live||{};
+Object.assign(STATE.live,{status:STATE.live.status||'idle',rows:STATE.live.rows||[],silent:[],at:null,msg:'',busy:false,watchOff:false,sub:'overview',hist:null,histAt:0,histBusy:false,histHours:0,ev:null,evAt:0,evBusy:false,sel:'',win:24,rref:'',lsSaved:0});
 let LIVE_TIMER=null, LIVE_MAP=null;
+const FW_SPEED=80, FW_MIN=60000;
+const FW_SUBS=[['overview','Overview'],['trails','Trails & routes'],['trips','Trips & stops'],['tamper','Tamper watch'],['events','Driver events'],['fuel','Fuel vs km']];
+/* approximate depots — used only for the wide default corridor until you save a real standard route */
+const FW_PLACES={apapa:[6.449,3.359],ewekoro:[6.935,3.230],sagamu:[6.835,3.645]};
+const FW_DEFAULT={gypsum_ewekoro:{pts:[FW_PLACES.apapa,FW_PLACES.ewekoro],km:16},gypsum_sagamu:{pts:[FW_PLACES.apapa,FW_PLACES.sagamu],km:18},clinker:{pts:[FW_PLACES.ewekoro,FW_PLACES.sagamu],km:16}};
+const FW_TAMPER_RE=/tamper|disconnect|unplug|power.*(lost|cut|off|fail|remov)|main.*(power|supply)|battery|jam|antenna|removed|cover|gps.*(lost|fail|fault)|device.*(fault|remov|reset)/i;
+
+/* ---------- small helpers ---------- */
 function liveAge(ts){ const t=Date.parse(ts); return isNaN(t)?null:(Date.now()-t)/60000; }
-function liveStatus(p){ const a=liveAge(p.ts); if(a===null) return {k:'grey',t:'No time'}; if(a<=30) return num(p.speed)>=5?{k:'green',t:'Moving'}:{k:'amber',t:'Stopped / idle'}; if(a<=360) return {k:'amber',t:'No signal 30m+'}; if(a<=4320) return {k:'amber',t:'Parked / ignition off'}; return {k:'red',t:'Offline 3d+'}; }
 function liveAgo(ts){ const a=liveAge(ts); if(a===null) return '—'; if(a<1) return 'just now'; if(a<60) return Math.round(a)+' min ago'; if(a<1440) return Math.round(a/60)+' h ago'; return Math.round(a/1440)+' d ago'; }
+function liveStatus(p){ const a=liveAge(p.ts); if(a===null) return {k:'grey',t:'No time'}; if(a<=30) return num(p.speed)>=5?{k:'green',t:'Moving'}:{k:'amber',t:'Stopped / idle'}; if(a<=360) return {k:'amber',t:'No signal 30m+'}; if(a<=4320) return {k:'amber',t:'Parked / ignition off'}; return {k:'red',t:'Offline 3d+'}; }
+function fwHav(a1,o1,a2,o2){ const r=Math.PI/180, R=6371, dA=(a2-a1)*r, dO=(o2-o1)*r, x=Math.sin(dA/2)**2+Math.cos(a1*r)*Math.cos(a2*r)*Math.sin(dO/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
+function fwSegDist(p,a,b){ const k=Math.cos(p[0]*Math.PI/180), X=q=>[(q[1]-p[1])*k*111.32,(q[0]-p[0])*111.32], A=X(a), B=X(b), dx=B[0]-A[0], dy=B[1]-A[1], L=dx*dx+dy*dy; let t=L?((-A[0])*dx+(-A[1])*dy)/L:0; t=Math.max(0,Math.min(1,t)); return Math.hypot(A[0]+t*dx,A[1]+t*dy); }
+function fwPolyDist(p,poly){ if(!poly||!poly.length) return null; if(poly.length===1) return fwHav(p[0],p[1],poly[0][0],poly[0][1]); let m=1e9; for(let i=0;i<poly.length-1;i++){ const d=fwSegDist(p,poly[i],poly[i+1]); if(d<m) m=d; } return m; }
+function fwTime(sec){ const d=new Date(sec*1000); return d.toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }
+function fwDur(min){ min=Math.round(min); return min<60?min+' min':(Math.floor(min/60)+' h '+String(min%60).padStart(2,'0')+' m'); }
+function fwMap(lat,lon,label){ return `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" rel="noopener" style="color:var(--teal);">${label||(Number(lat).toFixed(4)+', '+Number(lon).toFixed(4))}</a>`; }
+function fwRouteLabel(k){ return (ROUTES[k]&&ROUTES[k].label)||k; }
+function fwRef(k){ const r=(STATE.data.routeRefs||{})[k]; return r&&r.pts&&r.pts.length>1?r:null; }
+function fwCorridor(k){ const r=fwRef(k); if(r) return {pts:r.pts,km:3,saved:true}; const d=FW_DEFAULT[k]; return d?{pts:d.pts,km:d.km,saved:false}:null; }
+
+/* ---------- data loading ---------- */
 async function fetchLive(manual){
   if(!GAS_CONFIGURED) return; const L=STATE.live; if(L.busy) return; L.busy=true; if(manual||!L.rows.length){ L.status='loading'; if(STATE.tab==='live') render(); }
   try{
-    const res=await fetch(`${GAS_URL}?action=positions&_=${Date.now()}`); const txt=await res.text(); let j=null; try{ j=JSON.parse(txt); }catch(e){}
-    if(j&&j.ok&&Array.isArray(j.positions)){ L.rows=j.positions; L.at=j.at||new Date().toISOString(); L.status='ok'; L.msg=''; }
-    else if(j&&j.ok===false){ L.status='error'; L.msg=String(j.error||'The tracking feed returned an error.'); }
-    else { L.status='notset'; L.msg=''; }
+    let j=null; const get=async a=>{ const res=await fetch(`${GAS_URL}?action=${a}&_=${Date.now()}`); const txt=await res.text(); try{ return JSON.parse(txt); }catch(e){ return null; } };
+    j=await get('watch');
+    if(j&&j.ok&&Array.isArray(j.trucks)){ L.rows=j.trucks; L.silent=j.silent||[]; L.watchOff=false; L.at=j.at||new Date().toISOString(); L.status='ok'; L.msg=''; }
+    else { j=await get('positions');
+      if(j&&j.ok&&Array.isArray(j.positions)){ L.rows=j.positions; L.silent=j.noPosition||[]; L.watchOff=true; L.at=j.at||new Date().toISOString(); L.status='ok'; L.msg=''; }
+      else if(j&&j.ok===false){ L.status='error'; L.msg=String(j.error||'The tracking feed returned an error.'); }
+      else { L.status='notset'; L.msg=''; } }
+    if(L.status==='ok') fwRememberPositions();
   }catch(e){ L.status='error'; L.msg='Could not reach the backend: '+(e&&e.message?e.message:e); }
   L.busy=false; if(STATE.tab==='live') render();
+  if(L.status==='ok'&&!L.watchOff&&STATE.tab==='live') fetchHist();
 }
+async function fetchHist(hours){
+  const L=STATE.live; hours=Math.max(hours||48,(L.sub==='fuel'||L.win>48)?168:0); if(L.histBusy||L.watchOff) return; if(L.hist&&L.histHours>=hours&&Date.now()-L.histAt<300000) return; L.histBusy=true;
+  try{ const res=await fetch(`${GAS_URL}?action=history&hours=${hours}&_=${Date.now()}`); const j=JSON.parse(await res.text()); if(j&&j.ok){ L.hist=j; L.histAt=Date.now(); L.histHours=hours; } else L.hist={ok:false,error:(j&&j.error)||'history not available',trucks:{}}; }catch(e){ L.hist={ok:false,error:'history not available',trucks:{}}; } L.histHours=hours; L.histAt=Date.now();
+  L.histBusy=false; if(STATE.tab==='live') render();
+}
+async function fetchEvents(force){
+  const L=STATE.live; if(L.evBusy||L.watchOff) return; if(!force&&L.ev&&Date.now()-L.evAt<600000) return; L.evBusy=true; if(STATE.tab==='live') render();
+  try{ const res=await fetch(`${GAS_URL}?action=events&hours=72&_=${Date.now()}`); const j=JSON.parse(await res.text()); L.ev=j&&j.ok?j:{ok:false,error:(j&&j.error)||'events not available',events:[],counts:{},names:{},drivers:{}}; L.evAt=Date.now(); }catch(e){ L.ev={ok:false,error:'MiX events could not be loaded',events:[],counts:{},names:{},drivers:{}}; }
+  L.evBusy=false; if(STATE.tab==='live') render();
+}
+/* keep the last place every truck was ever seen, so trucks that go silent still have a last position */
+function fwRememberPositions(){
+  const ls=STATE.data.lastSeen||(STATE.data.lastSeen={}); let ch=false;
+  liveRows().forEach(r=>{ if(r.lat==null||r.lon==null||!r.ts) return; const k=normReg(r.label), o=ls[k]; if(!o||String(r.ts)>String(o.ts)){ ls[k]={ts:r.ts,lat:r.lat,lon:r.lon,speed:r.speed==null?null:r.speed,addr:r.addr||'',label:r.label}; ch=true; } });
+  if(ch&&Date.now()-STATE.live.lsSaved>600000){ STATE.live.lsSaved=Date.now(); persist('lastSeen'); }
+}
+
+/* ---------- pair feed rows with the registry ---------- */
 function liveRows(){
   const vs=STATE.data.vehicles||[], raw=STATE.live.rows||[];
   const hit=raw.map(p=>matchTruck(p.reg||p.name||'').v||null);
   const usedV={}; hit.forEach(v=>{ if(v) usedV[v.id]=1; });
   const dg=t=>String(t||'').replace(/\D/g,'');
-  // MiX and the registry sometimes spell the same truck differently (AKM853ZX vs AKM853XG, SGM628XC vs AKM628XG):
-  // pair them when the number part is the same and unique on both sides.
   raw.forEach((p,i)=>{ if(hit[i]) return; const d=dg(p.reg||p.name); if(d.length<3) return;
     const fc=raw.filter((q,j)=>!hit[j]&&dg(q.reg||q.name)===d), vc=vs.filter(v=>!usedV[v.id]&&dg(v.regNo)===d);
     if(fc.length===1&&vc.length===1){ hit[i]=vc[0]; usedV[vc[0].id]=1; p._fuzzy=1; } });
   return raw.map((p,i)=>{ const v=hit[i]; const key=v?v.id:('~'+normReg(p.reg||p.name));
     const mix=String(p.reg||p.name||'').toUpperCase();
-    return Object.assign({},p,{label:v?v.regNo:mix||'—',mixName:(v&&normReg(v.regNo)!==normReg(mix))?mix:'',inReg:!!v,st:liveStatus(p),driver:lastDriverOf(key)||''}); })
-    .sort((a,b)=>({green:0,amber:1,red:2,grey:3})[a.st.k]-({green:0,amber:1,red:2,grey:3})[b.st.k]||String(a.label).localeCompare(String(b.label),undefined,{numeric:true}));
+    return Object.assign({},p,{key,vid:v?v.id:'',label:v?v.regNo:mix||'—',mixName:(v&&normReg(v.regNo)!==normReg(mix))?mix:'',inReg:!!v,st:liveStatus(p),driver:lastDriverOf(key)||''}); });
 }
+function fwAssign(key){
+  const t=todayStr(), y=new Date(Date.now()-86400000), ys=y.getFullYear()+'-'+String(y.getMonth()+1).padStart(2,'0')+'-'+String(y.getDate()).padStart(2,'0'); let best=null;
+  (STATE.data.transport||[]).forEach(r=>{ if(trKey(r)!==key||!r.route||r.date<ys||r.date>t) return; if(!best||r.date>best.date) best=r; });
+  return best?{route:best.route,date:best.date,driver:best.driverName||'',dest:best.destination||''}:null;
+}
+/* one row per truck: all registry trucks first, then any MiX unit that is not in the registry */
+function fleetRows(){
+  const L=STATE.live, feed=liveRows(), byKey={}; feed.forEach(r=>{ byKey[r.key]=r; });
+  const ls=STATE.data.lastSeen||{}, out=[], seen={};
+  const add=(key,vid,label,cur,inReg)=>{
+    const nk=normReg(label); if(seen[nk]) return; seen[nk]=1;
+    const hs=fwHistFor(cur&&cur.id,label); let pos=null,src='none';
+    if(cur&&cur.lat!=null){ pos={lat:cur.lat,lon:cur.lon,ts:cur.ts,speed:cur.speed,addr:cur.addr||''}; src='live'; }
+    else if(ls[nk]){ pos=ls[nk]; src='saved'; }
+    else if(hs&&hs.p.length){ const q=hs.p[hs.p.length-1]; pos={lat:q[1],lon:q[2],ts:new Date(q[0]*1000).toISOString(),speed:q[3],addr:''}; src='log'; }
+    let st; if(cur) st=cur.st; else if(pos){ const a=liveAge(pos.ts); st={k:'red',t:a!==null&&a<4320?'No signal':'Silent since '+liveAgo(pos.ts)}; } else st={k:'red',t:'No GPS from tracker'};
+    out.push({key,vid,label,mixName:cur?cur.mixName:'',inReg,cur,pos,src,st,hs,pts:hs?hs.p:[],driver:(cur&&cur.driver)||lastDriverOf(key)||'',asg:fwAssign(key),assetId:cur&&cur.id});
+  };
+  const vs=STATE.data.vehicles||[]; vs.forEach(v=>{ const cur=feed.find(r=>r.vid===v.id); add(v.id,v.id,v.regNo,cur||null,true); });
+  feed.forEach(r=>{ if(!r.inReg) add(r.key,'',r.label,r,false); });
+  return out.sort((a,b)=>({green:0,amber:1,red:2,grey:3})[a.st.k]-({green:0,amber:1,red:2,grey:3})[b.st.k]||String(a.label).localeCompare(String(b.label),undefined,{numeric:true}));
+}
+function fwHistFor(assetId,label){
+  const H=STATE.live.hist; if(!H||!H.trucks) return null; if(assetId&&H.trucks[assetId]) return H.trucks[assetId];
+  const nk=normReg(label), dg=String(label).replace(/\D/g,''); const ids=Object.keys(H.trucks);
+  for(const id of ids){ if(normReg(H.trucks[id].reg)===nk) return H.trucks[id]; }
+  if(dg.length>=3){ const m=ids.filter(id=>String(H.trucks[id].reg).replace(/\D/g,'')===dg); if(m.length===1) return H.trucks[m[0]]; }
+  return null;
+}
+
+/* ---------- movement analysis from the saved trail ---------- */
+function fwStops(pts,minMin){
+  // a stop = consecutive fixes that are slow and stay within 250 m; length is until the next moving fix
+  const out=[]; let i=0; minMin=minMin||20;
+  while(i<pts.length){ const p=pts[i]; if(num(p[3])>=5){ i++; continue; }
+    let j=i; while(j+1<pts.length&&num(pts[j+1][3])<5&&fwHav(p[1],p[2],pts[j+1][1],pts[j+1][2])<0.25) j++;
+    const endT=(j+1<pts.length?pts[j+1][0]:pts[j][0]); const m=(endT-p[0])/60;
+    if(m>=minMin) out.push({t0:p[0],t1:endT,min:m,lat:p[1],lon:p[2],open:j+1>=pts.length}); i=j+1; }
+  return out;
+}
+function fwKm(pts){ let k=0; for(let i=1;i<pts.length;i++){ const d=fwHav(pts[i-1][1],pts[i-1][2],pts[i][1],pts[i][2]), dt=pts[i][0]-pts[i-1][0]; if(dt>0&&d/(dt/3600)<160) k+=d; } return k; }
+function fwOdoFactor(pts){ const r=[]; for(let i=1;i<pts.length;i++){ const a=pts[i-1],b=pts[i]; if(a[4]==null||b[4]==null) continue; const d=fwHav(a[1],a[2],b[1],b[2]); if(b[0]-a[0]<=1200&&d>=1&&b[4]>a[4]) r.push((b[4]-a[4])/d); } if(r.length<5) return null; r.sort((x,y)=>x-y); const m=r[r.length>>1]; return m>200?1/1000:1; }
+function fwKnownPlaces(rows){
+  const all=[]; rows.forEach(r=>fwStops(r.pts,20).forEach(s=>all.push({lat:s.lat,lon:s.lon,key:r.key}))); const cl=[];
+  all.forEach(s=>{ let c=cl.find(x=>fwHav(x.lat,x.lon,s.lat,s.lon)<0.4); if(!c){ c={lat:s.lat,lon:s.lon,n:0,trucks:{}}; cl.push(c); } c.n++; c.trucks[s.key]=1; });
+  return cl.filter(c=>c.n>=3||Object.keys(c.trucks).length>=2);
+}
+
+/* ---------- the rules ("Fleet Watch") ---------- */
+function fwAnalyze(rows){
+  const gf=fwOdoFactor([].concat(...rows.map(x=>x.pts))), L=STATE.live, A={}, F=[], now=Date.now(), nowS=now/1000, hasHist=!!(L.hist&&L.hist.ok&&!L.hist.empty);
+  const evs=(L.ev&&L.ev.ok)?L.ev:null; const places=hasHist?fwKnownPlaces(rows):[];
+  const push=(r,sev,type,title,detail,fix)=>{ const f={key:r.key,label:r.label,sev,type,title,detail,fix}; F.push(f); (A[r.key]=A[r.key]||[]).push(f); };
+  rows.forEach(r=>{
+    const pts=r.pts, last=r.pos, age=last?liveAge(last.ts):null, cur=r.cur, drvR=(r.asg&&r.asg.driver)||r.driver||'the driver', drv=esc(drvR), ad=last&&last.addr?esc(last.addr):'';
+    const recent=pts.filter(p=>p[0]>nowS-86400);
+    // --- tamper / device health ---
+    if(last&&age!==null&&age>45&&age<10080&&num(last.speed)>=5) push(r,'high','tamper','Tracker went quiet while the truck was moving',`Last report ${liveAgo(last.ts)} at ${Math.round(num(last.speed))} km/h${ad?' near '+ad:''}. Nothing since. This is the pattern of an unplugged, cut or jammed tracker (or a dead battery / no network).`,`Call ${drvR} now and ask where the truck is. If it stays silent, send someone to inspect the tracker power and aerial.`);
+    if(r.asg&&(!last||age===null||age>720)) push(r,'high','tamper','Truck has a trip logged but the tracker is silent',`${r.asg.date} trip on ${fwRouteLabel(r.asg.route)} (${drv}) but the tracker ${last?'last reported '+liveAgo(last.ts):'has never reported'}. The truck cannot be followed.`,'Check the tracker power and SIM today; ask the driver to confirm the truck’s position and give the odometer reading.');
+    if(cur&&age!==null&&age<=30){ const bad=[]; if(cur.sats!=null&&cur.sats<=3) bad.push(cur.sats+' satellites'); if(cur.hdop!=null&&cur.hdop>=5) bad.push('HDOP '+cur.hdop); if(cur.avl===false) bad.push('GPS fix not valid'); if(bad.length) push(r,'med','tamper','Poor or blocked GPS signal',bad.join(', ')+'. A jammer or covered aerial gives this, so does a bad aerial or parking under cover.','If it repeats outside a depot or underpass, have the aerial checked or look for a GPS jammer in the cab.'); }
+    if(hasHist&&pts.length>3){
+      const f=fwOdoFactor(pts)||gf, c72=pts.filter(p=>p[0]>nowS-72*3600);
+      if(f){ for(let i=1;i<c72.length;i++){ const a=c72[i-1],b=c72[i]; if(b[0]-a[0]>1500&&a[4]!=null&&b[4]!=null){ const odo=(b[4]-a[4])*f, d=fwHav(a[1],a[2],b[1],b[2]); if(odo-d>10){ push(r,'high','tamper','Distance travelled while the tracker was off',`Between ${fwTime(a[0])} and ${fwTime(b[0])} the odometer advanced about ${Math.round(odo)} km but no route was recorded (${fwDur((b[0]-a[0])/60)} gap, only ${Math.round(d)} km in a straight line).`,`Ask ${drvR} what the truck did in that window. The tracker was disconnected, jammed or without power while it drove.`); break; } } } }
+      for(let i=1;i<recent.length;i++){ const a=recent[i-1],b=recent[i], d=fwHav(a[1],a[2],b[1],b[2]), dt=(b[0]-a[0])/3600; if(dt>0&&dt<2&&d>5&&d/dt>160){ push(r,'med','tamper','Position jumped',`Between ${fwTime(a[0])} and ${fwTime(b[0])} the position moved ${Math.round(d)} km (${Math.round(d/dt)} km/h). That is not possible by road. It is a GPS glitch or a spoofing device.`,'Compare with the driver’s trip record. Repeated jumps on one truck means inspect the tracker.'); break; } }
+      let gaps=0; for(let i=1;i<recent.length;i++){ const a=recent[i-1],b=recent[i]; if(b[0]-a[0]>1800&&num(a[3])>=5) gaps++; }
+      if(gaps>=3) push(r,'med','tamper','Tracker drops out repeatedly while moving',`${gaps} times in the last 24 h the tracker stopped reporting for 30+ min straight after the truck had been moving.`,'Loose wiring or a switched-off tracker. Have the installer check the connector and fuse.');
+    }
+    if(evs){ const hit=evs.events.filter(e=>String(e.a)===String(r.assetId)&&FW_TAMPER_RE.test(evs.names[e.t]||'')); if(hit.length){ const nm=evs.names[hit[0].t]; push(r,'high','tamper','MiX reported a device event: '+nm,`${hit.length} such event${hit.length>1?'s':''} in the last 72 h, latest ${hit[0].ts?new Date(hit.sort((a,b)=>String(b.ts).localeCompare(String(a.ts)))[0].ts).toLocaleString():''}.`,'Treat as a tamper report: confirm with the driver and the installer.'); } }
+    // --- route deviation ---
+    if(r.asg&&r.asg.route){ const cor=fwCorridor(r.asg.route);
+      if(cor){ const day0=Date.parse(r.asg.date+'T00:00:00')/1000, w=pts.filter(p=>p[0]>=Math.max(day0,nowS-72*3600)); let run=[],worst=null;
+        const ptsAll=w.slice(); if(cur&&cur.lat!=null&&age!==null&&age<=30&&num(cur.speed)>=5) ptsAll.push([now/1000,cur.lat,cur.lon,cur.speed]);
+        ptsAll.forEach(p=>{ const d=fwPolyDist([p[1],p[2]],cor.pts); if(d>cor.km&&num(p[3])>=5){ run.push([p,d]); if(!worst||d>worst[1]) worst=[p,d]; if(run.length>=3&&worst) r._off=worst; } else if(run.length<3) run=[]; });
+        if(r._off){ const p=r._off[0]; push(r,'high','route',`Off the ${fwRouteLabel(r.asg.route)} route`,`${Math.round(r._off[1])} km away from the ${cor.saved?'saved standard':'expected'} corridor at ${fwTime(p[0])} (${fwMap(p[1],p[2],'see place')}). ${drv} was moving at ${Math.round(num(p[3]))} km/h.${cor.saved?'':' (Corridor is approximate — save a real standard route in Trails & routes to make this exact.)'}`,`Ask ${drvR} for the reason. Check the trip time and diesel used against the route average.`); }
+        delete r._off; }
+      else if(r.asg.route!=='east'&&r.asg.route!=='other') { /* no corridor yet for this route */ }
+    }
+    if(!r.asg&&cur&&age!==null&&age<=30&&num(cur.speed)>=20) push(r,'low','route','Truck is moving with no trip logged',`Moving at ${Math.round(num(cur.speed))} km/h${cur.addr?' near '+esc(cur.addr):''} but there is no Transport Ops entry for it in the last 2 days.`,'Ask dispatch which trip this is, or log it in Transport Ops.');
+    // --- driver safety ---
+    if(recent.length){ const fast=recent.filter(p=>num(p[3])>FW_SPEED); if(fast.length>=2){ const mx=Math.max(...fast.map(p=>num(p[3]))); push(r,mx>=100?'high':'med','safety','Speeding on the road',`${fast.length} readings above ${FW_SPEED} km/h in the last 24 h, top speed ${Math.round(mx)} km/h.`,`Speak to ${drvR}. Feed this into the weekly HSSE scorecard.`); } }
+    // --- stops away from usual places ---
+    if(hasHist&&r.asg){ fwStops(recent,45).forEach(s=>{ if(places.length&&!places.some(c=>fwHav(c.lat,c.lon,s.lat,s.lon)<0.5)){ if(!r._unplanned) r._unplanned=s; } }); if(r._unplanned){ const s=r._unplanned; push(r,'low','route','Long stop away from the usual places',`Stopped ${fwDur(s.min)} from ${fwTime(s.t0)} at ${fwMap(s.lat,s.lon,'this spot')}, which is not a place trucks normally stop.`,'Ask the driver (rest stop, breakdown, queue or unauthorised stop).'); delete r._unplanned; } }
+    if(!hasHist) return;
+  });
+  // fuel hints from the existing route insights
+  try{ const S=routeFuelStats('lastweek'); routeFuelInsights(S).filter(x=>x.sev==='red').slice(0,3).forEach(x=>F.push({key:'',label:'Fuel',sev:'med',type:'fuel',title:'Fuel outlier last week',detail:x.text,fix:'Open Fuel & Deliveries → Route insights.'})); }catch(e){}
+  const o={high:0,med:1,low:2}; F.sort((a,b)=>o[a.sev]-o[b.sev]||String(a.label).localeCompare(String(b.label),undefined,{numeric:true}));
+  return {A,F,hasHist,places};
+}
+
+/* ---------- rendering ---------- */
+function fwSevTag(s){ return s==='high'?'red':(s==='med'?'amber':'teal'); }
+function fwChips(A,key){ const a=A[key]||[]; if(!a.length) return '<span class="dim small">—</span>'; const m={}; a.forEach(x=>{ m[x.type]=Math.max(m[x.type]||0,x.sev==='high'?3:x.sev==='med'?2:1); }); const nm={tamper:'Device',route:'Route',safety:'Speed',fuel:'Fuel'}; return Object.keys(m).map(t=>`<span class="tag ${m[t]===3?'red':m[t]===2?'amber':'teal'}">${nm[t]||t}</span>`).join(' '); }
+function fwFindingsCard(F,limit,title){
+  const list=limit?F.slice(0,limit):F;
+  if(!F.length) return `<div class="card" style="border-left:3px solid var(--green);margin-bottom:14px;"><div style="font-weight:600;">Fleet Watch — nothing needs attention right now</div><div class="dim small" style="margin-top:4px;">No tamper signs, route deviations or speeding found in the data received so far.</div></div>`;
+  return `<div class="card" style="border-left:3px solid var(--${F.some(x=>x.sev==='high')?'red':'amber'});margin-bottom:14px;"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><div style="font-weight:600;">${esc(title||'Fleet Watch — what needs your attention')}</div><div class="dim small">${F.filter(x=>x.sev==='high').length} urgent · ${F.filter(x=>x.sev==='med').length} to check · ${F.filter(x=>x.sev==='low').length} for information</div></div>
+   <div style="margin-top:8px;display:grid;gap:8px;">${list.map(f=>`<div style="padding:9px 11px;border-radius:9px;background:var(--panel-2);"><div><span class="tag ${fwSevTag(f.sev)}">${f.sev==='high'?'Urgent':f.sev==='med'?'Check':'Info'}</span> <b>${esc(f.label)}</b> — ${esc(f.title)}</div><div class="small" style="margin-top:4px;line-height:1.55;">${f.detail}</div><div class="small" style="margin-top:3px;color:var(--teal);">→ ${esc(f.fix)}</div></div>`).join('')}</div>
+   ${limit&&F.length>limit?`<div class="dim small" style="margin-top:8px;">${F.length-limit} more — see the Tamper watch and Trails tabs.</div>`:''}<div class="dim small" style="margin-top:8px;">Automatic checks on tracker data, trip entries and fuel records (rule-based, not guesses). A flag means “look at this”, not proof by itself.</div></div>`;
+}
+function fwSetup(){ return `<div class="card" style="border-left:3px solid var(--amber);"><div style="font-weight:600;">Live tracking is not connected yet</div><div class="dim small" style="margin-top:6px;line-height:1.7;">Add the MiX positions script to the shared spreadsheet (Extensions → Apps Script) and set the Script properties, then press Refresh now.</div></div>`; }
+function fwUpgradeNote(){ const L=STATE.live; if(L.watchOff) return `<div class="note warn" style="margin-bottom:12px;"><b>Tamper, route and trail checks need the Watch add-on.</b> The app is only getting basic positions. Add <b>FleetDesk_Watch.gs</b> to the Apps Script (3 steps at the top of that file), deploy a new version, then press Refresh. Until then only last position and status can be shown.</div>`; const H=L.hist; if(H&&H.ok&&H.empty) return `<div class="note warn" style="margin-bottom:12px;">The position logger has not saved anything yet. In Apps Script run <b>fdInstallLogger</b> once. Trails, trips, deviation and tamper checks fill in as positions are saved every 5 minutes.</div>`; if(H&&H.ok===false) return `<div class="note warn" style="margin-bottom:12px;">Position history could not be read: ${esc(H.error)}.</div>`; if(H&&H.ok&&H.loggerSince){ const since=new Date(H.loggerSince); if(!isNaN(since)&&Date.now()-since<172800000) return `<div class="dim small" style="margin-bottom:10px;">Position history started ${esc(since.toLocaleString())}. Trails and checks get more reliable as it builds up.</div>`; } return ''; }
+
 function renderLivePage(){
-  const L=STATE.live; const rows=liveRows(); const c={green:0,amber:0,red:0};
-  rows.forEach(r=>{ if(c[r.st.k]!==undefined) c[r.st.k]++; });
-  const reg=(STATE.data.vehicles||[]); const seen={}; rows.forEach(r=>{ if(r.inReg) seen[normReg(r.label)]=1; });
-  const missing=reg.filter(v=>!seen[normReg(v.regNo)]);
-  const setup=`<div class="card" style="border-left:3px solid var(--amber);"><div style="font-weight:600;">Live tracking is not connected yet</div>
-    <div class="dim small" style="margin-top:6px;line-height:1.7;">This page shows where every truck is right now, straight from MiX Telematics. It needs a one-time set-up on the shared spreadsheet’s script:<br>
-    1. Ask MiX support (Support SR) for a <b>MiX Integrate Client Id &amp; Secret</b> — data centre <b>ZA</b>. Save the secret when it is shown, it cannot be shown again.<br>
-    2. Open the FleetDesk script (Google Sheet → Extensions → Apps Script). Paste the supplied <b>FleetDesk_MiX_Positions.gs</b> code and follow the 3 lines at its top.<br>
-    3. Add your MiX login, Client Id/Secret and group id in <i>Project Settings → Script properties</i>, then deploy a new version of the web app.<br>
-    Then press “Refresh now” — the trucks appear here.</div></div>`;
-  const body=L.status==='notset'?setup:(L.status==='error'?`<div class="note warn">${esc(L.msg)}</div>${setup}`:(!rows.length?`<div class="card dim" style="padding:22px;text-align:center;">${L.status==='loading'?'Loading positions…':'No positions yet — press Refresh now.'}</div>`:`
-    <div class="grid cols-3" style="margin-bottom:12px;"><div class="card kpi"><div class="label">Moving</div><div class="value" style="color:var(--green);">${c.green}</div></div><div class="card kpi"><div class="label">Stopped / parked</div><div class="value" style="color:var(--amber);">${c.amber}</div></div><div class="card kpi"><div class="label">Offline (3 days+)</div><div class="value" style="color:${c.red?'var(--red)':'var(--dim)'};">${c.red}</div></div></div>
-    <div id="live-map" style="height:380px;border-radius:12px;overflow:hidden;margin-bottom:14px;background:var(--panel2,#111);display:flex;align-items:center;justify-content:center;"><span class="dim small">Loading map…</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Status</th><th>Speed</th><th>Last update</th><th>Position</th><th>Last driver</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.label)}</b>${r.mixName?` <span class="dim small">(MiX: ${esc(r.mixName)})</span>`:''}${r.inReg?'':' <span class="tag amber">not in registry</span>'}</td><td><span class="tag ${r.st.k}">${esc(r.st.t)}</span></td><td>${r.speed===undefined||r.speed===null?'—':fmt(num(r.speed))+' km/h'}</td><td>${esc(liveAgo(r.ts))}</td><td>${r.lat!=null&&r.lon!=null?`<a href="https://www.google.com/maps?q=${r.lat},${r.lon}" target="_blank" rel="noopener" style="color:var(--teal);">${Number(r.lat).toFixed(4)}, ${Number(r.lon).toFixed(4)}</a>`:'—'}</td><td>${esc(r.driver||'—')}</td></tr>`).join('')}${missing.map(v=>`<tr style="opacity:.85"><td><b>${esc(v.regNo)}</b></td><td><span class="tag red">No GPS from tracker</span></td><td>—</td><td>—</td><td class="dim small">MiX has no recent location for this truck — check the tracker</td><td>${esc(lastDriverOf(v.id)||'')}</td></tr>`).join('')}</tbody></table></div>
-    ${missing.length?`<div class="dim small" style="margin-top:8px;">${rows.length} of ${rows.length+missing.length} trucks are reporting a position. ${missing.length} show no GPS data from MiX (tracker not installed, powered or reporting); they appear on the map automatically once they report.</div>`:''}`));
-  return `<div class="topbar"><div><h1>Live Map</h1><div class="sub">Current position of every truck, from MiX Telematics. Refreshes every minute while this page is open.</div></div>
-    <div class="topbar-right"><span class="dim small">${L.at?'Updated '+esc(liveAgo(L.at)):''}</span> <button class="btn small" data-live-refresh="1">${L.busy?'Refreshing…':'↻ Refresh now'}</button></div></div>${body}`;
+  const L=STATE.live; const rows=fleetRows(); const AN=fwAnalyze(rows); const c={green:0,amber:0,red:0}; rows.forEach(r=>{ if(c[r.st.k]!==undefined) c[r.st.k]++; });
+  const tabs=`<div class="tabs">${FW_SUBS.map(([k,l])=>`<button class="${L.sub===k?'active':''}" data-live-sub="${k}">${l}${k==='tamper'&&AN.F.filter(f=>f.type==='tamper').length?` <span class="tag red" style="margin-left:4px;">${AN.F.filter(f=>f.type==='tamper').length}</span>`:''}</button>`).join('')}</div>`;
+  let body='';
+  if(L.status==='notset') body=fwSetup();
+  else if(L.status==='error') body=`<div class="note warn">${esc(L.msg)}</div>${fwSetup()}`;
+  else if(!rows.length||(L.status==='loading'&&!L.rows.length)) body=`<div class="card dim" style="padding:22px;text-align:center;">${L.status==='loading'?'Loading positions…':'No positions yet — press Refresh now.'}</div>`;
+  else body=fwUpgradeNote()+({overview:fwOverview,trails:fwTrails,trips:fwTrips,tamper:fwTamper,events:fwEvents,fuel:fwFuel}[L.sub]||fwOverview)(rows,AN,c);
+  return `<div class="topbar"><div><h1>Live Map</h1><div class="sub">Where every truck is, where it has been, and what needs attention. Refreshes every minute while this page is open.</div></div>
+    <div class="topbar-right"><span class="dim small">${L.at?'Updated '+esc(liveAgo(L.at)):''}</span> <button class="btn small" data-live-refresh="1">${L.busy?'Refreshing…':'↻ Refresh now'}</button></div></div>${tabs}${body}`;
 }
+function fwPosCell(r){ if(!r.pos) return '<span class="dim small">Never reported to MiX in the last 7 days</span>'; const t=r.pos.addr?esc(r.pos.addr):(Number(r.pos.lat).toFixed(4)+', '+Number(r.pos.lon).toFixed(4)); return fwMap(r.pos.lat,r.pos.lon,t)+(r.src!=='live'?` <span class="dim small">(last known)</span>`:''); }
+function fwOverview(rows,AN,c){
+  const reporting=rows.filter(r=>r.src==='live').length, withPos=rows.filter(r=>r.pos).length, urgent=AN.F.filter(f=>f.sev==='high').length;
+  return `<div class="grid cols-4" style="margin-bottom:12px;"><div class="card kpi"><div class="label">Moving</div><div class="value" style="color:var(--green);">${c.green}</div></div><div class="card kpi"><div class="label">Stopped / parked</div><div class="value" style="color:var(--amber);">${c.amber}</div></div><div class="card kpi"><div class="label">Silent / offline</div><div class="value" style="color:${c.red?'var(--red)':'var(--dim)'};">${c.red}</div></div><div class="card kpi"><div class="label">Urgent alerts</div><div class="value" style="color:${urgent?'var(--red)':'var(--dim)'};">${urgent}</div></div></div>
+   ${fwFindingsCard(AN.F,6)}
+   <div id="live-map" style="height:380px;border-radius:12px;overflow:hidden;margin-bottom:14px;background:var(--panel-2);display:flex;align-items:center;justify-content:center;"><span class="dim small">Loading map…</span></div>
+   <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Status</th><th>Last known position</th><th>Last seen</th><th>Speed</th><th>Driver / today’s route</th><th>Flags</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.label)}</b>${r.mixName?` <span class="dim small">(MiX: ${esc(r.mixName)})</span>`:''}${r.inReg?'':' <span class="tag amber">not in registry</span>'}</td><td><span class="tag ${r.st.k}">${esc(r.st.t)}</span></td><td>${fwPosCell(r)}</td><td>${r.pos?esc(liveAgo(r.pos.ts)):'—'}</td><td>${r.cur&&r.cur.speed!=null?fmt(num(r.cur.speed))+' km/h':'—'}</td><td>${esc(r.driver||'—')}${r.asg?`<div class="dim small">${esc(fwRouteLabel(r.asg.route))}</div>`:''}</td><td>${fwChips(AN.A,r.key)}</td></tr>`).join('')}</tbody></table></div>
+   <div class="dim small" style="margin-top:8px;">${reporting} of ${rows.length} trucks are reporting now; ${withPos} have a last known position. ${rows.length-withPos?`${rows.length-withPos} have never sent a position to MiX in the last 7 days (tracker not installed, powered or registered under another plate). `:''}Last known positions are saved here automatically, so a truck that goes quiet keeps its last place.</div>`;
+}
+function fwSelRow(rows){ const L=STATE.live; let r=rows.find(x=>x.key===L.sel); if(!r) r=rows.find(x=>x.pts.length)||rows[0]; return r; }
+function fwTruckSelect(rows,sel){ return `<select data-live-sel="1" style="width:auto;max-width:220px;">${rows.map(r=>`<option value="${esc(r.key)}"${r.key===sel.key?' selected':''}>${esc(r.label)}${r.pts.length?'':' (no trail)'}</option>`).join('')}</select>`; }
+function fwTrails(rows,AN){
+  const L=STATE.live, r=fwSelRow(rows), win=L.win||24, from=Date.now()/1000-win*3600, p=r.pts.filter(x=>x[0]>=from);
+  const rk=L.rref||(r.asg&&r.asg.route)||'gypsum_ewekoro', cor=fwCorridor(rk), saved=!!fwRef(rk);
+  const routeKeys=Object.keys(ROUTES).filter(k=>k!=='other'&&k!=='east');
+  const offs=cor?p.filter(x=>num(x[3])>=5&&fwPolyDist([x[1],x[2]],cor.pts)>cor.km):[];
+  return `<div class="card" style="margin-bottom:12px;"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Truck</b> ${fwTruckSelect(rows,r)} <b>Show</b> <select data-live-win="1" style="width:auto;">${[6,12,24,48].map(h=>`<option value="${h}"${h===win?' selected':''}>last ${h} h</option>`).join('')}</select> <b>Compare with route</b> <select data-live-rref="1" style="width:auto;">${routeKeys.map(k=>`<option value="${k}"${k===rk?' selected':''}>${esc(fwRouteLabel(k))}${fwRef(k)?' ✓':''}</option>`).join('')}</select></div>
+   <div class="dim small" style="margin-top:8px;line-height:1.6;">${r.asg?`Assigned today: <b>${esc(fwRouteLabel(r.asg.route))}</b> (${esc(r.asg.driver||r.driver||'driver not entered')}). `:'No trip logged for this truck in the last 2 days. '}${p.length?`${p.length} saved positions, ${fmt(fwKm(p),0)} km in this window.`:'No saved trail in this window yet.'}
+   ${cor?`<br>Route check: ${saved?'<b>saved standard route</b> (±3 km)':'<b>approximate corridor</b> (±'+cor.km+' km, drawn from Apapa/Ewekoro/Sagamu)'}${offs.length?` — <span style="color:var(--red);">${offs.length} moving reading${offs.length>1?'s':''} outside it</span>`:p.length?' — truck stayed inside it':''}.`:'<br>No route line for this route yet — save one below.'}</div>
+   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn small" data-live-saveref="${r.key}"${p.length>5?'':' disabled'}>Save this trail as the standard ${esc(fwRouteLabel(rk))} route</button>${saved?`<button class="btn small" data-live-delref="${rk}">Remove saved route</button>`:''}</div>
+   <div class="dim small" style="margin-top:6px;">Pick a truck that drove the correct road for the whole trip, then save it. After that, every truck assigned to that route is checked against it (±3 km).</div></div>
+   <div id="live-map" style="height:430px;border-radius:12px;overflow:hidden;margin-bottom:14px;background:var(--panel-2);display:flex;align-items:center;justify-content:center;"><span class="dim small">Loading map…</span></div>
+   ${fwFindingsCard(AN.F.filter(f=>f.type==='route'),0,'Route deviations found')}`;
+}
+function fwTrips(rows,AN){
+  const L=STATE.live, r=fwSelRow(rows), win=L.win||24, from=Date.now()/1000-win*3600;
+  const sum=rows.map(x=>{ const p=x.pts.filter(q=>q[0]>=from), st=fwStops(p,20); let mv=0; for(let i=1;i<p.length;i++){ if(num(p[i-1][3])>=5) mv+=Math.min(p[i][0]-p[i-1][0],900); } const mx=p.reduce((m,q)=>Math.max(m,num(q[3])),0); return {x,p,st,km:fwKm(p),mv:mv/3600,mx,trips:Math.max(0,st.length+(p.length&&num(p[p.length-1][3])>=5?1:0)-(p.length&&num(p[0][3])<5?0:0))}; }).filter(s=>s.p.length);
+  const mine=r.pts.filter(q=>q[0]>=from), stops=fwStops(mine,20);
+  return `<div class="card" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Window</b> <select data-live-win="1" style="width:auto;">${[12,24,48,72,168].map(h=>`<option value="${h}"${h===win?' selected':''}>last ${h>=48?h/24+' days':h+' h'}</option>`).join('')}</select><span class="dim small">Distance, moving time and stops from the saved position trail. Stops are 20 minutes or longer.</span></div>
+   ${sum.length?`<div class="table-wrap"><table><thead><tr><th>Truck</th><th>Distance</th><th>Moving time</th><th>Stops (20 min+)</th><th>Longest stop</th><th>Top speed</th></tr></thead><tbody>${sum.map(s=>`<tr><td><b>${esc(s.x.label)}</b></td><td>${fmt(s.km,0)} km</td><td>${fmt(s.mv,1)} h</td><td>${s.st.length}</td><td>${s.st.length?fwDur(Math.max(...s.st.map(z=>z.min))):'—'}</td><td style="color:${s.mx>FW_SPEED?'var(--red)':'inherit'}">${s.mx?Math.round(s.mx)+' km/h':'—'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="card dim" style="padding:18px;">No saved trails in this window yet. They build up every 5 minutes once the logger is on.</div>'}
+   <div class="card" style="margin-top:14px;"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><b>Stops for</b> ${fwTruckSelect(rows,r)}</div>${stops.length?`<div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>From</th><th>To</th><th>Length</th><th>Place</th><th></th></tr></thead><tbody>${stops.map(s=>{ const known=AN.places.some(c=>fwHav(c.lat,c.lon,s.lat,s.lon)<0.5); return `<tr><td>${esc(fwTime(s.t0))}</td><td>${s.open?'now':esc(fwTime(s.t1))}</td><td>${fwDur(s.min)}</td><td>${fwMap(s.lat,s.lon)}</td><td>${known?'<span class="tag green">usual place</span>':(AN.places.length?'<span class="tag amber">unusual</span>':'')}</td></tr>`; }).join('')}</tbody></table></div>`:'<div class="dim small" style="margin-top:8px;">No stops of 20 minutes or longer for this truck in the window.</div>'}</div>`;
+}
+function fwTamper(rows,AN){
+  const T=AN.F.filter(f=>f.type==='tamper'); const nowS=Date.now()/1000;
+  return `${fwFindingsCard(T,0,'Tracker tamper & health flags')}
+   <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Last report</th><th>Satellites</th><th>HDOP</th><th>GPS valid</th><th>Dropouts (24 h)</th><th>Device status</th></tr></thead><tbody>${rows.map(r=>{ const cur=r.cur||{}, p24=r.pts.filter(q=>q[0]>nowS-86400); let gaps=0; for(let i=1;i<p24.length;i++){ if(p24[i][0]-p24[i-1][0]>1800&&num(p24[i-1][3])>=5) gaps++; }
+     const fl=(AN.A[r.key]||[]).filter(f=>f.type==='tamper'), bad=fl.some(f=>f.sev==='high'), warn=fl.length&&!bad; return `<tr><td><b>${esc(r.label)}</b></td><td>${r.pos?esc(liveAgo(r.pos.ts)):'never'}</td><td>${cur.sats!=null?cur.sats:'—'}</td><td>${cur.hdop!=null?cur.hdop:'—'}</td><td>${cur.avl===true?'Yes':cur.avl===false?'<span style="color:var(--red)">No</span>':'—'}</td><td>${r.pts.length?gaps:'—'}</td><td>${bad?'<span class="tag red">Suspect</span>':warn?'<span class="tag amber">Check</span>':r.pos?'<span class="tag green">OK</span>':'<span class="tag red">No tracker data</span>'}</td></tr>`; }).join('')}</tbody></table></div>
+   <div class="dim small" style="margin-top:10px;line-height:1.6;">What is checked: tracker silent while the truck was moving · distance driven while no route was recorded (odometer vs trail) · repeated drop-outs · position jumps · weak satellites / poor accuracy · trucks with a trip logged but no signal · device events from MiX (tamper, power disconnect, battery) when your MiX account reports them. A flag is a reason to ask the driver, not proof.</div>`;
+}
+function fwEvents(rows){
+  const L=STATE.live; if(L.watchOff) return `<div class="card dim" style="padding:18px;">Driver events need the Watch add-on (see the note above).</div>`;
+  if(!L.ev&&!L.evBusy) setTimeout(()=>fetchEvents(),0);
+  if(L.evBusy||!L.ev) return `<div class="card dim" style="padding:22px;text-align:center;">Loading driver events from MiX… this takes up to a minute.</div>`;
+  const E=L.ev; if(!E.ok) return `<div class="note warn">${esc(E.error)}</div><button class="btn small" data-live-evrefresh="1">Try again</button>`;
+  const nm=t=>E.names[t]||('Event type '+t), byDrv={}, types={};
+  E.events.forEach(e=>{ const d=e.d||('asset '+e.a); const k=E.drivers[e.d]||(e.d?'Driver '+e.d:'Unknown driver'); (byDrv[k]=byDrv[k]||{n:0,t:{}}); byDrv[k].n++; byDrv[k].t[e.t]=(byDrv[k].t[e.t]||0)+1; types[e.t]=(types[e.t]||0)+1; });
+  const tl=Object.keys(E.counts).sort((a,b)=>E.counts[b]-E.counts[a]); const top=tl.slice(0,8);
+  const dr=Object.keys(byDrv).sort((a,b)=>byDrv[b].n-byDrv[a].n).slice(0,25);
+  return `<div class="card" style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><b>MiX driver &amp; vehicle events — last 72 h</b><button class="btn small" data-live-evrefresh="1">↻ Reload</button></div><div class="dim small" style="margin-top:6px;">${E.events.length} events read.${E.err?' '+esc(E.err):''}${E.libErr?' Event names could not be loaded from MiX ('+esc(E.libErr)+'), so type numbers are shown.':''}</div></div>
+   <div class="table-wrap"><table><thead><tr><th>Event type</th><th>Count</th><th></th></tr></thead><tbody>${tl.map(t=>`<tr><td>${esc(nm(t))}</td><td>${E.counts[t]}</td><td>${FW_TAMPER_RE.test(E.names[t]||'')?'<span class="tag red">tamper / device</span>':''}</td></tr>`).join('')}</tbody></table></div>
+   <div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>Driver</th><th>Events</th>${top.map(t=>`<th>${esc(nm(t))}</th>`).join('')}</tr></thead><tbody>${dr.map(d=>`<tr><td><b>${esc(d)}</b></td><td>${byDrv[d].n}</td>${top.map(t=>`<td>${byDrv[d].t[t]||'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+function fwFuel(rows,AN){
+  const L=STATE.live; if(L.watchOff) return `<div class="card dim" style="padding:18px;">Fuel vs distance needs the Watch add-on (see the note above).</div>`;
+  if((!L.hist||L.histHours<168)&&!L.histBusy) setTimeout(()=>fetchHist(168),0);
+  if(L.histBusy||!L.hist||L.histHours<168) return `<div class="card dim" style="padding:22px;text-align:center;">Loading last week’s trails…</div>`;
+  const pr=periodRange('lastweek'), s0=Date.parse(pr.start+'T00:00:00')/1000, s1=Date.parse(pr.end+'T23:59:59')/1000, D={};
+  (STATE.data.dieselTrips||[]).filter(r=>inPeriod(r.date,'lastweek')).forEach(r=>{ const c=dieselCalc(r), k=r.vehicleId; if(!k) return; const o=D[k]||(D[k]={L:0,km:0,n:0}); o.L+=c.lt; o.km+=c.dist; o.n++; });
+  const out=rows.map(r=>{ const p=r.pts.filter(q=>q[0]>=s0&&q[0]<=s1), km=fwKm(p), d=D[r.vid]||null; return {r,km,d,has:p.length>3}; }).filter(x=>x.has||x.d);
+  const S=routeFuelStats('lastweek'), I=routeFuelInsights(S).slice(0,5);
+  return `<div class="dim small" style="margin-bottom:10px;">Last week (${esc(pr.start)} to ${esc(pr.end)}): distance from the tracker against the distance and litres logged in Fuel &amp; Deliveries.</div>
+   <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Tracker km</th><th>Logged km</th><th>Difference</th><th>Diesel litres</th><th>km/L (tracker)</th><th>Check</th></tr></thead><tbody>${out.map(x=>{ const diff=x.d&&x.d.km>0&&x.has?(x.km-x.d.km)/x.d.km*100:null, kl=x.d&&x.d.L>0&&x.has?x.km/x.d.L:null; const flag=diff!==null&&Math.abs(diff)>25; return `<tr><td><b>${esc(x.r.label)}</b></td><td>${x.has?fmt(x.km,0):'—'}</td><td>${x.d&&x.d.km?fmt(x.d.km,0):'—'}</td><td style="color:${flag?'var(--red)':'inherit'}">${diff!==null?(diff>0?'+':'')+fmt(diff,0)+'%':'—'}</td><td>${x.d?fmt(x.d.L,0):'—'}</td><td>${kl?fmt(kl,2):'—'}</td><td>${flag?`<span class="tag amber">${diff>0?'Tracker shows more km than logged':'Logged km higher than tracker'}</span>`:''}</td></tr>`; }).join('')||'<tr><td colspan="7" class="dim">Nothing to compare yet — trails need a full week of saved positions.</td></tr>'}</tbody></table></div>
+   ${I.length?`<div class="card" style="margin-top:14px;"><b>Route fuel insights</b><div style="margin-top:6px;display:grid;gap:6px;">${I.map(x=>`<div class="small"><span class="tag ${x.sev==='red'?'red':x.sev==='amber'?'amber':'teal'}">${x.sev==='red'?'Urgent':x.sev==='amber'?'Check':'Info'}</span> ${esc(x.text)}</div>`).join('')}</div></div>`:''}`;
+}
+
+/* ---------- map ---------- */
 function loadLeaflet(){
   if(window.L&&window.L.map) return Promise.resolve(true);
   if(loadLeaflet.p) return loadLeaflet.p;
@@ -5964,20 +6167,47 @@ function loadLeaflet(){
   return loadLeaflet.p;
 }
 async function drawLiveMap(){
-  const el=document.getElementById('live-map'); if(!el) return; const pts=liveRows().filter(r=>r.lat!=null&&r.lon!=null&&!isNaN(r.lat)&&!isNaN(r.lon));
+  const el=document.getElementById('live-map'); if(!el) return; const rows=fleetRows(); const AN=fwAnalyze(rows), L2=STATE.live;
+  const pts=rows.filter(r=>r.pos&&!isNaN(r.pos.lat)&&!isNaN(r.pos.lon));
   const ok=await loadLeaflet(); const el2=document.getElementById('live-map'); if(!el2) return;
   if(!ok||!pts.length){ el2.innerHTML=`<span class="dim small">${ok?'No positions to show.':'The map could not be loaded (check your connection) — the table below still shows every position.'}</span>`; return; }
   el2.innerHTML=''; if(LIVE_MAP){ try{ LIVE_MAP.remove(); }catch(e){} }
   const map=LIVE_MAP=L.map(el2,{scrollWheelZoom:false}); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
   const col={green:'#3fb950',amber:'#e8a33d',red:'#e1543f',grey:'#8b949e'}; const b=[];
-  pts.forEach(r=>{ const m=L.circleMarker([r.lat,r.lon],{radius:8,color:'#0b0e13',weight:1.5,fillColor:col[r.st.k],fillOpacity:.95}).addTo(map); m.bindPopup(`<b>${esc(r.label)}</b><br>${esc(r.st.t)}${r.speed!=null?' · '+fmt(num(r.speed))+' km/h':''}<br>${esc(liveAgo(r.ts))}${r.driver?'<br>Driver: '+esc(r.driver):''}`); m.bindTooltip(r.label,{direction:'top'}); b.push([r.lat,r.lon]); });
+  if(L2.sub==='trails'){
+    const r=fwSelRow(rows), win=L2.win||24, from=Date.now()/1000-win*3600, p=r.pts.filter(x=>x[0]>=from), rk=L2.rref||(r.asg&&r.asg.route)||'gypsum_ewekoro', cor=fwCorridor(rk);
+    if(cor){ L.polyline(cor.pts,{color:'#3fb950',weight:cor.saved?6:3,opacity:.55,dashArray:cor.saved?null:'8 8'}).addTo(map); cor.pts.forEach(q=>b.push(q)); if(!cor.saved) cor.pts.forEach(q=>L.circle(q,{radius:cor.km*1000,color:'#3fb950',weight:1,fillOpacity:.05}).addTo(map)); }
+    if(p.length){ L.polyline(p.map(q=>[q[1],q[2]]),{color:'#4da3ff',weight:3}).addTo(map); p.forEach(q=>b.push([q[1],q[2]]));
+      p.forEach(q=>{ if(cor&&num(q[3])>=5&&fwPolyDist([q[1],q[2]],cor.pts)>cor.km) L.circleMarker([q[1],q[2]],{radius:4,color:'#e1543f',fillColor:'#e1543f',fillOpacity:1,weight:1}).addTo(map).bindTooltip(fwTime(q[0])+' · '+Math.round(num(q[3]))+' km/h'); });
+      fwStops(p,20).forEach(s=>L.circleMarker([s.lat,s.lon],{radius:6,color:'#0b0e13',fillColor:'#e8a33d',fillOpacity:1,weight:1.5}).addTo(map).bindTooltip('Stop '+fwDur(s.min)+' · '+fwTime(s.t0)));
+      L.circleMarker([p[0][1],p[0][2]],{radius:6,color:'#fff',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(map).bindTooltip('Start '+fwTime(p[0][0])); }
+    if(r.pos) { L.circleMarker([r.pos.lat,r.pos.lon],{radius:9,color:'#0b0e13',weight:1.5,fillColor:col[r.st.k],fillOpacity:.95}).addTo(map).bindTooltip(r.label+' — '+liveAgo(r.pos.ts)); b.push([r.pos.lat,r.pos.lon]); }
+    if(b.length) map.fitBounds(b,{padding:[30,30],maxZoom:12}); else map.setView([6.9,3.4],9); return;
+  }
+  pts.forEach(r=>{ const bad=(AN.A[r.key]||[]).some(f=>f.sev==='high'); const live=r.src==='live';
+    const m=L.circleMarker([r.pos.lat,r.pos.lon],{radius:live?8:7,color:bad?'#e1543f':'#0b0e13',weight:bad?3:1.5,fillColor:col[r.st.k],fillOpacity:live?.95:.35}).addTo(map);
+    m.bindPopup(`<b>${esc(r.label)}</b><br>${esc(r.st.t)}${r.cur&&r.cur.speed!=null?' · '+fmt(num(r.cur.speed))+' km/h':''}<br>${live?'':'Last known: '}${esc(liveAgo(r.pos.ts))}${r.pos.addr?'<br>'+esc(r.pos.addr):''}${r.driver?'<br>Driver: '+esc(r.driver):''}${(AN.A[r.key]||[]).map(f=>'<br><span style="color:#c0392b">⚠ '+esc(f.title)+'</span>').join('')}`); m.bindTooltip(r.label,{direction:'top'}); b.push([r.pos.lat,r.pos.lon]); });
   map.fitBounds(b,{padding:[30,30],maxZoom:13});
 }
+
+/* ---------- events ---------- */
 function attachLiveEvents(app){
-  const b=app.querySelector('[data-live-refresh]'); if(b) b.addEventListener('click',()=>fetchLive(true));
-  if(STATE.tab==='live'){ drawLiveMap(); if(STATE.live.status==='idle') fetchLive(); }
+  const L=STATE.live, q=(s,f)=>app.querySelectorAll(s).forEach(f);
+  q('[data-live-refresh]',b=>b.addEventListener('click',()=>{ L.histAt=0; fetchLive(true); }));
+  q('[data-live-sub]',b=>b.addEventListener('click',()=>{ L.sub=b.dataset.liveSub; render(); if(L.sub==='fuel') fetchHist(168); else if(L.sub!=='overview'&&L.sub!=='events') fetchHist(); }));
+  q('[data-live-sel]',s=>s.addEventListener('change',()=>{ L.sel=s.value; L.rref=''; render(); }));
+  q('[data-live-win]',s=>s.addEventListener('change',()=>{ L.win=+s.value; if(L.win>48) fetchHist(168); render(); }));
+  q('[data-live-rref]',s=>s.addEventListener('change',()=>{ L.rref=s.value; render(); }));
+  q('[data-live-evrefresh]',b=>b.addEventListener('click',()=>fetchEvents(true)));
+  q('[data-live-saveref]',b=>b.addEventListener('click',async()=>{
+    const rows=fleetRows(), r=rows.find(x=>x.key===b.dataset.liveSaveref); if(!r) return; const from=Date.now()/1000-(L.win||24)*3600, p=r.pts.filter(x=>x[0]>=from); const rk=L.rref||(r.asg&&r.asg.route)||'gypsum_ewekoro';
+    const thin=[]; p.forEach(x=>{ const l=thin[thin.length-1]; if(!l||fwHav(l[0],l[1],x[1],x[2])>0.6) thin.push([+x[1].toFixed(5),+x[2].toFixed(5)]); });
+    if(thin.length<5){ showToast('Not enough movement in that window to save a route.'); return; }
+    STATE.data.routeRefs=Object.assign({},STATE.data.routeRefs||{},{[rk]:{pts:thin.slice(0,400),from:r.label,at:new Date().toISOString()}}); await persist('routeRefs'); showToast('Saved '+r.label+'’s trail as the standard '+fwRouteLabel(rk)+' route.'); render(); }));
+  q('[data-live-delref]',b=>b.addEventListener('click',async()=>{ const o=Object.assign({},STATE.data.routeRefs||{}); delete o[b.dataset.liveDelref]; STATE.data.routeRefs=o; await persist('routeRefs'); render(); }));
+  if(STATE.tab==='live'){ if(L.sub==='overview'||L.sub==='trails') drawLiveMap(); if(L.status==='idle') fetchLive(); else if(L.status==='ok'&&!L.hist&&!L.watchOff) fetchHist(); }
 }
-if(!LIVE_TIMER) LIVE_TIMER=setInterval(()=>{ if(STATE.tab==='live'&&!document.hidden) fetchLive(); },60000);
+if(!LIVE_TIMER) LIVE_TIMER=setInterval(()=>{ if(STATE.tab==='live'&&!document.hidden){ fetchLive(); } },60000);
 
 /* ============================================================ routefuel.js ============================================================ */
 /* ===== Route fuel insights: diesel litres and gas (SCM) per route, outliers and recommendations ===== */
