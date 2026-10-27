@@ -403,7 +403,7 @@
 const STORAGE_KEYS = {
   transport:'vms:transport', journey:'vms:journey', inspections:'vms:inspections',
   pretrip:'vms:pretrip', safety:'vms:safety', vehicles:'vms:vehicles',
-  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', seeds:'vms:seeds', portFiles:'vms:portFiles', lastSeen:'vms:lastSeen', routeRefs:'vms:routeRefs', targets:'vms:targets'
+  maintenance:'vms:maintenance', maintenanceDaily:'vms:maintenanceDaily', fuel:'vms:fuel', maintInspections:'vms:maintInspections', hsseScores:'vms:hsseScores', hsseLogs:'vms:hsseLogs', cngFills:'vms:cngFills', dieselTrips:'vms:dieselTrips', portFlags:'vms:portFlags', portUpdates:'vms:portUpdates', seeds:'vms:seeds', portFiles:'vms:portFiles', lastSeen:'vms:lastSeen', routeRefs:'vms:routeRefs', routePlans:'vms:routePlans', targets:'vms:targets'
 };
 
 // Route definitions per the fleet's fixed daily trip & duration targets.
@@ -412,14 +412,14 @@ const STORAGE_KEYS = {
 // go-load-offload window. Adjust durationTargetHrs below if that assumption is wrong.
 const ROUTES = {
   clinker:        {label:'Clinker — Ewekoro ⇄ Sagamu (to & fro)', tripsPerDayTarget:2, durationTargetHrs:8},
-  gypsum_ewekoro: {label:'Gypsum — Apapa → Ewekoro',               tripsPerDayTarget:1, durationTargetHrs:24},
-  gypsum_sagamu:  {label:'Gypsum — Apapa → Sagamu',                tripsPerDayTarget:1, durationTargetHrs:24},
+  gypsum_ewekoro: {label:'Gypsum — Apapa → Ewekoro',               tripsPerDayTarget:1, durationTargetHrs:16},
+  gypsum_sagamu:  {label:'Gypsum — Apapa → Sagamu',                tripsPerDayTarget:1, durationTargetHrs:16},
   gypsum_adumbu:  {label:'Gypsum — Adumbu → Ewekoro',              tripsPerDayTarget:4, durationTargetHrs:2},
-  gypsum_adumbu_sagamu: {label:'Gypsum — Adumbu → Sagamu',         tripsPerDayTarget:0, durationTargetHrs:null},
+  gypsum_adumbu_sagamu: {label:'Gypsum — Adumbu → Sagamu',         tripsPerDayTarget:2, durationTargetHrs:8},
   east:           {label:'East Deliveries',                        tripsPerDayTarget:0, durationTargetHrs:null},
   other:          {label:'Other / Ad-hoc',                         tripsPerDayTarget:0, durationTargetHrs:null},
 };
-const ROUTE_KEYS_TARGETED = Object.keys(ROUTES).filter(k=>['other','east','gypsum_adumbu_sagamu'].indexOf(k)<0);
+const ROUTE_KEYS_TARGETED = Object.keys(ROUTES).filter(k=>['other','east'].indexOf(k)<0);
 ROUTES.clinker.material='Clinker'; ROUTES.gypsum_ewekoro.material='Gypsum'; ROUTES.gypsum_sagamu.material='Gypsum'; ROUTES.gypsum_adumbu.material='Gypsum'; ROUTES.gypsum_adumbu_sagamu.material='Gypsum';
 
 const REPAIR_COMPONENTS = ['Engine','Brakes','Tyres / Wheels','Electrical','Gearbox / Transmission','Suspension','Cooling System','Hydraulics','Body / Chassis','Other'];
@@ -434,7 +434,7 @@ const DEFAULT_TARGETS = {
   roadPatrolWeeklyTarget: 2,       // Safety AND Maintenance each patrol 2x/week
   toolboxTalkWeeklyTarget: 1,      // Safety AND Maintenance each hold 1 toolbox talk/week
   checkCoverageTarget: 1.0,        // share of trips with a same-day pre-trip / post-trip check
-  truckTripsPerDayTarget: 0,       // per-truck trips/day for utilization; 0 = auto (fleet daily route target ÷ fleet size)
+  truckTripsPerDayTarget: 2,       // CNG truck target: 2 trips/day = 14/week = 56/month (0 = auto from route targets)
   workshopServiceCapacityPerWeek: 5, // trucks the workshop can service per week (predictive booking queue)
   cngLongTripsPerFill: 2,          // clinker/gypsum trips one CNG fill-up covers
   cngAdumbuTripsPerFill: 5,        // Adumbu trips one fill-up covers (together with 1 clinker/gypsum trip)
@@ -446,7 +446,7 @@ const FUEL_CALC_URL = "https://claude.ai/public/artifacts/d45cbde1-5358-4c10-875
 let STATE = {
   loading:true, tab:'summary', maintView:'ops', repairWindow:30, truckDetail:null, transportRoute:'ALL', transportMaterial:'ALL', safetyView:'kpi', hsseTab:'overview', hsseWeek:null, hsseBand:'ALL', driverDetail:null, hsseMsg:null,
   periodByDept:{transport:'lastweek', journey:'lastweek', inspections:'lastweek', safety:'lastweek', maintenance:'lastweek', costkm:'lastweek'},
-  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{}, portFiles:[], lastSeen:{}, routeRefs:{} },
+  data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{}, portFiles:[], lastSeen:{}, routeRefs:{}, routePlans:[] },
   targets:{...DEFAULT_TARGETS},
   toast:null, settingsOpen:false, syncing:false, lastSync:null, connectionError:null,
   reportWeekEnding: null, reportPreparedBy:'', fuelWeekEnding:null
@@ -553,6 +553,7 @@ async function loadAll(opts){
       portFiles: safeParseJSON(json[STORAGE_KEYS.portFiles], []),
       lastSeen: safeParseJSON(json[STORAGE_KEYS.lastSeen], {}),
       routeRefs: safeParseJSON(json[STORAGE_KEYS.routeRefs], {}),
+      routePlans: safeParseJSON(json[STORAGE_KEYS.routePlans], []),
     };
     normalizeHsseWeeks(newData.hsseScores);
     const newTargets = {...DEFAULT_TARGETS, ...safeParseJSON(json[STORAGE_KEYS.targets], {})};
@@ -685,7 +686,7 @@ function kpisTransport(recs){
 
 function kpisJourneyOverall(recs, period){
   const totalActual = recs.length;
-  const totalTarget = ROUTE_KEYS_TARGETED.reduce((a,k)=>a+scaledTarget(ROUTES[k].tripsPerDayTarget,'day',period),0);
+  const totalTarget = (STATE.data.vehicles||[]).length ? perTruckTripTarget(period).target*STATE.data.vehicles.length : ROUTE_KEYS_TARGETED.reduce((a,k)=>a+scaledTarget(ROUTES[k].tripsPerDayTarget,'day',period),0);
   const onTimeCount = recs.filter(r=>r.onTime==='Yes').length;
   const onTimePct = totalActual? onTimeCount/totalActual : 0;
   const riskCount = recs.filter(r=>r.riskAssessment==='Yes').length;
@@ -716,7 +717,7 @@ function kpisJourneyByRoute(recs, period){
     const routeRecs = recs.filter(r=>r.route===key);
     const target = scaledTarget(cfg.tripsPerDayTarget,'day',period);
     const actual = routeRecs.length;
-    const avgDurActual = avgBy(routeRecs,'durationActual');
+    const avgDurActual = avgBy(routeRecs.filter(r=>num(r.durationActual)>0),'durationActual');
     const tripsRatio = attainment(actual,target,'higher');
     const durRatio = routeRecs.length? attainment(avgDurActual,cfg.durationTargetHrs,'lower') : null;
     const ratios = [tripsRatio, durRatio].filter(r=>r!==null && r!==undefined);
@@ -830,7 +831,8 @@ function perTruckTripTarget(period){
   const fleetDaily = ROUTE_KEYS_TARGETED.reduce((a,k)=>a+ROUTES[k].tripsPerDayTarget,0);
   const manual = num(STATE.targets.truckTripsPerDayTarget);
   const perDay = manual>0 ? manual : (vehicles? fleetDaily/vehicles : 0);
-  return {perDay, target: scaledTarget(perDay,'day',period), auto: !(manual>0)};
+  const days=periodDays(period); let target; if(period==='lastweek'||period==='prevweek') target=perDay*7; else if(period==='lastmonth') target=perDay*28; else if(period==='month') target=Math.min(perDay*days,perDay*28); else target=scaledTarget(perDay,'day',period);
+  return {perDay, target, auto: !(manual>0)};
 }
 function kpisUtilization(period){
   const journey = filterPeriod(STATE.data.journey, period);
@@ -1212,7 +1214,8 @@ function renderDeptPage(deptKey){
 }
 
 /* ---------------- journey management (trip-level) ---------------- */
-function renderJourneyPage(){
+function jDurCell(r){ const t=jTarget(r.route), d=num(r.durationActual); return fmt(d,1)+' h'+(t&&d>t?' <span class="tag red">over '+t+'h</span>':''); }
+function renderJourneyPageCore(){
   const period = STATE.periodByDept.journey;
   const recs = filterPeriod(STATE.data.journey, period);
   const overall = kpisJourneyOverall(recs, period);
@@ -1236,7 +1239,7 @@ function renderJourneyPage(){
   ${dailyChecksSection()}
 
   <div class="section-title"><span>Trips by Route — Target vs Actual</span><div class="line"></div></div>
-  <div class="section-sub">Targets: Clinker 2/day (Ewekoro⇄Sagamu, 8h) · Gypsum Apapa→Ewekoro 1/day (24h) · Gypsum Apapa→Sagamu 1/day (24h*) · Gypsum Adumbu → Ewekoro 4/day (2h). *Apapa→Sagamu duration assumed same as Apapa→Ewekoro — confirm and adjust if different.</div>
+  <div class="section-sub">Targets per truck: Apapa⇄Sagamu 1 round trip/day (16h) · Apapa⇄Ewekoro 1 round trip/day (16h) · Adunbu⇄Sagamu 2 trips/day (8h) · Ewekoro⇄Sagamu 2 trips/day (8h) · Adumbu → Ewekoro 4/day (2h). Every CNG truck: 2 trips/day, 14/week, 56/month.</div>
   <div class="table-wrap"><table>
     <thead><tr><th>Route</th><th>Target Trips</th><th>Actual Trips</th><th>Avg Duration Actual</th><th>Duration Target</th><th>Status</th></tr></thead>
     <tbody>${byRoute.map(r=>`<tr><td style="white-space:normal;">${r.label}</td><td>${fmt(r.target,1)}</td><td>${fmt(r.actual)}</td><td>${r.actual?fmt(r.avgDurActual,1)+' h':'—'}</td><td>${r.durTarget!==null?r.durTarget+' h':'—'}</td><td><span class="tag ${r.status}">${statusLabel(r.status)}</span></td></tr>`).join('')}</tbody>
@@ -1255,9 +1258,10 @@ function renderJourneyPage(){
         <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
         <div><label>Truck No.</label><select name="vehicleId" required><option value="">Select truck…</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}">${v.regNo}</option>`).join('')}</select></div>
         <div><label>Driver Name</label><input type="text" name="driverName" placeholder="e.g. John Doe" required></div>
-        <div><label>Route</label><select name="route" required>${ROUTE_KEYS_TARGETED.concat(['gypsum_adumbu_sagamu','east','other']).map(k=>`<option value="${k}">${ROUTES[k].label}</option>`).join('')}</select></div>
+        <div><label>Route</label><select name="route" required>${ROUTE_KEYS_TARGETED.concat(['east','other']).map(k=>`<option value="${k}">${ROUTES[k].label}</option>`).join('')}</select></div>
         <div><label>Material</label><input type="text" name="material" list="dl-materials" placeholder="e.g. Clinker"></div>
-        <div><label>Duration Actual (hrs)</label><input type="number" name="durationActual" step="0.1" required></div>
+        <div><label>Transit time (hrs) — worked out from the times below</label><input type="number" name="durationActual" step="0.1"></div>
+        <div><label>Approved route (optional)</label><select name="planId"><option value="">Any approved route for this route</option>${(STATE.data.routePlans||[]).map(pl=>`<option value="${pl.id}">${esc(pl.name)}</option>`).join('')}</select></div>
         <div><label>Delay / Idling (hrs)</label><input type="number" name="delayHrs" step="0.1" value="0"></div>
         <div><label>Route Deviations (count)</label><input type="number" name="deviations" value="0"></div>
         <div><label>On-Time Arrival</label><select name="onTime"><option value="Yes">Yes</option><option value="No">No</option></select></div>
@@ -1265,6 +1269,7 @@ function renderJourneyPage(){
         <div><label>Driver Hours Violation</label><select name="driverHoursViolation"><option value="No">No</option><option value="Yes">Yes</option></select></div>
         <div><label>Notes</label><input type="text" name="notes" placeholder="Optional"></div>
       </div>
+      <div style="margin-top:14px;"><b>Trip times</b> <span class="dim small">— stamp each step with “Now” as it happens, or type the time in</span>${jTimeFields({},'jtr')}</div>
       <div id="trip-check-hint" class="small" style="margin-top:10px;"></div>
       <div class="form-actions"><button type="submit" class="btn primary">Save Trip</button><span class="dim small">Visible to the whole team instantly.</span></div>
     </form>
@@ -1272,8 +1277,8 @@ function renderJourneyPage(){
 
   <div class="section-title"><span>Trip Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records</span></div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Date</th><th>Truck No.</th><th>Driver</th><th>Route</th><th>Material</th><th>Duration</th><th>Delay</th><th>Deviations</th><th>On-Time</th><th>Risk Ass.</th><th>Hrs Viol.</th><th>Pre-Trip</th><th>Post-Trip</th><th></th></tr></thead>
-    <tbody>${allRecs.length? allRecs.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.driverName||'—'}</td><td style="white-space:normal;">${ROUTES[r.route]?ROUTES[r.route].label:r.route}</td><td>${esc(r.material||'—')}</td><td>${fmt(num(r.durationActual),1)} h</td><td>${fmt(num(r.delayHrs),1)} h</td><td>${num(r.deviations)}</td><td>${r.onTime}</td><td>${r.riskAssessment}</td><td>${r.driverHoursViolation}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Pre-Trip'))}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Post-Trip'))}</td><td><button class="btn ghost small" data-delete="journey:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="14">No trips logged yet — log the first one above.</td></tr>`}</tbody>
+    <thead><tr><th>Date</th><th>Truck No.</th><th>Driver</th><th>Route</th><th>Material</th><th>Transit</th><th>Timings</th><th>Delay</th><th>Deviations</th><th>On-Time</th><th>Risk Ass.</th><th>Hrs Viol.</th><th>Pre-Trip</th><th>Post-Trip</th><th></th></tr></thead>
+    <tbody>${allRecs.length? allRecs.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.driverName||'—'}</td><td style="white-space:normal;">${ROUTES[r.route]?ROUTES[r.route].label:r.route}</td><td>${esc(r.material||'—')}</td><td>${jDurCell(r)}</td><td><button class="btn ghost small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/8</button></td><td>${fmt(num(r.delayHrs),1)} h</td><td>${num(r.deviations)}</td><td>${r.onTime}</td><td>${r.riskAssessment}</td><td>${r.driverHoursViolation}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Pre-Trip'))}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Post-Trip'))}</td><td><button class="btn ghost small" data-delete="journey:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="15">No trips logged yet — log the first one above.</td></tr>`}</tbody>
   </table></div>`;
 }
 
@@ -2983,6 +2988,7 @@ function attachEvents(){
       if(dept==='maintenance') prepMaintRec(rec);
       let issueAdded=false; if(dept==='fuel') issueAdded=finalizeFuelEntry(rec);
       if(['cngFills'].indexOf(dept)>-1) compactRec(rec);
+      if(dept==='journey' && !finalizeJourney(rec)) return;
       STATE.data[dept] = [...STATE.data[dept], rec];
       form.reset();
       const dateEl = form.querySelector('input[name="date"]');
@@ -5476,6 +5482,7 @@ function attachEventsV10(app){
   attachPortEvents(app);
   attachBulkExtras(app);
   attachLiveEvents(app);
+  attachJourneyExtras(app);
   attachRouteFuel(app);
   app.querySelectorAll('[data-more-toggle]').forEach(b=>b.addEventListener('click',()=>{ STATE.moreOpen=!STATE.moreOpen; render(); }));
   app.querySelectorAll('[data-more-close]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el){ STATE.moreOpen=false; render(); } }));
@@ -5487,7 +5494,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v11.0 · 27 Oct 2026';
+const APP_VERSION='v11.1 · 27 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5886,6 +5893,7 @@ function addRouteTabs(files){
 /* ===== one-time data seeds ===== */
 const SEEDS={oct26:{"names":["clinker","APP-EWEK","APP-SHAGAMU","ADUNMBU-EWK","ITORI  -SHG","SLOUGH","EAST","IGBESA"],"sheets":{"clinker":[["TRUCK NO.","DATE","","","","","","","","","","WEIGHT","",""]],"APP-EWEK":[["TRUCK NUMBER ","DATE","TONNAGE","DRIVER NAME"],["AKM 285","2026-10-03",52.88,"julius"],["AKM 286","",50.06,"raimi"],["AKM 290","",51.74,"ayinde"],["AKM 848","",48.92,"ahmed"],["AKM 851","",53.04,"silas"],["AKM 854","",52.56,"okiki"],["T562","",49.48,"zubeiru"],["AKM 291","",46.5,""],["AKM 628","",45,""],["AKM 288","",44,""],["AKM 854","2026-10-04",49.58,""],["AKM 852","",47.52,""],["AKM 851","",51.44,""],["AKM 849","",51.4,""],["AKM 289","",48.02,""],["AKM 286","",52.24,""],["AKM 285","2026-10-06",44.58,""],["AKM 291","",46.76,""],["AKM 284","",47.38,""],["AKM 290","",48.74,""],["AKM 628","",47.86,""],["AKM 851","",50.94,""],["AKM 562","",50.64,""],["AKM 848","",44.7,""],["AKM 286","",51.18,""],["AKM 854","",50.14,""],["AKM 850","",46.64,""],["AKM 562","2026-10-08",41.52,""],["AKM 852","",37.7,""],["AKM 291","",48.58,""],["AKM 289","",50.8,""],["AKM 283","",43.86,""],["AKM 851","",49.14,""],["AKM 850","2026-10-09",42.84,""],["AKM 285","",42.26,""],["AKM 854","",47.06,""],["AKM 628","",38.16,""],["AKM 286","",47.5,""],["AKM 290","",48.38,""],["AKM 288","",49.76,""],["AKM 848","2026-10-11",50.98,""],["AKM 283","",46.36,""],["AKM 851","",45.12,""],["AKM 854","",46.16,""],["AKM 286","",48.26,""],["AKM 291","",44.74,""],["AKM 562","",47.74,""],["AKM 285","",45.22,""],["AKM 850","",47.1,""],["AKM 292","",49.42,""],["AKM 852","","",""],["AKM 562","2026-10-20",46.68,""],["AKM 854","",51.08,""],["AKM 291","",47.78,""],["AKM 283","",54.62,""],["AKM 851","",52.78,""],["","","=SUM(C2:C57)",""]],"APP-SHAGAMU":[["TRUCK NO","DATE","WEIGHT"],["AKM 854","2026-10-12",45.72],["AKM 851","",48.18],["AKM 283","",45.88],["AKM 291","",47.48],["AKM 562","",47.4],["","","=SUM(C2:C6)"]],"ADUNMBU-EWK":[["TRUCK NO","DATE","WEIGHT",""],["AKM 288","2026-10-01",42,""],["AKM 288","",46.54,""],["AKM 288","",44.2,""],["AKM 286","",45.1,""],["AKM 286","",47.74,""],["AKM 286","",44.3,""],["AKM 562","",48.8,""],["AKM 562","",43.4,""],["AKM 562","",47.26,""],["AKM 290","",42.42,""],["AKM 290","",40.64,""],["AKM 290","",46.38,""],["AKM 291","",46.08,""],["AKM 291","",42.44,""],["AKM 291","",45.24,""],["AKM 848","",44.82,""],["AKM 848","",42.9,""],["AKM 848","",53.02,""],["AKM 285","",47.08,""],["AKM 285","",44.32,""],["AKM 285","",47.48,""],["AKM 849","",44.7,""],["AKM 849","",39.26,""],["AKM 849","",44.94,""],["AKM 854","",41.3,""],["AKM 854","",40.4,""],["AKM 854","",45.16,""],["AKM 851","",38.72,""],["AKM 849","2026-10-02",43.96,""],["AKM 849","",42.56,""],["AKM 289","",42.94,""],["AKM 289","",45.94,""],["AKM 286","2026-10-03",52.68,""],["AKM 286","",53.48,""],["AKM 849","",49.58,""],["AKM 849","",51.02,""],["AKM 849","",44.56,""],["AKM 854","",48.88,""],["AKM 854","",52.56,""],["AKM 851","",47,""],["AKM 851","",48.54,""],["AKM 291","",51.26,""],["AKM 849","2026-10-05",46.48,""],["AKM 854","",49,""],["AKM 628","",51.78,""],["AKM 291","",42.52,""],["AKM 285","2026-10-07",48,""],["AKM 285","",44.72,""],["AKM 285","",46.2,""],["AKM 286","",52.5,""],["AKM 289","",46.52,""],["AKM 289","",45.52,""],["AKM 289","",47.74,""],["AKM 562","",46.2,""],["AKM 628","",42.18,""],["AKM 628","",45.9,""],["AKM 848","",40.12,""],["AKM 848","",42.36,""],["AKM 849","",51.5,""],["AKM 849","",41.48,""],["AKM 849","",44.04,""],["AKM 849","",48.16,""],["AKM 850","",45.66,""],["AKM 851","",49.44,""],["AKM 851","",44.12,""],["AKM 851","",46.52,""],["AKM 854","",47.06,""],["AKM 854","",47.34,""],["AKM 854","",44.04,""],["AKM 854","",46.98,""],["AKM 849","2026-10-09",48.26,""],["AKM 849","",51.5,""],["AKM 848","",45.5,""],["AKM 850","",43.14,""],["AKM 291","",40.42,""],["AKM 283","",44.68,""],["AKM 851","",47.8,""],["AKM 849","2026-10-10",49.42,""],["AKM 291","",45.04,""],["AKM 851","",49.1,""],["AKM 283","",50.86,""],["AKM285XG","2026-10-11","",""],["AKM851ZX","",45.12,""],[" AKM291XG","",44.74,""],["AKM286XG","",48.26,""],["AKM850ZX","",47.1,""],["AKM283XG","",46.36,""],["AKM854ZX","",46.16,""],["T27562LA","",47.74,""],["AKM848ZX","",50.98,""],["AKM292XG","",49.42,""],["AKM852ZX","","",""],["AKM 854","2026-10-12",44.06,""],["AKM 854","",47.26,""],["AKM 851","",46.26,""],["AKM 848","",53.62,""],["AKM 283","",43.8,""],["","","=SUM(C2:C98)",""]],"ITORI  -SHG":[["TRUCK NO","DATE","WEIGHT",""],["AKM 283","2026-10-14",43.74,""],["AKM 284","",38.92,""],["AKM 285","",41.84,""],["AKM 286","",39.94,""],["AKM 291","",34.42,""],["AKM 562","",38.7,""],["AKM 848","",39.18,""],["AKM 851","",36.88,""],["AKM 854","",39.16,""],["AKM 283","2026-10-15",40.2,""],["AKM 284","",40.22,""],["AKM 285","",33.98,""],["AKM 286","",35.72,""],["AKM 288","",34.16,""],["AKM 289","",36.16,""],["AKM 290","",38.62,""],["AKM 291","",42.68,""],["AKM 292","",40.56,""],["AKM 628","",37.66,""],["AKM 848","",40.2,""],["AKM 853","",32.74,""],["AKM 854","",37.6,""],["","2026-10-16","","RTSS"],["AKM 288","2026-10-17",43.8,""],["AKM 292","",41.44,""],["AKM 628","",42.63,""],["AKM 286","",43.02,""],["AKM 289","",44.26,""],["AKM 848","",40.08,""],["AKM 285","",42.2,""],["AKM 284","",44.18,""],["AKM 290","",40.16,""],["AKM 853","",42.26,""],["AKM 562","",40.3,""],["AKM 850","2026-10-18",40.5,""],["AKM 289","",45.4,""],["AKM 286","",43.18,""],["AKM 854","",47.82,""],["AKM 285","",51.84,""],["AKM 290","",40.38,""],["AKM 284","",43.62,""],["AKM 851","",43.58,""],["AKM 283","",51.7,""],["AKM 291","",46.02,""],["AKM 853","",42.18,""],["AKM 628","",45.2,""],["AKM 285","2026-10-19",49.02,""],["AKM 289","",48.14,""],["AKM 290","",47.12,1],["AKM 288","",40.02,""],["AKM 849","",48.9,""],["AKM 850","",46.8,""],["AKM 853","",45.12,""],["AKM 284","",46.24,""],["AKM 290","",49.04,2],["AKM 628","",48.8,1],["AKM 628","",41.94,2],["AKM 286","",39.84,""],["AKM 850","2026-10-20",46.72,""],["AKM 853","",48.46,1],["AKM 849","",39.46,1],["AKM 283","",47.78,""],["AKM 286","",47.46,1],["AKM 289","",45.02,""],["AKM 285","",48.34,""],["AKM 288","",48.6,""],["AKM 849","",43.7,2],["AKM 853","",46.38,2],["AKM 286","",46.22,2],["AKM 851","",50.12,""],["AKM 562","",45.3,""],["AKM 291","",39.32,""]],"SLOUGH":[["TRUCK NO","DATE"],["AKM 290","2026-10-11"],["AKM 284","2024-10-11"],["",""],["AKM 850","2026-10-20"],["AKM 284",""],["AKM 292",""]],"EAST":[["TRUCK DETAILS","LOADING LOCATION","MATERIAL","LOADING DATE","TAKEOFF DATE","ARRIVAL DATE","OFFLOADED DATE","OFFLOADING LOCATION","","BACKHAUL DESTINATION","MATERIAL","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""," EXTRA BACKHAUL DESTINATION","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""],["T23639LA","SHAGAMU","ANIMAL FEEDS","2026-10-05","2026-10-06","2026-10-08","2026-10-09","PHC","","PHC","FLOUR","2026-10-10","2026-10-10","","","","","","",""],["T23640LA","OGERE","ANIMAL FEEDS","2026-10-08","2026-10-09","","","UYO","","","","","","","","","","","",""],["T23641LA","SHAGAMU","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""],["T23642LA","IBADAN","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""]],"IGBESA":[["TRUCK NO","DRIVER","DESTINATION","LOADING DATE","OFFLOADING DATE"]]}}};
 async function applySeeds(){
+  try{ await applyTargetSeed(); }catch(e){ console.error(e); }
   if(typeof applyHsseSeed==='function'){ try{ await applyHsseSeed(); }catch(e){ console.error(e); } }
   if(typeof XLSX==='undefined'||!(STATE.data.vehicles||[]).length) return;
   const done=STATE.data.seeds||{}; let changed=false;
@@ -5931,7 +5939,8 @@ function fwDur(min){ min=Math.round(min); return min<60?min+' min':(Math.floor(m
 function fwMap(lat,lon,label){ return `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" rel="noopener" style="color:var(--teal);">${label||(Number(lat).toFixed(4)+', '+Number(lon).toFixed(4))}</a>`; }
 function fwRouteLabel(k){ return (ROUTES[k]&&ROUTES[k].label)||k; }
 function fwRef(k){ const r=(STATE.data.routeRefs||{})[k]; return r&&r.pts&&r.pts.length>1?r:null; }
-function fwCorridor(k){ const r=fwRef(k); if(r) return {pts:r.pts,km:3,saved:true}; const d=FW_DEFAULT[k]; return d?{pts:d.pts,km:d.km,saved:false}:null; }
+function fwCorridor(k,planId){ const parts=jCorridors(k,planId); if(parts.length) return {parts,pts:parts[0].pts,km:parts[0].km,saved:true,plan:true}; const r=fwRef(k); if(r) return {parts:[{pts:r.pts,km:3}],pts:r.pts,km:3,saved:true}; const d=FW_DEFAULT[k]; return d?{parts:[{pts:d.pts,km:d.km}],pts:d.pts,km:d.km,saved:false}:null; }
+function fwCorCheck(p,cor){ let best=1e9,off=true; cor.parts.forEach(x=>{ const d=fwPolyDist(p,x.pts); if(d<best) best=d; if(d<=x.km) off=false; }); return {d:best,off}; }
 
 /* ---------- data loading ---------- */
 async function fetchLive(manual){
@@ -5982,7 +5991,8 @@ function liveRows(){
 function fwAssign(key){
   const t=todayStr(), y=new Date(Date.now()-86400000), ys=y.getFullYear()+'-'+String(y.getMonth()+1).padStart(2,'0')+'-'+String(y.getDate()).padStart(2,'0'); let best=null;
   (STATE.data.transport||[]).forEach(r=>{ if(trKey(r)!==key||!r.route||r.date<ys||r.date>t) return; if(!best||r.date>best.date) best=r; });
-  return best?{route:best.route,date:best.date,driver:best.driverName||'',dest:best.destination||''}:null;
+  (STATE.data.journey||[]).forEach(r=>{ if(r.vehicleId!==key||!r.route||r.date<ys||r.date>t) return; if(!best||r.date>=best.date) best=r; });
+  return best?{route:best.route,date:best.date,driver:best.driverName||'',dest:best.destination||'',planId:best.planId||''}:null;
 }
 /* one row per truck: all registry trucks first, then any MiX unit that is not in the registry */
 function fleetRows(){
@@ -6048,19 +6058,22 @@ function fwAnalyze(rows){
     }
     if(evs){ const hit=evs.events.filter(e=>String(e.a)===String(r.assetId)&&FW_TAMPER_RE.test(evs.names[e.t]||'')); if(hit.length){ const nm=evs.names[hit[0].t]; push(r,'high','tamper','MiX reported a device event: '+nm,`${hit.length} such event${hit.length>1?'s':''} in the last 72 h, latest ${hit[0].ts?new Date(hit.sort((a,b)=>String(b.ts).localeCompare(String(a.ts)))[0].ts).toLocaleString():''}.`,'Treat as a tamper report: confirm with the driver and the installer.'); } }
     // --- route deviation ---
-    if(r.asg&&r.asg.route){ const cor=fwCorridor(r.asg.route);
+    if(r.asg&&r.asg.route){ const cor=fwCorridor(r.asg.route,r.asg.planId);
       if(cor){ const day0=Date.parse(r.asg.date+'T00:00:00')/1000, w=pts.filter(p=>p[0]>=Math.max(day0,nowS-72*3600)); let run=[],worst=null;
         const ptsAll=w.slice(); if(cur&&cur.lat!=null&&age!==null&&age<=30&&num(cur.speed)>=5) ptsAll.push([now/1000,cur.lat,cur.lon,cur.speed]);
-        ptsAll.forEach(p=>{ const d=fwPolyDist([p[1],p[2]],cor.pts); if(d>cor.km&&num(p[3])>=5){ run.push([p,d]); if(!worst||d>worst[1]) worst=[p,d]; if(run.length>=3&&worst) r._off=worst; } else if(run.length<3) run=[]; });
-        if(r._off){ const p=r._off[0]; push(r,'high','route',`Off the ${fwRouteLabel(r.asg.route)} route`,`${Math.round(r._off[1])} km away from the ${cor.saved?'saved standard':'expected'} corridor at ${fwTime(p[0])} (${fwMap(p[1],p[2],'see place')}). ${drv} was moving at ${Math.round(num(p[3]))} km/h.${cor.saved?'':' (Corridor is approximate — save a real standard route in Trails & routes to make this exact.)'}`,`Ask ${drvR} for the reason. Check the trip time and diesel used against the route average.`); }
+        ptsAll.forEach(p=>{ const cc=fwCorCheck([p[1],p[2]],cor), d=cc.d; if(cc.off&&num(p[3])>=5){ run.push([p,d]); if(!worst||d>worst[1]) worst=[p,d]; if(run.length>=3&&worst) r._off=worst; } else if(run.length<3) run=[]; });
+        if(r._off){ const p=r._off[0]; push(r,'high','route',`Off the ${fwRouteLabel(r.asg.route)} route`,`${Math.round(r._off[1])} km away from the ${cor.plan?'approved route':cor.saved?'saved standard':'expected'} corridor at ${fwTime(p[0])} (${fwMap(p[1],p[2],'see place')}). ${drv} was moving at ${Math.round(num(p[3]))} km/h.${cor.saved?'':' (Corridor is approximate — save a real standard route in Trails & routes to make this exact.)'}`,`Ask ${drvR} for the reason. Check the trip time and diesel used against the route average.`); }
         delete r._off; }
       else if(r.asg.route!=='east'&&r.asg.route!=='other') { /* no corridor yet for this route */ }
     }
     if(!r.asg&&cur&&age!==null&&age<=30&&num(cur.speed)>=20) push(r,'low','route','Truck is moving with no trip logged',`Moving at ${Math.round(num(cur.speed))} km/h${cur.addr?' near '+esc(cur.addr):''} but there is no Transport Ops entry for it in the last 2 days.`,'Ask dispatch which trip this is, or log it in Transport Ops.');
+    if(hasHist&&r.asg){ const parts=jCorridors(r.asg.route,r.asg.planId); if(parts.length){ const idleMin=Math.min(...parts.map(x=>x.plan.idleMin||20)), sp=[]; parts.forEach(x=>(x.plan.stops||[]).forEach(s=>{ if(s.lat!=null&&s.lon!=null) sp.push(s); }));
+      const bad=fwStops(recent,idleMin).filter(s=>!sp.some(q=>fwHav(q.lat,q.lon,s.lat,s.lon)<1.2)).sort((a,b)=>b.min-a.min);
+      if(bad.length){ const s=bad[0]; push(r,'med','route','Idling away from the approved stops',`Stopped ${fwDur(s.min)} from ${fwTime(s.t0)} at ${fwMap(s.lat,s.lon,'this spot')}, which is not one of the stops on the approved route${bad.length>1?` (${bad.length} such stops in 24 h)`:''}.`,`Ask ${drvR} why the truck stopped there.`); } } }
     // --- driver safety ---
     if(recent.length){ const fast=recent.filter(p=>num(p[3])>FW_SPEED); if(fast.length>=2){ const mx=Math.max(...fast.map(p=>num(p[3]))); push(r,mx>=100?'high':'med','safety','Speeding on the road',`${fast.length} readings above ${FW_SPEED} km/h in the last 24 h, top speed ${Math.round(mx)} km/h.`,`Speak to ${drvR}. Feed this into the weekly HSSE scorecard.`); } }
     // --- stops away from usual places ---
-    if(hasHist&&r.asg){ fwStops(recent,45).forEach(s=>{ if(places.length&&!places.some(c=>fwHav(c.lat,c.lon,s.lat,s.lon)<0.5)){ if(!r._unplanned) r._unplanned=s; } }); if(r._unplanned){ const s=r._unplanned; push(r,'low','route','Long stop away from the usual places',`Stopped ${fwDur(s.min)} from ${fwTime(s.t0)} at ${fwMap(s.lat,s.lon,'this spot')}, which is not a place trucks normally stop.`,'Ask the driver (rest stop, breakdown, queue or unauthorised stop).'); delete r._unplanned; } }
+    if(hasHist&&r.asg&&!jCorridors(r.asg.route,r.asg.planId).length){ fwStops(recent,45).forEach(s=>{ if(places.length&&!places.some(c=>fwHav(c.lat,c.lon,s.lat,s.lon)<0.5)){ if(!r._unplanned) r._unplanned=s; } }); if(r._unplanned){ const s=r._unplanned; push(r,'low','route','Long stop away from the usual places',`Stopped ${fwDur(s.min)} from ${fwTime(s.t0)} at ${fwMap(s.lat,s.lon,'this spot')}, which is not a place trucks normally stop.`,'Ask the driver (rest stop, breakdown, queue or unauthorised stop).'); delete r._unplanned; } }
     if(!hasHist) return;
   });
   // fuel hints from the existing route insights
@@ -6106,12 +6119,12 @@ function fwSelRow(rows){ const L=STATE.live; let r=rows.find(x=>x.key===L.sel); 
 function fwTruckSelect(rows,sel){ return `<select data-live-sel="1" style="width:auto;max-width:220px;">${rows.map(r=>`<option value="${esc(r.key)}"${r.key===sel.key?' selected':''}>${esc(r.label)}${r.pts.length?'':' (no trail)'}</option>`).join('')}</select>`; }
 function fwTrails(rows,AN){
   const L=STATE.live, r=fwSelRow(rows), win=L.win||24, from=Date.now()/1000-win*3600, p=r.pts.filter(x=>x[0]>=from);
-  const rk=L.rref||(r.asg&&r.asg.route)||'gypsum_ewekoro', cor=fwCorridor(rk), saved=!!fwRef(rk);
+  const rk=L.rref||(r.asg&&r.asg.route)||'gypsum_ewekoro', cor=fwCorridor(rk,r.asg&&r.asg.route===rk?r.asg.planId:''), saved=!!fwRef(rk);
   const routeKeys=Object.keys(ROUTES).filter(k=>k!=='other'&&k!=='east');
-  const offs=cor?p.filter(x=>num(x[3])>=5&&fwPolyDist([x[1],x[2]],cor.pts)>cor.km):[];
+  const offs=cor?p.filter(x=>num(x[3])>=5&&fwCorCheck([x[1],x[2]],cor).off):[];
   return `<div class="card" style="margin-bottom:12px;"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Truck</b> ${fwTruckSelect(rows,r)} <b>Show</b> <select data-live-win="1" style="width:auto;">${[6,12,24,48].map(h=>`<option value="${h}"${h===win?' selected':''}>last ${h} h</option>`).join('')}</select> <b>Compare with route</b> <select data-live-rref="1" style="width:auto;">${routeKeys.map(k=>`<option value="${k}"${k===rk?' selected':''}>${esc(fwRouteLabel(k))}${fwRef(k)?' ✓':''}</option>`).join('')}</select></div>
    <div class="dim small" style="margin-top:8px;line-height:1.6;">${r.asg?`Assigned today: <b>${esc(fwRouteLabel(r.asg.route))}</b> (${esc(r.asg.driver||r.driver||'driver not entered')}). `:'No trip logged for this truck in the last 2 days. '}${p.length?`${p.length} saved positions, ${fmt(fwKm(p),0)} km in this window.`:'No saved trail in this window yet.'}
-   ${cor?`<br>Route check: ${saved?'<b>saved standard route</b> (±3 km)':'<b>approximate corridor</b> (±'+cor.km+' km, drawn from Apapa/Ewekoro/Sagamu)'}${offs.length?` — <span style="color:var(--red);">${offs.length} moving reading${offs.length>1?'s':''} outside it</span>`:p.length?' — truck stayed inside it':''}.`:'<br>No route line for this route yet — save one below.'}</div>
+   ${cor?`<br>Route check: ${cor&&cor.plan?'<b>approved route</b> (±'+cor.km+' km)':saved?'<b>saved standard route</b> (±3 km)':'<b>approximate corridor</b> (±'+cor.km+' km, drawn from Apapa/Ewekoro/Sagamu)'}${offs.length?` — <span style="color:var(--red);">${offs.length} moving reading${offs.length>1?'s':''} outside it</span>`:p.length?' — truck stayed inside it':''}.`:'<br>No route line for this route yet — save one below.'}</div>
    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn small" data-live-saveref="${r.key}"${p.length>5?'':' disabled'}>Save this trail as the standard ${esc(fwRouteLabel(rk))} route</button>${saved?`<button class="btn small" data-live-delref="${rk}">Remove saved route</button>`:''}</div>
    <div class="dim small" style="margin-top:6px;">Pick a truck that drove the correct road for the whole trip, then save it. After that, every truck assigned to that route is checked against it (±3 km).</div></div>
    <div id="live-map" style="height:430px;border-radius:12px;overflow:hidden;margin-bottom:14px;background:var(--panel-2);display:flex;align-items:center;justify-content:center;"><span class="dim small">Loading map…</span></div>
@@ -6175,10 +6188,10 @@ async function drawLiveMap(){
   const map=LIVE_MAP=L.map(el2,{scrollWheelZoom:false}); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
   const col={green:'#3fb950',amber:'#e8a33d',red:'#e1543f',grey:'#8b949e'}; const b=[];
   if(L2.sub==='trails'){
-    const r=fwSelRow(rows), win=L2.win||24, from=Date.now()/1000-win*3600, p=r.pts.filter(x=>x[0]>=from), rk=L2.rref||(r.asg&&r.asg.route)||'gypsum_ewekoro', cor=fwCorridor(rk);
-    if(cor){ L.polyline(cor.pts,{color:'#3fb950',weight:cor.saved?6:3,opacity:.55,dashArray:cor.saved?null:'8 8'}).addTo(map); cor.pts.forEach(q=>b.push(q)); if(!cor.saved) cor.pts.forEach(q=>L.circle(q,{radius:cor.km*1000,color:'#3fb950',weight:1,fillOpacity:.05}).addTo(map)); }
+    const r=fwSelRow(rows), win=L2.win||24, from=Date.now()/1000-win*3600, p=r.pts.filter(x=>x[0]>=from), rk=L2.rref||(r.asg&&r.asg.route)||'gypsum_ewekoro', cor=fwCorridor(rk,r.asg&&r.asg.route===rk?r.asg.planId:'');
+    if(cor){ cor.parts.forEach(x=>{ L.polyline(x.pts,{color:'#3fb950',weight:cor.saved?6:3,opacity:.55,dashArray:cor.saved?null:'8 8'}).addTo(map); x.pts.forEach(q=>b.push(q)); if(!cor.saved) x.pts.forEach(q=>L.circle(q,{radius:x.km*1000,color:'#3fb950',weight:1,fillOpacity:.05}).addTo(map)); if(x.plan) (x.plan.stops||[]).forEach(s=>{ if(s.lat!=null) L.circleMarker([s.lat,s.lon],{radius:5,color:'#fff',fillColor:'#3fb950',fillOpacity:1,weight:1.5}).addTo(map).bindTooltip(s.name); }); }); }
     if(p.length){ L.polyline(p.map(q=>[q[1],q[2]]),{color:'#4da3ff',weight:3}).addTo(map); p.forEach(q=>b.push([q[1],q[2]]));
-      p.forEach(q=>{ if(cor&&num(q[3])>=5&&fwPolyDist([q[1],q[2]],cor.pts)>cor.km) L.circleMarker([q[1],q[2]],{radius:4,color:'#e1543f',fillColor:'#e1543f',fillOpacity:1,weight:1}).addTo(map).bindTooltip(fwTime(q[0])+' · '+Math.round(num(q[3]))+' km/h'); });
+      p.forEach(q=>{ if(cor&&num(q[3])>=5&&fwCorCheck([q[1],q[2]],cor).off) L.circleMarker([q[1],q[2]],{radius:4,color:'#e1543f',fillColor:'#e1543f',fillOpacity:1,weight:1}).addTo(map).bindTooltip(fwTime(q[0])+' · '+Math.round(num(q[3]))+' km/h'); });
       fwStops(p,20).forEach(s=>L.circleMarker([s.lat,s.lon],{radius:6,color:'#0b0e13',fillColor:'#e8a33d',fillOpacity:1,weight:1.5}).addTo(map).bindTooltip('Stop '+fwDur(s.min)+' · '+fwTime(s.t0)));
       L.circleMarker([p[0][1],p[0][2]],{radius:6,color:'#fff',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(map).bindTooltip('Start '+fwTime(p[0][0])); }
     if(r.pos) { L.circleMarker([r.pos.lat,r.pos.lon],{radius:9,color:'#0b0e13',weight:1.5,fillColor:col[r.st.k],fillOpacity:.95}).addTo(map).bindTooltip(r.label+' — '+liveAgo(r.pos.ts)); b.push([r.pos.lat,r.pos.lon]); }
@@ -6334,6 +6347,184 @@ async function applyHsseSeed(){
   await persistHsse(); await persist('seeds');
   showToast('HSSE report loaded: driver scorecard (18–24 Oct), incidents, inspections and more.');
 }
+
+/* ============================================================ journey2.js ============================================================ */
+/* ===== Journey Management v11: trip timing stamps, approved full routes (synced to the Live Map), route sheets for drivers, CNG truck trip targets ===== */
+const J_TIMES=[['tLeftYard','Left the yard'],['tGateIn','Gate-in at loading location'],['tLoadStart','Loading starts'],['tLoadEnd','Loading ends'],['tLeftLoading','Left loading location'],['tArriveOff','Arrived at offloading location'],['tLeftOff','Left offloading location'],['tBackLoading','Back at loading location']];
+const J_TRUCK_TARGET={day:2,week:14,month:56};
+STATE.jTimes=null; STATE.jPlan=null; STATE.jShare=null;
+function jNow(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function jMs(v){ const t=Date.parse(v); return isNaN(t)?null:t; }
+function jCalc(r){
+  const g=k=>jMs(r[k]), h=(a,b)=>(a!==null&&b!==null&&b>=a)?(b-a)/3600000:null;
+  const out=h(g('tLeftLoading'),g('tArriveOff')), back=h(g('tLeftOff'),g('tBackLoading'));
+  return {wait:h(g('tGateIn'),g('tLoadStart')), load:h(g('tLoadStart'),g('tLoadEnd')), toYard:h(g('tLeftYard'),g('tGateIn')), out, back, total:(out!==null&&back!==null)?out+back:(out!==null?out:null), cycle:h(g('tLeftYard'),g('tBackLoading'))};
+}
+function jH(v){ return v===null||v===undefined?'—':(v<1?Math.round(v*60)+' min':fmt(v,1)+' h'); }
+function jStampCount(r){ return J_TIMES.filter(([k])=>r[k]).length; }
+function jTimeFields(r,prefix){
+  return `<div class="form-grid" style="margin-top:6px;">${J_TIMES.map(([k,l])=>`<div><label>${l}</label><div style="display:flex;gap:6px;"><input type="datetime-local" name="${k}" value="${esc(r[k]||'')}" data-jt="1" style="flex:1;min-width:0;"><button type="button" class="btn small" data-jnow="${k}" title="Stamp the time now">Now</button></div></div>`).join('')}</div>
+   <div class="dim small" id="${prefix}-calc" style="margin-top:8px;line-height:1.7;"></div>`;
+}
+function jCalcText(r){ const c=jCalc(r); const bits=[]; if(c.toYard!==null) bits.push(`Yard → gate <b>${jH(c.toYard)}</b>`); if(c.wait!==null) bits.push(`Gate wait <b>${jH(c.wait)}</b>`); if(c.load!==null) bits.push(`Loading <b>${jH(c.load)}</b>`); if(c.out!==null) bits.push(`Loaded transit <b>${jH(c.out)}</b>`); if(c.back!==null) bits.push(`Return transit <b>${jH(c.back)}</b>`); if(c.total!==null) bits.push(`<span style="color:var(--teal);">Transit time <b>${jH(c.total)}</b></span>`); return bits.length?bits.join(' · '):'Times are optional: stamp each step with “Now” as it happens, or type them in. Transit time = left loading → arrived offloading + left offloading → back at loading.'; }
+function jTarget(routeKey){ const rt=ROUTES[routeKey]; return rt&&rt.durationTargetHrs?rt.durationTargetHrs:null; }
+
+/* ---------- approved routes ---------- */
+function jPlans(){ return STATE.data.routePlans||[]; }
+function jPlanPts(p){ return (p.stops||[]).filter(s=>s.lat!=null&&s.lon!=null&&!isNaN(s.lat)&&!isNaN(s.lon)).map(s=>[+s.lat,+s.lon]); }
+function jPlanChain(p){ return (p.stops||[]).map(s=>esc(s.name||'?')).join(' → '); }
+function jPlanCards(){
+  const P=jPlans();
+  return P.length?`<div class="grid cols-2" style="gap:12px;">${P.map(p=>{ const loc=jPlanPts(p).length, n=(p.stops||[]).length; return `<div class="card"><div class="flex between" style="gap:8px;flex-wrap:wrap;"><b>${esc(p.name)}</b><span class="tag ${loc===n&&n>=2?'green':'amber'}">${loc}/${n} stops on the map</span></div>
+    <div class="dim small" style="margin-top:4px;">${esc(ROUTES[p.routeKey]?ROUTES[p.routeKey].label:p.routeKey)} · corridor ±${p.km||5} km · idle alert after ${p.idleMin||20} min</div>
+    <div class="small" style="margin-top:8px;line-height:1.6;">${jPlanChain(p)}</div>
+    <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;"><button class="btn primary small" data-jplan-send="${p.id}">Send to driver</button><button class="btn small" data-jplan-edit="${p.id}">Edit</button><button class="btn ghost small" data-jplan-del="${p.id}">Delete</button></div></div>`; }).join('')}</div>`
+  :`<div class="card dim" style="padding:16px;">No approved routes yet. Add the full road route (for example Adunbu → Itori → Wasinmi → … → Lafarge Sagamu plant). Once saved it is used by the Live Map to flag trucks that leave the route or sit idle away from the approved stops.</div>`;
+}
+function jPlanSection(){
+  return `<div class="section-title"><span>Approved Routes</span><div class="line"></div><button class="btn small" data-jplan-new="1">＋ Add approved route</button></div>
+  <div class="section-sub">Full routes, stop by stop. They sync with the Live Map automatically: a truck on a linked route is flagged if it leaves the road corridor or idles away from the approved stops. Each route can be sent to drivers.</div>${jPlanCards()}`;
+}
+function jTargetCard(){
+  const route=(k,txt)=>`<tr><td>${esc(ROUTES[k].label)}</td><td>${txt}</td><td>${ROUTES[k].durationTargetHrs} h</td></tr>`;
+  const vs=STATE.data.vehicles||[], J=STATE.data.journey||[]; const cnt={day:{},week:{},month:{}};
+  J.forEach(r=>{ ['day','week','month'].forEach(p=>{ if(inPeriod(r.date,p)) cnt[p][r.vehicleId]=(cnt[p][r.vehicleId]||0)+1; }); });
+  const seen={}; const rows=vs.filter(v=>{ const k=normReg(v.regNo); if(seen[k]) return false; seen[k]=1; return true; }).map(v=>({v,d:cnt.day[v.id]||0,w:cnt.week[v.id]||0,m:cnt.month[v.id]||0}));
+  const cell=(a,t)=>{ const r=a/t; return `<td><span class="tag ${r>=1?'green':r>=.5?'amber':'red'}">${a} / ${t}</span></td>`; };
+  return `<div class="section-title"><span>CNG Truck Trip Targets</span><div class="line"></div></div>
+  <div class="grid cols-2" style="gap:12px;">
+   <div class="card"><b>Targets per route</b><div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Route</th><th>Trips per truck</th><th>Transit target</th></tr></thead><tbody>
+    ${route('gypsum_sagamu','1 round trip daily')}${route('gypsum_ewekoro','1 round trip daily')}${route('gypsum_adumbu_sagamu','2 trips daily')}${route('clinker','2 trips daily')}</tbody></table></div>
+    <div class="dim small" style="margin-top:8px;">Every CNG truck: <b>2 trips a day · 14 a week · 56 a month</b>.</div></div>
+   <div class="card"><b>Trips per truck so far</b><div class="dim small">Today · this week · this month, from the trip log below.</div><div class="table-wrap" style="margin-top:8px;max-height:260px;overflow:auto;"><table><thead><tr><th>Truck</th><th>Today</th><th>Week</th><th>Month</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.v.regNo)}</b></td>${cell(x.d,J_TRUCK_TARGET.day)}${cell(x.w,J_TRUCK_TARGET.week)}${cell(x.m,J_TRUCK_TARGET.month)}</tr>`).join('')||'<tr><td colspan="4" class="dim">No trucks.</td></tr>'}</tbody></table></div></div>
+  </div>`;
+}
+function jTimesModal(){
+  const id=STATE.jTimes; if(!id) return ''; const r=(STATE.data.journey||[]).find(x=>x.id===id); if(!r) return '';
+  return `<div class="modal-bg" data-jt-close="1"><div class="modal" style="max-width:640px;" onclick="event.stopPropagation()"><h3>Trip times — ${esc(vehicleLabel(r.vehicleId))} · ${esc(r.date)}</h3>
+   <form data-jt-form="${esc(id)}">${jTimeFields(r,'jtm')}<div class="form-actions"><button type="submit" class="btn primary">Save times</button><button type="button" class="btn ghost" data-jt-close="1">Cancel</button></div></form></div></div>`;
+}
+function jPlanModal(){
+  const P=STATE.jPlan; if(!P) return '';
+  const rts=Object.keys(ROUTES).filter(k=>k!=='other');
+  return `<div class="modal-bg" data-jp-close="1"><div class="modal" style="max-width:760px;" onclick="event.stopPropagation()"><h3>${P.id?'Edit':'New'} approved route</h3>
+   <div class="form-grid"><div><label>Route name</label><input type="text" data-jp="name" value="${esc(P.name)}" placeholder="e.g. Adunbu → Lafarge Sagamu (via Itori, Wasinmi)"></div>
+   <div><label>Used for</label><select data-jp="routeKey">${rts.map(k=>`<option value="${k}"${P.routeKey===k?' selected':''}>${esc(ROUTES[k].label)}</option>`).join('')}</select></div>
+   <div><label>Corridor width (± km)</label><input type="number" step="0.5" min="1" data-jp="km" value="${P.km}"></div>
+   <div><label>Idle alert after (min)</label><input type="number" min="5" data-jp="idleMin" value="${P.idleMin}"></div></div>
+   <label style="margin-top:10px;display:block;">Stops in order — type them separated by → or one per line</label>
+   <textarea data-jp="paste" rows="2" placeholder="Adunbu → Itori → Wasinmi → Lafarge Sagamu plant" style="width:100%;"></textarea>
+   <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;"><button class="btn small" data-jp-parse="1">Make stop list</button><button class="btn small" data-jp-geo="1"${P.busy?' disabled':''}>${P.busy?'Finding places…':'📍 Find all places on the map'}</button><button class="btn small" data-jp-add="1">＋ Add a stop</button></div>
+   ${P.msg?`<div class="dim small" style="margin-top:6px;">${esc(P.msg)}</div>`:''}
+   <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>#</th><th>Stop</th><th>Latitude</th><th>Longitude</th><th></th></tr></thead><tbody>${P.stops.map((s,i)=>`<tr${P.active===i?' style="background:var(--panel-2);"':''}><td>${i+1}</td><td><input type="text" data-jp-stop="${i}:name" value="${esc(s.name)}"></td><td><input type="number" step="0.00001" data-jp-stop="${i}:lat" value="${s.lat==null?'':s.lat}" style="width:110px;"></td><td><input type="number" step="0.00001" data-jp-stop="${i}:lon" value="${s.lon==null?'':s.lon}" style="width:110px;"></td><td style="white-space:nowrap;"><button class="btn ghost small" data-jp-pick="${i}" title="Then click the map">Set on map</button><button class="btn ghost small" data-jp-up="${i}">↑</button><button class="btn ghost small" data-jp-del="${i}">✕</button></td></tr>`).join('')||'<tr><td colspan="5" class="dim">No stops yet.</td></tr>'}</tbody></table></div>
+   <div id="jp-map" style="height:300px;border-radius:10px;margin-top:10px;background:var(--panel-2);"></div>
+   <div class="dim small" style="margin-top:6px;">${P.active!=null?'Click the map to place stop '+(P.active+1)+'. ':''}“Find all places” looks the names up on OpenStreetMap; check each pin and adjust with “Set on map” if one is wrong. Add enough stops to follow the road: the corridor is drawn straight between them.</div>
+   <div class="form-actions"><button class="btn primary" data-jp-save="1">Save approved route</button><button class="btn ghost" data-jp-close="1">Cancel</button></div></div></div>`;
+}
+function jShareText(S){
+  const p=jPlans().find(x=>x.id===S.id); if(!p) return {text:'',url:''};
+  const rt=ROUTES[p.routeKey]||{}; const stops=(p.stops||[]);
+  const q=s=>(s.lat!=null&&s.lon!=null&&!isNaN(s.lat))?(s.lat+','+s.lon):encodeURIComponent((s.name||'')+', Nigeria');
+  let mid=stops.slice(1,-1); if(mid.length>8){ const k=mid.length/8; mid=Array.from({length:8},(_,i)=>mid[Math.floor(i*k)]); }
+  const url=stops.length>=2?`https://www.google.com/maps/dir/?api=1&origin=${q(stops[0])}&destination=${q(stops[stops.length-1])}${mid.length?'&waypoints='+mid.map(q).join('%7C'):''}&travelmode=driving`:'';
+  const lines=[`*SKB LOGISTICS — APPROVED ROUTE*`,`Route: ${p.name}`];
+  if(S.driver) lines.push('Driver: '+S.driver); if(S.truck) lines.push('Truck: '+S.truck); if(S.date) lines.push('Date: '+S.date);
+  lines.push('','Stops in order:',...stops.map((s,i)=>`${i+1}. ${s.name}`),'');
+  const tg=[]; if(rt.tripsPerDayTarget) tg.push(rt.tripsPerDayTarget+' trip'+(rt.tripsPerDayTarget>1?'s':'')+' a day'); if(rt.durationTargetHrs) tg.push('transit time target '+rt.durationTargetHrs+' hrs'); if(tg.length) lines.push('Target: '+tg.join(', '));
+  lines.push('Stay on this route. Do not stop or idle away from the approved stops for more than '+(p.idleMin||20)+' minutes. Your truck is tracked live and any deviation or long idling is flagged to dispatch.');
+  if(p.notes) lines.push(p.notes); if(url) lines.push('','Open in Google Maps: '+url);
+  return {text:lines.join('\n'),url};
+}
+function jShareModal(){
+  const S=STATE.jShare; if(!S) return ''; const t=jShareText(S);
+  return `<div class="modal-bg" data-js-close="1"><div class="modal" style="max-width:620px;" onclick="event.stopPropagation()"><h3>Send route to driver</h3>
+   <div class="form-grid"><div><label>Driver</label><input type="text" list="dl-drivers" data-js="driver" value="${esc(S.driver||'')}">${driverDatalist()}</div><div><label>Truck</label><select data-js="truck"><option value="">—</option>${(STATE.data.vehicles||[]).map(v=>`<option value="${esc(v.regNo)}"${S.truck===v.regNo?' selected':''}>${esc(v.regNo)}</option>`).join('')}</select></div><div><label>Date</label><input type="date" data-js="date" value="${esc(S.date||'')}"></div></div>
+   <pre style="white-space:pre-wrap;background:var(--panel-2);padding:12px;border-radius:8px;margin-top:12px;font-size:12.5px;line-height:1.55;max-height:280px;overflow:auto;">${esc(t.text)}</pre>
+   <div class="form-actions" style="flex-wrap:wrap;"><button class="btn primary" data-js-wa="1">Send on WhatsApp</button><button class="btn" data-js-copy="1">Copy text</button><button class="btn" data-js-print="1">Print / save as PDF</button>${t.url?`<a class="btn" href="${esc(t.url)}" target="_blank" rel="noopener">Open in Google Maps ↗</a>`:''}<button class="btn ghost" data-js-close="1">Close</button></div></div></div>`;
+}
+
+/* ---------- page wrapper ---------- */
+function renderJourneyPage(){
+  let h=renderJourneyPageCore(); const mark='<div class="section-title"><span>Trips by Route — Target vs Actual</span>';
+  if(h.indexOf(mark)>-1) h=h.replace(mark,jTargetCard()+jPlanSection()+mark);
+  return h+jTimesModal()+jPlanModal()+jShareModal();
+}
+function finalizeJourney(rec){
+  const c=jCalc(rec); if(c.total!==null&&!num(rec.durationActual)) rec.durationActual=String(Math.round(c.total*10)/10);
+  if(!num(rec.durationActual)&&rec.durationActual!=='0'){ showToast('Enter the transit time, or fill the times so it is worked out for you.'); return false; }
+  return true;
+}
+
+/* ---------- events ---------- */
+async function jGeocode(name){
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ng&q='+encodeURIComponent(name)); const j=await r.json(); return j&&j[0]?{lat:+(+j[0].lat).toFixed(5),lon:+(+j[0].lon).toFixed(5)}:null;
+}
+let JP_MAP=null, JP_LAYER=null;
+async function jpDrawMap(){
+  const el=document.getElementById('jp-map'); if(!el||!STATE.jPlan) return; const ok=await loadLeaflet(); const e2=document.getElementById('jp-map'); if(!e2) return;
+  if(!ok){ e2.innerHTML='<div class="dim small" style="padding:20px;">Map not available offline — enter coordinates in the table.</div>'; return; }
+  if(JP_MAP){ try{ JP_MAP.remove(); }catch(e){} } const P=STATE.jPlan, pts=jPlanPts(P);
+  const map=JP_MAP=L.map(e2,{scrollWheelZoom:false}); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(map);
+  if(pts.length>1) L.polyline(pts,{color:'#3fb950',weight:4,opacity:.8}).addTo(map);
+  P.stops.forEach((s,i)=>{ if(s.lat==null||s.lon==null||isNaN(s.lat)) return; const m=L.marker([s.lat,s.lon],{draggable:true}).addTo(map); m.bindTooltip((i+1)+'. '+s.name,{permanent:true,direction:'top',offset:[-14,-8]}); m.on('dragend',()=>{ const ll=m.getLatLng(); s.lat=+ll.lat.toFixed(5); s.lon=+ll.lng.toFixed(5); render(); }); });
+  if(pts.length) map.fitBounds(pts,{padding:[30,30],maxZoom:12}); else map.setView([6.9,3.4],9);
+  map.on('click',ev=>{ if(P.active==null) return; const s=P.stops[P.active]; s.lat=+ev.latlng.lat.toFixed(5); s.lon=+ev.latlng.lng.toFixed(5); P.active=null; render(); });
+}
+function attachJourneyExtras(app){
+  const q=(s,f)=>app.querySelectorAll(s).forEach(f);
+  const refreshCalc=(root,id)=>{ const box=root.querySelector('#'+id+'-calc'); if(!box) return; const r={}; root.querySelectorAll('[data-jt]').forEach(i=>{ r[i.name]=i.value; }); box.innerHTML=jCalcText(r);
+    const dur=root.querySelector('input[name="durationActual"]'); const c=jCalc(r); if(dur&&c.total!==null&&(!dur.value||dur.dataset.auto==='1')){ dur.value=(Math.round(c.total*10)/10); dur.dataset.auto='1'; } };
+  q('[data-jnow]',b=>b.addEventListener('click',()=>{ const root=b.closest('form'); const inp=root.querySelector('[name="'+b.dataset.jnow+'"]'); if(inp){ inp.value=jNow(); const id=root.hasAttribute('data-jt-form')?'jtm':'jtr'; refreshCalc(root,id); } }));
+  q('form[data-log-form="journey"]',f=>{ f.addEventListener('input',e=>{ if(e.target.matches('[data-jt]')) refreshCalc(f,'jtr'); if(e.target.name==='durationActual') e.target.dataset.auto=''; }); refreshCalc(f,'jtr'); });
+  q('form[data-jt-form]',f=>{ f.addEventListener('input',e=>{ if(e.target.matches('[data-jt]')) refreshCalc(f,'jtm'); }); refreshCalc(f,'jtm');
+    f.addEventListener('submit',async e=>{ e.preventDefault(); const r=(STATE.data.journey||[]).find(x=>x.id===f.dataset.jtForm); if(!r) return; J_TIMES.forEach(([k])=>{ r[k]=f.elements[k].value; }); const c=jCalc(r); if(c.total!==null) r.durationActual=String(Math.round(c.total*10)/10); STATE.jTimes=null; await persist('journey'); showToast('Trip times saved.'); }); });
+  q('[data-jt-times]',b=>b.addEventListener('click',()=>{ STATE.jTimes=b.dataset.jtTimes; render(); }));
+  q('[data-jt-close]',el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.jTimes=null; render(); } }));
+  // approved routes
+  q('[data-jplan-new]',b=>b.addEventListener('click',()=>{ STATE.jPlan={id:'',name:'',routeKey:'gypsum_adumbu_sagamu',km:5,idleMin:20,stops:[],active:null,msg:''}; render(); }));
+  q('[data-jplan-edit]',b=>b.addEventListener('click',()=>{ const p=jPlans().find(x=>x.id===b.dataset.jplanEdit); if(p){ STATE.jPlan=JSON.parse(JSON.stringify(p)); STATE.jPlan.active=null; STATE.jPlan.msg=''; render(); } }));
+  q('[data-jplan-del]',b=>b.addEventListener('click',async()=>{ if(!confirm('Delete this approved route?')) return; STATE.data.routePlans=jPlans().filter(x=>x.id!==b.dataset.jplanDel); await persist('routePlans'); render(); }));
+  q('[data-jplan-send]',b=>b.addEventListener('click',()=>{ STATE.jShare={id:b.dataset.jplanSend,driver:'',truck:'',date:todayStr()}; render(); }));
+  const P=STATE.jPlan;
+  if(P){
+    q('[data-jp]',i=>i.addEventListener('input',()=>{ const k=i.dataset.jp; if(k==='paste') return; P[k]=(k==='km'||k==='idleMin')?num(i.value):i.value; }));
+    q('[data-jp-stop]',i=>i.addEventListener('change',()=>{ const [n,f]=i.dataset.jpStop.split(':'); const s=P.stops[+n]; s[f]=f==='name'?i.value:(i.value===''?null:+i.value); render(); }));
+    q('[data-jp-parse]',b=>b.addEventListener('click',()=>{ const t=app.querySelector('[data-jp="paste"]').value; const names=t.split(/→|->|>|\n|;/).map(x=>x.trim()).filter(Boolean); if(names.length){ P.stops=names.map(n=>({name:n,lat:null,lon:null})); if(!P.name) P.name=names[0]+' → '+names[names.length-1]; P.msg='Now press “Find all places on the map”.'; render(); } }));
+    q('[data-jp-add]',b=>b.addEventListener('click',()=>{ P.stops.push({name:'',lat:null,lon:null}); render(); }));
+    q('[data-jp-del]',b=>b.addEventListener('click',()=>{ P.stops.splice(+b.dataset.jpDel,1); render(); }));
+    q('[data-jp-up]',b=>b.addEventListener('click',()=>{ const i=+b.dataset.jpUp; if(i>0){ const t=P.stops[i]; P.stops[i]=P.stops[i-1]; P.stops[i-1]=t; render(); } }));
+    q('[data-jp-pick]',b=>b.addEventListener('click',()=>{ P.active=+b.dataset.jpPick; render(); }));
+    q('[data-jp-geo]',b=>b.addEventListener('click',async()=>{ P.busy=true; P.msg=''; render(); let miss=[];
+      for(const s of P.stops){ if(s.lat!=null&&s.lon!=null) continue; try{ const g=await jGeocode(s.name); if(g){ s.lat=g.lat; s.lon=g.lon; } else miss.push(s.name); }catch(e){ miss.push(s.name); } await new Promise(r=>setTimeout(r,1100)); if(!STATE.jPlan) return; }
+      P.busy=false; P.msg=miss.length?'Could not find: '+miss.join(', ')+'. Add a town name or use “Set on map”.':'All places found. Check the pins on the map.'; render(); }));
+    q('[data-jp-save]',b=>b.addEventListener('click',async()=>{ if(!P.name.trim()){ P.msg='Give the route a name.'; render(); return; } if(jPlanPts(P).length<2){ P.msg='At least two stops need a position on the map.'; render(); return; }
+      const rec={id:P.id||uid(),name:P.name.trim(),routeKey:P.routeKey,km:P.km||5,idleMin:P.idleMin||20,stops:P.stops.map(s=>({name:s.name,lat:s.lat==null?null:+s.lat,lon:s.lon==null?null:+s.lon})),approved:true,at:new Date().toISOString()};
+      STATE.data.routePlans=P.id?jPlans().map(x=>x.id===P.id?rec:x):[...jPlans(),rec]; STATE.jPlan=null; await persist('routePlans'); showToast('Approved route saved. The Live Map now checks trucks against it.'); }));
+    q('[data-jp-close]',el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.jPlan=null; render(); } }));
+    jpDrawMap();
+  }
+  const S=STATE.jShare;
+  if(S){
+    q('[data-js]',i=>i.addEventListener('change',()=>{ S[i.dataset.js]=i.value; render(); }));
+    q('[data-js-close]',el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.jShare=null; render(); } }));
+    q('[data-js-wa]',b=>b.addEventListener('click',()=>window.open('https://wa.me/?text='+encodeURIComponent(jShareText(S).text),'_blank')));
+    q('[data-js-copy]',b=>b.addEventListener('click',async()=>{ try{ await navigator.clipboard.writeText(jShareText(S).text); showToast('Route copied — paste it into WhatsApp or SMS.'); }catch(e){ showToast('Could not copy; select the text and copy it.'); } }));
+    q('[data-js-print]',b=>b.addEventListener('click',()=>{ const t=jShareText(S).text.replace(/\*/g,''); const w=window.open('','_blank'); if(!w) return; w.document.write('<pre style="font:16px/1.6 sans-serif;white-space:pre-wrap;padding:24px;">'+esc(t)+'</pre>'); w.document.close(); w.focus(); w.print(); }));
+  }
+}
+
+/* ---------- Live Map link: approved routes become corridors, with idle checks ---------- */
+function jCorridors(routeKey,planId){
+  let P=jPlans().filter(p=>planId?p.id===planId:p.routeKey===routeKey); const parts=P.map(p=>({pts:jPlanPts(p),km:p.km||5,plan:p})).filter(x=>x.pts.length>1); return parts;
+}
+
+async function applyTargetSeed(){
+  const done=STATE.data.seeds||{}; if(done.targets_v11) return;
+  STATE.targets=Object.assign({},STATE.targets,{truckTripsPerDayTarget:2});
+  STATE.data.seeds=Object.assign({},STATE.data.seeds||{},{targets_v11:{at:new Date().toISOString()}});
+  await persistTargets(); await persist('seeds');
+}
+
 
 loadAll();
 </script>
