@@ -429,7 +429,7 @@ const DEFAULT_TARGETS = {
   onTimeTarget: 0.95, riskAssessmentTarget: 1.0, maxDelayHrsTarget: 1,
   inspectionComplianceTarget: 1.0, defectRateTarget: 0.10, prePostPassRateTarget: 1.0,
   ltifrTarget: 1.0, nearMissWeeklyTarget: 3,
-  pmComplianceTarget: 0.95, breakdownRateTarget: 0.05, mttrTargetHrs: 8,
+  pmComplianceTarget: 0.95, breakdownRateTarget: 0, mttrTargetHrs: 8,
   dailyTruckInspectionTarget: 5,   // Safety AND Maintenance each inspect 5 trucks/day
   roadPatrolWeeklyTarget: 2,       // Safety AND Maintenance each patrol 2x/week
   toolboxTalkWeeklyTarget: 1,      // Safety AND Maintenance each hold 1 toolbox talk/week
@@ -798,8 +798,7 @@ function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   const pmDue = sumBy(recs,'pmDue') || scheduled.length;
   const pmCompliance = pmDue? scheduled.length/Math.max(pmDue,scheduled.length) : (scheduled.length?1:0);
   const totalVehicles = vehicles.length || 1;
-  const bdWeeks = Math.max(1, periodDays(period)/7);
-  const breakdownRate = breakdowns.length / totalVehicles / bdWeeks;   // weekly basis: breakdowns per truck per week
+  const breakdownRate = breakdowns.length / totalVehicles;   // breakdown/repair events ÷ trucks in the fleet, for the period shown. Target 0.
   const mttr = avgBy(breakdowns,'downtimeHours');
   const alerts = vehicles.map(maintenanceStatusForVehicle);
   const overdue = alerts.filter(a=>a.status==='red').length;
@@ -809,7 +808,7 @@ function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   const toolboxTarget = scaledTarget(STATE.targets.toolboxTalkWeeklyTarget,'week',period);
   return [
     {key:'pm', label:'PM Compliance', actual:pmCompliance, target:STATE.targets.pmComplianceTarget, fmt:'pct', good:'higher', ratio:attainment(pmCompliance,STATE.targets.pmComplianceTarget,'higher')},
-    {key:'breakdown', label:(bdWeeks>1?'Breakdown Rate (weekly avg)':'Breakdown Rate (weekly)'), actual:breakdownRate, target:STATE.targets.breakdownRateTarget, fmt:'pct', good:'lower', ratio:attainment(breakdownRate,STATE.targets.breakdownRateTarget,'lower')},
+    {key:'breakdown', label:'Breakdown Rate (% of fleet)', actual:breakdownRate, target:STATE.targets.breakdownRateTarget||0, fmt:'pct', good:'lower', ratio:(breakdowns.length===0?1:0.5/breakdowns.length)},
     {key:'mttr', label:'Avg Repair Time (MTTR)', actual:mttr, target:STATE.targets.mttrTargetHrs, fmt:1, unit:'hrs', good:'lower', ratio:attainment(mttr,STATE.targets.mttrTargetHrs,'lower')},
     {key:'predictive', label:'Predictive Alerts (open)', actual:overdue+dueSoon, target:0, fmt:0, good:'lower', ratio:(overdue+dueSoon)===0?1:(overdue?0.3:0.7)},
     {key:'truckinsp', label:'Trucks Inspected (Maint.)', actual:trucksInspected, target:truckInspTarget, fmt:0, good:'higher', ratio:attainment(trucksInspected,truckInspTarget,'higher')},
@@ -1401,7 +1400,7 @@ const REPORT_ROW_DEFS = {
   journey: k=>[['Total Trips',k.find(x=>x.key==='trips')],['On-Time Arrival',k.find(x=>x.key==='ontime')],['Risk Assessment Compliance',k.find(x=>x.key==='risk')],['Avg Delay / Idling (hrs)',k.find(x=>x.key==='delay')],['Route Deviations',k.find(x=>x.key==='deviations')],['Driver Hours Violations',k.find(x=>x.key==='violations')]],
   inspections: k=>[['Inspection Compliance',k.find(x=>x.key==='compliance')],['Defect Rate',k.find(x=>x.key==='defectrate')],['Critical Defects',k.find(x=>x.key==='critical')],['Vehicles Inspected',k.find(x=>x.key==='done')]],
   safety: k=>[['LTIFR',k.find(x=>x.key==='ltifr')],['Incidents',k.find(x=>x.key==='incidents')],['Near-Misses Reported',k.find(x=>x.key==='nearmiss')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Road Patrols',k.find(x=>x.key==='patrol')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
-  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate (weekly)',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
+  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate (% of fleet)',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
 };
 const REPORT_DEPT_MATCH = {
   transport:r=>r.dept==='Transport', journey:r=>r.dept==='Journey Mgmt', inspections:r=>r.dept==='Inspections',
@@ -2846,7 +2845,7 @@ function renderSettingsModal(){
     ['inspectionComplianceTarget','Inspection Compliance Target (0–1)'], ['defectRateTarget','Max Acceptable Defect Rate (0–1)'],
     ['prePostPassRateTarget','Pre/Post-Trip Pass Rate Target (0–1)'], ['ltifrTarget','LTIFR Target'],
     ['nearMissWeeklyTarget','Near-Miss Reporting Target (per week)'], ['pmComplianceTarget','PM Compliance Target (0–1)'],
-    ['breakdownRateTarget','Max Breakdown Rate (0–1)'], ['mttrTargetHrs','MTTR Target (hrs)'],
+    ['breakdownRateTarget','Breakdown Rate Target (0 = no breakdowns)'], ['mttrTargetHrs','MTTR Target (hrs)'],
     ['dailyTruckInspectionTarget','Truck Inspections / Day (Safety & Maint.)'], ['roadPatrolWeeklyTarget','Road Patrols / Week (Safety & Maint.)'],
     ['toolboxTalkWeeklyTarget','Toolbox Talks / Week (Safety & Maint.)'],
     ['checkCoverageTarget','Pre/Post-Trip Check Coverage Target (0–1)'], ['workshopServiceCapacityPerWeek','Workshop Capacity (trucks serviced / week)'], ['cngLongTripsPerFill','CNG: clinker / gypsum trips per fill-up'], ['cngAdumbuTripsPerFill','CNG: Adumbu trips per fill-up (plus 1 clinker/gypsum trip)'], ['truckTripsPerDayTarget','Trips / Truck / Day for Utilization (0 = auto)'], ['dieselPricePerLitre','Default Fuel Price (₦ / litre)'],
@@ -3517,7 +3516,7 @@ function renderMaintWeekly(){
     <div style="min-width:260px;flex:1;max-width:440px;"><label>Week (Mon – Sun)</label><select data-maint-week="1">${opts}</select></div>
     <div class="flex gap8"><button class="btn small ${start===addDays(cur,-7)?'primary':''}" data-maint-wk="last">Last week</button><button class="btn small ${start===cur?'primary':''}" data-maint-wk="cur">This week so far</button></div></div>
     <div class="dim small" style="margin-top:8px;">Comparing <b>${weekRangeText(start)}</b> with the week before, <b>${weekRangeText(prevStart)}</b>. ${start===cur?'This week is still in progress, so its totals will keep growing until Sunday.':''}</div></div>`;
-  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Breakdown rate (% of fleet, weekly)','bdPct','lower',1,'%'],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
+  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Breakdown rate (% of fleet)','bdPct','lower',1,'%'],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
   const fv=(r,v)=>r[1]==='cost'?naira(v):fmt(v,r[3])+r[4];
   const trs=rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${fv(r,A[r[1]])}</td><td class="dim">${fv(r,B[r[1]])}</td><td>${deltaCell(A[r[1]],B[r[1]],r[2],r[3],r[4],r[1]==='cost')}</td></tr>`).join('');
   // component and truck movement
@@ -3642,6 +3641,7 @@ function renderMaintenancePage(){
   ${maintViewTabs()}
   ${periodTabs('maintenance')}
   <div class="grid cols-4">${kpiGrid(kpis,mkpisPrev,PERIOD_WORD[mcmp])}</div>
+  ${maintBreakdownBasis()}
   ${kpiPeriodSection(p=>{ const r=filterPeriod(STATE.data.maintenance,p), d=filterPeriod(STATE.data.maintenanceDaily,p), mi=filterPeriod(STATE.data.maintInspections||[],p); return {kpis:kpisMaintenance(r,STATE.data.vehicles,d,p,mi),hasData:(r.length+d.length+mi.length)>0}; },'Maintenance log, daily activity and maintenance inspections.')}
 
   <div class="section-title"><span>Maintenance Log</span><div class="line"></div><span class="dim small mono">${logs.length} record${logs.length===1?'':'s'}</span></div>
@@ -4781,7 +4781,7 @@ function repMaintenance(r,p,L){
   const blocks=[kpiTableBlock('Maintenance KPIs',REPORT_ROW_DEFS.maintenance(kc_),REPORT_ROW_DEFS.maintenance(kp_),hasCur,hasPrev,L)];
   const A=maintMetricsFor(r), B=maintMetricsFor(p);
   blocks.push(compareBlock('Maintenance activity',[
-    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Breakdown rate (% of fleet, weekly)',A.bdPct,B.bdPct,'lower',{dec:1,unit:'%'}],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
+    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Breakdown rate (% of fleet)',A.bdPct,B.bdPct,'lower',{dec:1,unit:'%'}],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
     ['Repair downtime',A.downtime,B.downtime,'lower',{dec:1,unit:'h'}],['Average repair time (MTTR)',A.mttr,B.mttr,'lower',{dec:1,unit:'h'}],['Maintenance cost',A.cost,B.cost,'lower',{money:true}],
     ['Scheduled services done',A.scheduled,B.scheduled,'higher'],['Repair jobs closed',A.closed,B.closed,'higher'],['Trucks inspected',A.inspected,B.inspected,'higher'],
     ['Toolbox talks',A.toolbox,B.toolbox,'higher'],['Part lines bought',A.parts,B.parts,null],['Parts bought again within 90 days',A.partsAgain,B.partsAgain,'lower']],L));
@@ -5515,7 +5515,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v11.2 · 28 Oct 2026';
+const APP_VERSION='v11.3 · 28 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5915,6 +5915,7 @@ function addRouteTabs(files){
 const SEEDS={oct26:{"names":["clinker","APP-EWEK","APP-SHAGAMU","ADUNMBU-EWK","ITORI  -SHG","SLOUGH","EAST","IGBESA"],"sheets":{"clinker":[["TRUCK NO.","DATE","","","","","","","","","","WEIGHT","",""]],"APP-EWEK":[["TRUCK NUMBER ","DATE","TONNAGE","DRIVER NAME"],["AKM 285","2026-10-03",52.88,"julius"],["AKM 286","",50.06,"raimi"],["AKM 290","",51.74,"ayinde"],["AKM 848","",48.92,"ahmed"],["AKM 851","",53.04,"silas"],["AKM 854","",52.56,"okiki"],["T562","",49.48,"zubeiru"],["AKM 291","",46.5,""],["AKM 628","",45,""],["AKM 288","",44,""],["AKM 854","2026-10-04",49.58,""],["AKM 852","",47.52,""],["AKM 851","",51.44,""],["AKM 849","",51.4,""],["AKM 289","",48.02,""],["AKM 286","",52.24,""],["AKM 285","2026-10-06",44.58,""],["AKM 291","",46.76,""],["AKM 284","",47.38,""],["AKM 290","",48.74,""],["AKM 628","",47.86,""],["AKM 851","",50.94,""],["AKM 562","",50.64,""],["AKM 848","",44.7,""],["AKM 286","",51.18,""],["AKM 854","",50.14,""],["AKM 850","",46.64,""],["AKM 562","2026-10-08",41.52,""],["AKM 852","",37.7,""],["AKM 291","",48.58,""],["AKM 289","",50.8,""],["AKM 283","",43.86,""],["AKM 851","",49.14,""],["AKM 850","2026-10-09",42.84,""],["AKM 285","",42.26,""],["AKM 854","",47.06,""],["AKM 628","",38.16,""],["AKM 286","",47.5,""],["AKM 290","",48.38,""],["AKM 288","",49.76,""],["AKM 848","2026-10-11",50.98,""],["AKM 283","",46.36,""],["AKM 851","",45.12,""],["AKM 854","",46.16,""],["AKM 286","",48.26,""],["AKM 291","",44.74,""],["AKM 562","",47.74,""],["AKM 285","",45.22,""],["AKM 850","",47.1,""],["AKM 292","",49.42,""],["AKM 852","","",""],["AKM 562","2026-10-20",46.68,""],["AKM 854","",51.08,""],["AKM 291","",47.78,""],["AKM 283","",54.62,""],["AKM 851","",52.78,""],["","","=SUM(C2:C57)",""]],"APP-SHAGAMU":[["TRUCK NO","DATE","WEIGHT"],["AKM 854","2026-10-12",45.72],["AKM 851","",48.18],["AKM 283","",45.88],["AKM 291","",47.48],["AKM 562","",47.4],["","","=SUM(C2:C6)"]],"ADUNMBU-EWK":[["TRUCK NO","DATE","WEIGHT",""],["AKM 288","2026-10-01",42,""],["AKM 288","",46.54,""],["AKM 288","",44.2,""],["AKM 286","",45.1,""],["AKM 286","",47.74,""],["AKM 286","",44.3,""],["AKM 562","",48.8,""],["AKM 562","",43.4,""],["AKM 562","",47.26,""],["AKM 290","",42.42,""],["AKM 290","",40.64,""],["AKM 290","",46.38,""],["AKM 291","",46.08,""],["AKM 291","",42.44,""],["AKM 291","",45.24,""],["AKM 848","",44.82,""],["AKM 848","",42.9,""],["AKM 848","",53.02,""],["AKM 285","",47.08,""],["AKM 285","",44.32,""],["AKM 285","",47.48,""],["AKM 849","",44.7,""],["AKM 849","",39.26,""],["AKM 849","",44.94,""],["AKM 854","",41.3,""],["AKM 854","",40.4,""],["AKM 854","",45.16,""],["AKM 851","",38.72,""],["AKM 849","2026-10-02",43.96,""],["AKM 849","",42.56,""],["AKM 289","",42.94,""],["AKM 289","",45.94,""],["AKM 286","2026-10-03",52.68,""],["AKM 286","",53.48,""],["AKM 849","",49.58,""],["AKM 849","",51.02,""],["AKM 849","",44.56,""],["AKM 854","",48.88,""],["AKM 854","",52.56,""],["AKM 851","",47,""],["AKM 851","",48.54,""],["AKM 291","",51.26,""],["AKM 849","2026-10-05",46.48,""],["AKM 854","",49,""],["AKM 628","",51.78,""],["AKM 291","",42.52,""],["AKM 285","2026-10-07",48,""],["AKM 285","",44.72,""],["AKM 285","",46.2,""],["AKM 286","",52.5,""],["AKM 289","",46.52,""],["AKM 289","",45.52,""],["AKM 289","",47.74,""],["AKM 562","",46.2,""],["AKM 628","",42.18,""],["AKM 628","",45.9,""],["AKM 848","",40.12,""],["AKM 848","",42.36,""],["AKM 849","",51.5,""],["AKM 849","",41.48,""],["AKM 849","",44.04,""],["AKM 849","",48.16,""],["AKM 850","",45.66,""],["AKM 851","",49.44,""],["AKM 851","",44.12,""],["AKM 851","",46.52,""],["AKM 854","",47.06,""],["AKM 854","",47.34,""],["AKM 854","",44.04,""],["AKM 854","",46.98,""],["AKM 849","2026-10-09",48.26,""],["AKM 849","",51.5,""],["AKM 848","",45.5,""],["AKM 850","",43.14,""],["AKM 291","",40.42,""],["AKM 283","",44.68,""],["AKM 851","",47.8,""],["AKM 849","2026-10-10",49.42,""],["AKM 291","",45.04,""],["AKM 851","",49.1,""],["AKM 283","",50.86,""],["AKM285XG","2026-10-11","",""],["AKM851ZX","",45.12,""],[" AKM291XG","",44.74,""],["AKM286XG","",48.26,""],["AKM850ZX","",47.1,""],["AKM283XG","",46.36,""],["AKM854ZX","",46.16,""],["T27562LA","",47.74,""],["AKM848ZX","",50.98,""],["AKM292XG","",49.42,""],["AKM852ZX","","",""],["AKM 854","2026-10-12",44.06,""],["AKM 854","",47.26,""],["AKM 851","",46.26,""],["AKM 848","",53.62,""],["AKM 283","",43.8,""],["","","=SUM(C2:C98)",""]],"ITORI  -SHG":[["TRUCK NO","DATE","WEIGHT",""],["AKM 283","2026-10-14",43.74,""],["AKM 284","",38.92,""],["AKM 285","",41.84,""],["AKM 286","",39.94,""],["AKM 291","",34.42,""],["AKM 562","",38.7,""],["AKM 848","",39.18,""],["AKM 851","",36.88,""],["AKM 854","",39.16,""],["AKM 283","2026-10-15",40.2,""],["AKM 284","",40.22,""],["AKM 285","",33.98,""],["AKM 286","",35.72,""],["AKM 288","",34.16,""],["AKM 289","",36.16,""],["AKM 290","",38.62,""],["AKM 291","",42.68,""],["AKM 292","",40.56,""],["AKM 628","",37.66,""],["AKM 848","",40.2,""],["AKM 853","",32.74,""],["AKM 854","",37.6,""],["","2026-10-16","","RTSS"],["AKM 288","2026-10-17",43.8,""],["AKM 292","",41.44,""],["AKM 628","",42.63,""],["AKM 286","",43.02,""],["AKM 289","",44.26,""],["AKM 848","",40.08,""],["AKM 285","",42.2,""],["AKM 284","",44.18,""],["AKM 290","",40.16,""],["AKM 853","",42.26,""],["AKM 562","",40.3,""],["AKM 850","2026-10-18",40.5,""],["AKM 289","",45.4,""],["AKM 286","",43.18,""],["AKM 854","",47.82,""],["AKM 285","",51.84,""],["AKM 290","",40.38,""],["AKM 284","",43.62,""],["AKM 851","",43.58,""],["AKM 283","",51.7,""],["AKM 291","",46.02,""],["AKM 853","",42.18,""],["AKM 628","",45.2,""],["AKM 285","2026-10-19",49.02,""],["AKM 289","",48.14,""],["AKM 290","",47.12,1],["AKM 288","",40.02,""],["AKM 849","",48.9,""],["AKM 850","",46.8,""],["AKM 853","",45.12,""],["AKM 284","",46.24,""],["AKM 290","",49.04,2],["AKM 628","",48.8,1],["AKM 628","",41.94,2],["AKM 286","",39.84,""],["AKM 850","2026-10-20",46.72,""],["AKM 853","",48.46,1],["AKM 849","",39.46,1],["AKM 283","",47.78,""],["AKM 286","",47.46,1],["AKM 289","",45.02,""],["AKM 285","",48.34,""],["AKM 288","",48.6,""],["AKM 849","",43.7,2],["AKM 853","",46.38,2],["AKM 286","",46.22,2],["AKM 851","",50.12,""],["AKM 562","",45.3,""],["AKM 291","",39.32,""]],"SLOUGH":[["TRUCK NO","DATE"],["AKM 290","2026-10-11"],["AKM 284","2024-10-11"],["",""],["AKM 850","2026-10-20"],["AKM 284",""],["AKM 292",""]],"EAST":[["TRUCK DETAILS","LOADING LOCATION","MATERIAL","LOADING DATE","TAKEOFF DATE","ARRIVAL DATE","OFFLOADED DATE","OFFLOADING LOCATION","","BACKHAUL DESTINATION","MATERIAL","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""," EXTRA BACKHAUL DESTINATION","BACKHAUL LOADING DATE","EXIT DATE","DELIVERY DATE",""],["T23639LA","SHAGAMU","ANIMAL FEEDS","2026-10-05","2026-10-06","2026-10-08","2026-10-09","PHC","","PHC","FLOUR","2026-10-10","2026-10-10","","","","","","",""],["T23640LA","OGERE","ANIMAL FEEDS","2026-10-08","2026-10-09","","","UYO","","","","","","","","","","","",""],["T23641LA","SHAGAMU","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""],["T23642LA","IBADAN","ANIMAL FEEDS","2026-10-09","2026-10-10","","","","","","","","","","","","","","",""]],"IGBESA":[["TRUCK NO","DRIVER","DESTINATION","LOADING DATE","OFFLOADING DATE"]]}}};
 async function applySeeds(){
   try{ await applyTargetSeed(); }catch(e){ console.error(e); }
+  try{ await applyBreakdownSeed(); }catch(e){ console.error(e); }
   if(typeof applyHsseSeed==='function'){ try{ await applyHsseSeed(); }catch(e){ console.error(e); } }
   if(typeof XLSX==='undefined'||!(STATE.data.vehicles||[]).length) return;
   const done=STATE.data.seeds||{}; let changed=false;
@@ -6471,6 +6472,7 @@ function jShareModal(){
 function renderJourneyPage(){
   let h=renderJourneyPageCore(); const mark='<div class="section-title"><span>Trips by Route — Target vs Actual</span>';
   if(h.indexOf(mark)>-1) h=h.replace(mark,jTargetCard()+jPlanSection()+mark);
+  h=h.replace(/<details class="form-card" style="margin-top:20px;">(\s*)<summary>Log a trip<\/summary>/,(m,w)=>'<details class="form-card" style="margin-top:20px;"'+(STATE.jBulk?' open':'')+'>'+w+'<summary>Log a trip</summary>'+jbBlock());
   return h+jTimesModal()+jPlanModal()+jShareModal();
 }
 function finalizeJourney(rec){
@@ -6495,6 +6497,7 @@ async function jpDrawMap(){
   map.on('click',ev=>{ if(P.active==null) return; const s=P.stops[P.active]; s.lat=+ev.latlng.lat.toFixed(5); s.lon=+ev.latlng.lng.toFixed(5); P.active=null; render(); });
 }
 function attachJourneyExtras(app){
+  attachJourneyBulk(app);
   const q=(s,f)=>app.querySelectorAll(s).forEach(f);
   const refreshCalc=(root,id)=>{ const box=root.querySelector('#'+id+'-calc'); if(!box) return; const r={}; root.querySelectorAll('[data-jt]').forEach(i=>{ r[i.name]=i.value; }); box.innerHTML=jCalcText(r);
     const dur=root.querySelector('input[name="durationActual"]'); const c=jCalc(r); if(dur&&c.total!==null&&(!dur.value||dur.dataset.auto==='1')){ dur.value=(Math.round(c.total*10)/10); dur.dataset.auto='1'; } };
@@ -6642,6 +6645,125 @@ function renderScoreboard(A,B){
   return `<div class="section-title"><span>Improving or slipping?</span><div class="line"></div><span class="dim small">last week against the week before</span></div>
   <div class="grid cols-3" style="margin-bottom:14px;">${rows.map(r=>`<div class="card"><div style="font-weight:600;">${r.n}</div><div style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><span class="tag green">▲ ${r.up} improved</span><span class="tag red">▼ ${r.down} slipped</span><span class="tag teal">${r.same} same</span></div><div class="small" style="margin-top:6px;color:var(--${r.down>r.up?'red':r.up>r.down?'green':'dim'});">${r.down>r.up?'Regression — look at the red KPIs below':r.up>r.down?'Improvement':'Holding steady'}</div></div>`).join('')}
    ${mixNow!==null?`<div class="card"><div style="font-weight:600;">High-risk drivers (MiX)</div><div style="margin-top:6px;font-size:22px;font-weight:600;color:var(--${mixNow?'red':'green'});">${mixNow}</div><div class="small dim">Target 0 · week before: ${mixPrev===null?'—':mixPrev}</div></div>`:''}</div>`;
+}
+
+/* ============================================================ bulk3.js ============================================================ */
+/* ===== v11.3: bulk trip upload (Excel / CSV / paste) in Journey Mgmt → Log a trip; breakdown-rate basis (target 0) ===== */
+STATE.jBulk=null;
+const JB_COLS=[['date','Date',/^date$|^tripdate$/],['truck','Truck No.',/^truck|^reg|^vehicle/],['driver','Driver',/^driver/],['route','Route',/^route/],['material','Material',/^material|^cargo|^product/],
+ ['tLeftYard','Left the yard',/leftthe?yard|^leftyard|yardout|^yard/],['tGateIn','Gate-in at loading location',/gatein|^gate/],['tLoadStart','Loading starts',/loadingstart|loadstart|startloading|^loadingstarts/],['tLoadEnd','Loading ends',/loadingend|loadend|endloading|^loadingends/],
+ ['tLeftLoading','Left loading location',/leftloading|leftthe?loading|^departloading/],['tArriveOff','Arrived at offloading location',/arriv|^atoffloading/],['tLeftOff','Left offloading location',/leftoff|leftthe?offload|^departoff/],['tBackLoading','Back at loading location',/backat|^back|returned?/],
+ ['durationActual','Transit time (hrs)',/transit|duration/],['delayHrs','Delay / idling (hrs)',/delay|idl/],['deviations','Route deviations',/deviation/],['onTime','On-time (Yes/No)',/ontime/],['riskAssessment','Risk assessment done (Yes/No)',/risk/],['driverHoursViolation','Driver hours violation (Yes/No)',/hours?viol|violation/],['notes','Notes',/^note|^remark|^comment/]];
+function jbNorm(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,''); }
+function jbDate(v){
+  if(v===null||v===undefined||v==='') return '';
+  if(typeof v==='number'&&isFinite(v)){ const d=new Date(Math.round((v-25569)*864e5)); return isNaN(d)?'':d.toISOString().slice(0,10); }
+  const t=String(v).trim(); let m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if(m) return m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0');
+  m=t.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/); if(m){ let y=+m[3]; if(y<100) y+=2000; return y+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0'); }
+  const d=new Date(t); return isNaN(d)?'':d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function jbStamp(v,date){          // → 'YYYY-MM-DDTHH:MM' (local) or '' ; time-only cells use the trip date
+  if(v===null||v===undefined||v==='') return '';
+  const pad=n=>String(n).padStart(2,'0'), fmtD=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+  if(typeof v==='number'&&isFinite(v)){ if(v<1){ const mins=Math.round(v*1440); return date?date+'T'+pad(Math.floor(mins/60)%24)+':'+pad(mins%60):''; } const ms=Math.round((v-25569)*864e5), d=new Date(ms+new Date(ms).getTimezoneOffset()*60000); return isNaN(d)?'':fmtD(d); }
+  const t=String(v).trim(); let m=t.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?$/i); if(m){ let h=+m[1]; if(m[3]){ const p=m[3].toLowerCase(); if(p==='pm'&&h<12) h+=12; if(p==='am'&&h===12) h=0; } return date?date+'T'+pad(h)+':'+m[2]:''; }
+  m=t.match(/^(.+?)[ T](\d{1,2}):(\d{2})/); if(m){ const d=jbDate(m[1]); return d?d+'T'+pad(+m[2])+':'+m[3]:''; }
+  return '';
+}
+function jbRoute(t){
+  const s=String(t||'').trim(); if(!s) return '';
+  const k=jbNorm(s); const keys=Object.keys(ROUTES); let hit=keys.find(x=>jbNorm(x)===k||jbNorm(ROUTES[x].label)===k); if(hit) return hit;
+  const r=routeOfLocations(s,s); return r==='other'?'':r;
+}
+function jbYesNo(v,def){ const t=String(v==null?'':v).trim().toLowerCase(); if(!t) return def; return /^(y|yes|true|1)$/.test(t)?'Yes':/^(n|no|false|0)$/.test(t)?'No':def; }
+function jbParse(aoa){
+  const rows=aoa.filter(r=>r&&r.some(c=>String(c==null?'':c).trim()!==''));
+  let hi=rows.findIndex(r=>r.filter(c=>JB_COLS.some(x=>x[2].test(jbNorm(c)))).length>=3); if(hi<0) return {err:'Could not find the heading row. Use the template: it has Date, Truck No., Driver and Route in the first row.'};
+  const heads=rows[hi].map(jbNorm), idx={}; JB_COLS.forEach(([k,,re])=>{ const i=heads.findIndex((h,j)=>h&&re.test(h)&&!Object.values(idx).includes(j)); if(i>-1) idx[k]=i; });
+  const miss=['date','truck','driver','route'].filter(k=>idx[k]===undefined); if(miss.length) return {err:'These columns are missing: '+miss.map(k=>JB_COLS.find(x=>x[0]===k)[1]).join(', ')+'.'};
+  const exist=STATE.data.journey||[], out=[], seen={};
+  rows.slice(hi+1).forEach((r,n)=>{
+    const g=k=>idx[k]===undefined?'':r[idx[k]]; const e=[]; const date=jbDate(g('date')); if(!date) e.push('date not understood');
+    const tk=String(g('truck')||'').trim(), m=tk?matchTruck(tk):{v:null}; if(!m.v) e.push(tk?('truck “'+tk+'” is not in the registry'):'truck missing');
+    const drv=canonDriver(String(g('driver')||'')); if(!drv) e.push('driver missing');
+    const rt=jbRoute(g('route')); if(!rt) e.push('route “'+String(g('route')||'')+'” not recognised');
+    const rec={id:uid(),date,vehicleId:m.v?m.v.id:'',driverName:drv,route:rt,material:String(g('material')||'').trim(),delayHrs:String(num(g('delayHrs'))),deviations:String(Math.round(num(g('deviations')))),onTime:jbYesNo(g('onTime'),'Yes'),riskAssessment:jbYesNo(g('riskAssessment'),'Yes'),driverHoursViolation:jbYesNo(g('driverHoursViolation'),'No'),notes:String(g('notes')||'').trim()};
+    J_TIMES.forEach(([k])=>{ rec[k]=jbStamp(g(k),date); });
+    const c=jCalc(rec); let dur=num(g('durationActual')); if(!dur&&c.total!==null) dur=Math.round(c.total*10)/10; if(!dur) e.push('needs the transit time, or the times to work it out'); rec.durationActual=String(dur||'');
+    if(g('durationActual')===''&&c.total!==null) rec._auto=1;
+    let st='ok', why=e.join('; ');
+    if(e.length) st='err'; else { const key=[rec.vehicleId,date,rec.route,rec.tLeftYard||rec.durationActual].join('|'); if(seen[key]||exist.some(x=>x.vehicleId===rec.vehicleId&&x.date===date&&x.route===rec.route&&(rec.tLeftYard?x.tLeftYard===rec.tLeftYard:String(x.durationActual)===rec.durationActual))){ st='dup'; why='already logged'; } seen[key]=1; }
+    out.push({n:hi+n+2,st,why,rec});
+  });
+  if(!out.length) return {err:'No trip rows found under the headings.'};
+  return {rows:out};
+}
+function jbTemplate(){
+  if(typeof XLSX==='undefined'){ alert('The spreadsheet library did not load. Check your internet connection and reload.'); return; }
+  const heads=JB_COLS.map(c=>c[1]), v=(STATE.data.vehicles||[])[0], t=todayStr();
+  const ex1=[t,v?v.regNo:'AKM123XX','Adamu Yusuf','Gypsum — Apapa → Ewekoro','Gypsum',t+' 05:30',t+' 07:10',t+' 08:00',t+' 08:45',t+' 09:00',t+' 16:30',t+' 17:15',t+' 23:40','','0',0,'Yes','Yes','No',''];
+  const ex2=[t,v?v.regNo:'AKM123XX','Adamu Yusuf','Clinker — Ewekoro ⇄ Sagamu (to & fro)','Clinker','06:00','06:20','06:50','07:20','07:30','09:30','10:00','12:00','','0',0,'Yes','Yes','No','Times can be typed as 06:30 — the trip date is used'];
+  const ws=XLSX.utils.aoa_to_sheet([heads,ex1,ex2]); ws['!cols']=heads.map(h=>({wch:Math.max(14,h.length+2)}));
+  const L=XLSX.utils.aoa_to_sheet([['Routes (copy exactly, or write it like "Apapa to Sagamu")','Trucks in the registry'],...Array.from({length:Math.max(Object.keys(ROUTES).length,(STATE.data.vehicles||[]).length)},(_,i)=>[Object.keys(ROUTES)[i]?ROUTES[Object.keys(ROUTES)[i]].label:'',((STATE.data.vehicles||[])[i]||{}).regNo||''])]); L['!cols']=[{wch:52},{wch:24}];
+  const H=XLSX.utils.aoa_to_sheet([['How to use'],['1. Delete the two example rows and type one row per trip.'],['2. Date, Truck No., Driver and Route are needed. Times are optional: type them as 2026-10-27 06:30, or just 06:30 (the trip date is used).'],['3. Leave Transit time empty if you fill the times — it is worked out as: left loading → arrived at offloading, plus left offloading → back at loading.'],['4. Save, then in FleetDesk: Journey Mgmt → Log a trip → Bulk upload → choose this file.']]); H['!cols']=[{wch:120}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Trips'); XLSX.utils.book_append_sheet(wb,L,'Lists'); XLSX.utils.book_append_sheet(wb,H,'How to use'); XLSX.writeFile(wb,'FleetDesk_Trip_Upload_Template.xlsx');
+}
+function jbBlock(){
+  const B=STATE.jBulk; const info=B&&B.rows?(()=>{ const ok=B.rows.filter(x=>x.st==='ok').length, dup=B.rows.filter(x=>x.st==='dup').length, er=B.rows.filter(x=>x.st==='err').length; return {ok,dup,er}; })():null;
+  const tag=x=>x.st==='ok'?'<span class="tag green">Ready</span>':x.st==='dup'?'<span class="tag amber">Skip — already logged</span>':'<span class="tag red">Fix: '+esc(x.why)+'</span>';
+  return `<div class="card" style="margin:12px 0 16px;border-left:3px solid var(--teal);"><div style="font-weight:600;">Bulk upload — many trips at once</div>
+   <div class="dim small" style="margin-top:4px;line-height:1.6;">Fill the template (or copy rows from your own Excel sheet with the same headings), then upload it. You see a check list first, and nothing is saved until you press Import.</div>
+   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn small" type="button" data-jb-template="1">⬇ Download template</button><button class="btn primary small" type="button" data-jb-pick="1">⬆ Choose Excel / CSV file</button><button class="btn small" type="button" data-jb-pastebtn="1">Paste from Excel</button><input type="file" data-jb-file="1" accept=".xlsx,.xls,.csv" style="display:none;"></div>
+   ${B&&B.paste?`<div style="margin-top:10px;"><textarea data-jb-paste="1" rows="5" placeholder="Copy the rows in Excel, including the heading row, and paste here" style="width:100%;"></textarea><div style="margin-top:6px;"><button class="btn small" type="button" data-jb-readpaste="1">Check pasted rows</button></div></div>`:''}
+   ${B&&B.err?`<div class="note warn" style="margin-top:10px;">${esc(B.err)}</div>`:''}
+   ${info?`<div style="margin-top:12px;"><b>${esc(B.name||'Pasted rows')}</b> — <span style="color:var(--green);">${info.ok} ready</span>${info.dup?` · <span style="color:var(--amber);">${info.dup} already logged</span>`:''}${info.er?` · <span style="color:var(--red);">${info.er} need fixing</span>`:''}</div>
+   <div class="table-wrap" style="margin-top:8px;max-height:340px;overflow:auto;"><table><thead><tr><th>Row</th><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Transit</th><th>Times</th><th>Check</th></tr></thead><tbody>${B.rows.slice(0,200).map(x=>`<tr><td>${x.n}</td><td>${esc(x.rec.date||'—')}</td><td>${esc(x.rec.vehicleId?vehicleLabel(x.rec.vehicleId):'—')}</td><td>${esc(x.rec.driverName||'—')}</td><td style="white-space:normal;">${esc(x.rec.route?fwRouteLabel(x.rec.route):'—')}</td><td>${x.rec.durationActual?esc(x.rec.durationActual)+' h':'—'}</td><td>${jStampCount(x.rec)}/8</td><td>${tag(x)}</td></tr>`).join('')}</tbody></table></div>
+   ${B.rows.length>200?`<div class="dim small">Showing the first 200 of ${B.rows.length} rows.</div>`:''}
+   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn primary small" type="button" data-jb-import="1"${info.ok?'':' disabled'}>Import ${info.ok} trip${info.ok===1?'':'s'}</button><button class="btn small" type="button" data-jb-cancel="1">Cancel</button></div>`:''}</div>`;
+}
+async function jbReadFile(file){
+  if(typeof XLSX==='undefined'){ STATE.jBulk={err:'The spreadsheet reader did not load. Check your internet connection and reload.'}; render(); return; }
+  try{ const buf=await file.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); let best=null;
+    for(const n of wb.SheetNames){ const aoa=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''}); const r=jbParse(aoa); if(r.rows){ best=r; break; } if(!best) best=r; }
+    STATE.jBulk=Object.assign({name:file.name},best); }catch(e){ STATE.jBulk={err:'Could not read that file: '+(e&&e.message?e.message:e)}; }
+  render();
+}
+function attachJourneyBulk(app){
+  const q=(s,f)=>app.querySelectorAll(s).forEach(f);
+  q('[data-jb-template]',b=>b.addEventListener('click',jbTemplate));
+  q('[data-jb-pick]',b=>b.addEventListener('click',()=>{ const f=app.querySelector('[data-jb-file]'); if(f) f.click(); }));
+  q('[data-jb-file]',f=>f.addEventListener('change',()=>{ const file=f.files&&f.files[0]; f.value=''; if(file) jbReadFile(file); }));
+  q('[data-jb-pastebtn]',b=>b.addEventListener('click',()=>{ STATE.jBulk=Object.assign({},STATE.jBulk||{},{paste:true}); render(); }));
+  q('[data-jb-readpaste]',b=>b.addEventListener('click',()=>{ const t=app.querySelector('[data-jb-paste]').value; const aoa=t.split(/\r?\n/).map(l=>l.split('\t')); STATE.jBulk=Object.assign({name:'Pasted rows'},jbParse(aoa)); render(); }));
+  q('[data-jb-cancel]',b=>b.addEventListener('click',()=>{ STATE.jBulk=null; render(); }));
+  q('[data-jb-import]',b=>b.addEventListener('click',async()=>{ const B=STATE.jBulk; if(!B||!B.rows) return; const recs=B.rows.filter(x=>x.st==='ok').map(x=>{ const r=Object.assign({},x.rec); delete r._auto; return r; }); if(!recs.length) return;
+    STATE.data.journey=[...(STATE.data.journey||[]),...recs]; STATE.jBulk=null; await persist('journey'); showToast(recs.length+' trip'+(recs.length===1?'':'s')+' imported into Journey Management.'); }));
+}
+
+/* ---------- Maintenance: breakdown rate with a clear basis, target zero ---------- */
+function bdStats(start,end){
+  const ev=(STATE.data.maintenance||[]).filter(r=>isBd(r)&&r.date&&r.date>=start&&r.date<=end), fleet=Math.max(1,(STATE.data.vehicles||[]).length);
+  return {n:ev.length,trucks:new Set(ev.map(r=>r.vehicleId)).size,rate:ev.length/fleet*100,down:ev.reduce((a,r)=>a+num(r.downtimeHours),0),fleet};
+}
+function maintBreakdownBasis(){
+  const t=todayStr(), fleet=Math.max(1,(STATE.data.vehicles||[]).length);
+  const days=[...Array(7)].map((_,i)=>addDays(t,-i)).map(d=>({l:fmtDate(d)+(d===t?' (today)':''),s:d,e:d}));
+  const wk0=wkStart(t), weeks=[...Array(8)].map((_,i)=>{ const s=addDays(wk0,-7*i); return {l:rangeText({start:s,end:addDays(s,6)})+(i===0?' (this week)':''),s,e:addDays(s,6)}; });
+  const m0=monthStartOf(t), months=[...Array(6)].map((_,i)=>{ const s=addMonthsStr(m0,-i); return {l:new Date(s+'T00:00:00').toLocaleDateString(undefined,{month:'long',year:'numeric'})+(i===0?' (so far)':''),s,e:monthEndOf(s)}; });
+  const tbl=(title,rows)=>`<div class="card"><div style="font-weight:600;margin-bottom:6px;">${title}</div><div class="table-wrap" style="border:none;background:none;"><table><thead><tr><th></th><th>Breakdowns</th><th>Trucks</th><th>Rate</th></tr></thead><tbody>${rows.map(x=>{ const s=bdStats(x.s,x.e); return `<tr><td style="white-space:normal;">${esc(x.l)}</td><td>${s.n}</td><td>${s.trucks}</td><td>${s.n===0?'<span class="tag green">0%  ✓</span>':'<span class="tag red">'+fmt(s.rate,1)+'%</span>'}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+  return `<div class="section-title"><span>Breakdown rate — how it is measured</span><div class="line"></div><span class="dim small">Target: 0 every day, week and month</span></div>
+  <div class="card" style="margin-bottom:12px;border-left:3px solid var(--teal);"><div class="small" style="line-height:1.8;"><b>Breakdown rate (%) = breakdown or repair events logged in the period ÷ trucks in the fleet (${fleet}) × 100.</b><br>
+   • An event is any <i>Breakdown / Repair</i> entry in the Maintenance log, counted on the date it happened. Scheduled services do not count.<br>
+   • A truck that breaks down twice counts twice; the “Trucks” column shows how many different trucks were affected.<br>
+   • The same rule is used for the day, the week (Mon–Sun) and the month, so they can be compared directly. One breakdown = ${fmt(100/fleet,1)}% of the fleet.<br>
+   • Target is <b>0</b> — a period is green only with no breakdowns at all.</div></div>
+  <div class="grid cols-3" style="margin-bottom:14px;">${tbl('Daily — last 7 days',days)}${tbl('Weekly — last 8 weeks',weeks)}${tbl('Monthly — last 6 months',months)}</div>`;
+}
+async function applyBreakdownSeed(){
+  const done=STATE.data.seeds||{}; if(done.bd_zero) return;
+  STATE.targets=Object.assign({},STATE.targets,{breakdownRateTarget:0});
+  STATE.data.seeds=Object.assign({},STATE.data.seeds||{},{bd_zero:{at:new Date().toISOString()}});
+  await persistTargets(); await persist('seeds');
 }
 
 loadAll();
