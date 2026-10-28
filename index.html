@@ -429,7 +429,7 @@ const DEFAULT_TARGETS = {
   onTimeTarget: 0.95, riskAssessmentTarget: 1.0, maxDelayHrsTarget: 1,
   inspectionComplianceTarget: 1.0, defectRateTarget: 0.10, prePostPassRateTarget: 1.0,
   ltifrTarget: 1.0, nearMissWeeklyTarget: 3,
-  pmComplianceTarget: 0.95, breakdownRateTarget: 0, mttrTargetHrs: 8,
+  pmComplianceTarget: 0.95, breakdownRateTarget: 0, repairRateTarget: 0, mttrTargetHrs: 8,
   dailyTruckInspectionTarget: 5,   // Safety AND Maintenance each inspect 5 trucks/day
   roadPatrolWeeklyTarget: 2,       // Safety AND Maintenance each patrol 2x/week
   toolboxTalkWeeklyTarget: 1,      // Safety AND Maintenance each hold 1 toolbox talk/week
@@ -798,8 +798,8 @@ function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   const pmDue = sumBy(recs,'pmDue') || scheduled.length;
   const pmCompliance = pmDue? scheduled.length/Math.max(pmDue,scheduled.length) : (scheduled.length?1:0);
   const totalVehicles = vehicles.length || 1;
-  const bdReal = breakdowns.filter(isRealBd), bdTrucks = new Set(bdReal.map(r=>r.vehicleId)).size;
-  const breakdownRate = bdTrucks / totalVehicles;   // trucks that broke down in the period ÷ trucks in the fleet. Target 0.
+  const bdTrucks = new Set(breakdowns.filter(isRoadBd).map(r=>r.vehicleId)).size, rpTrucks = new Set(breakdowns.filter(isRepairJob).map(r=>r.vehicleId)).size;
+  const breakdownRate = bdTrucks / totalVehicles, repairRate = rpTrucks / totalVehicles;   // trucks that broke down in the period ÷ trucks in the fleet. Target 0.
   const mttr = avgBy(breakdowns,'downtimeHours');
   const alerts = vehicles.map(maintenanceStatusForVehicle);
   const overdue = alerts.filter(a=>a.status==='red').length;
@@ -809,7 +809,8 @@ function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   const toolboxTarget = scaledTarget(STATE.targets.toolboxTalkWeeklyTarget,'week',period);
   return [
     {key:'pm', label:'PM Compliance', actual:pmCompliance, target:STATE.targets.pmComplianceTarget, fmt:'pct', good:'higher', ratio:attainment(pmCompliance,STATE.targets.pmComplianceTarget,'higher')},
-    {key:'breakdown', label:'Breakdown Rate (% of trucks)', actual:breakdownRate, target:STATE.targets.breakdownRateTarget||0, fmt:'pct', good:'lower', ratio:(bdTrucks===0?1:0.5/bdTrucks)},
+    {key:'breakdown', label:'Breakdown Rate (roadside)', actual:breakdownRate, target:STATE.targets.breakdownRateTarget||0, fmt:'pct', good:'lower', ratio:(bdTrucks===0?1:0.5/bdTrucks)},
+    {key:'repair', label:'Repair Rate (workshop)', actual:repairRate, target:STATE.targets.repairRateTarget||0, fmt:'pct', good:'lower', ratio:(rpTrucks===0?1:0.5/rpTrucks)},
     {key:'mttr', label:'Avg Repair Time (MTTR)', actual:mttr, target:STATE.targets.mttrTargetHrs, fmt:1, unit:'hrs', good:'lower', ratio:attainment(mttr,STATE.targets.mttrTargetHrs,'lower')},
     {key:'predictive', label:'Predictive Alerts (open)', actual:overdue+dueSoon, target:0, fmt:0, good:'lower', ratio:(overdue+dueSoon)===0?1:(overdue?0.3:0.7)},
     {key:'truckinsp', label:'Trucks Inspected (Maint.)', actual:trucksInspected, target:truckInspTarget, fmt:0, good:'higher', ratio:attainment(trucksInspected,truckInspTarget,'higher')},
@@ -1295,7 +1296,7 @@ function renderJourneyPageCore(){
   <div class="section-title"><span>Trip Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records</span></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Date</th><th>Truck No.</th><th>Driver</th><th>Route</th><th>Material</th><th>Transit</th><th>Timings</th><th>Delay</th><th>Deviations</th><th>On-Time</th><th>Risk Ass.</th><th>Hrs Viol.</th><th>Pre-Trip</th><th>Post-Trip</th><th></th></tr></thead>
-    <tbody>${allRecs.length? allRecs.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.driverName||'—'}</td><td style="white-space:normal;">${ROUTES[r.route]?ROUTES[r.route].label:r.route}</td><td>${esc(r.material||'—')}</td><td>${jDurCell(r)}</td><td><button class="btn ghost small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/8</button></td><td>${fmt(num(r.delayHrs),1)} h</td><td>${num(r.deviations)}</td><td>${r.onTime}</td><td>${r.riskAssessment}</td><td>${r.driverHoursViolation}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Pre-Trip'))}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Post-Trip'))}</td><td><button class="btn ghost small" data-delete="journey:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="15">No trips logged yet — log the first one above.</td></tr>`}</tbody>
+    <tbody>${allRecs.length? allRecs.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.driverName||'—'}</td><td style="white-space:normal;">${ROUTES[r.route]?ROUTES[r.route].label:r.route}</td><td>${esc(r.material||'—')}</td><td>${jDurCell(r)}</td><td><button class="btn ghost small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/9</button></td><td>${fmt(num(r.delayHrs),1)} h</td><td>${num(r.deviations)}</td><td>${r.onTime}</td><td>${r.riskAssessment}</td><td>${r.driverHoursViolation}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Pre-Trip'))}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Post-Trip'))}</td><td><button class="btn ghost small" data-delete="journey:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="15">No trips logged yet — log the first one above.</td></tr>`}</tbody>
   </table></div>`;
 }
 
@@ -1401,7 +1402,7 @@ const REPORT_ROW_DEFS = {
   journey: k=>[['Total Trips',k.find(x=>x.key==='trips')],['On-Time Arrival',k.find(x=>x.key==='ontime')],['Risk Assessment Compliance',k.find(x=>x.key==='risk')],['Avg Delay / Idling (hrs)',k.find(x=>x.key==='delay')],['Route Deviations',k.find(x=>x.key==='deviations')],['Driver Hours Violations',k.find(x=>x.key==='violations')]],
   inspections: k=>[['Inspection Compliance',k.find(x=>x.key==='compliance')],['Defect Rate',k.find(x=>x.key==='defectrate')],['Critical Defects',k.find(x=>x.key==='critical')],['Vehicles Inspected',k.find(x=>x.key==='done')]],
   safety: k=>[['LTIFR',k.find(x=>x.key==='ltifr')],['Incidents',k.find(x=>x.key==='incidents')],['Near-Misses Reported',k.find(x=>x.key==='nearmiss')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Road Patrols',k.find(x=>x.key==='patrol')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
-  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate (% of trucks)',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
+  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate (roadside)',k.find(x=>x.key==='breakdown')],['Repair Rate (workshop)',k.find(x=>x.key==='repair')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
 };
 const REPORT_DEPT_MATCH = {
   transport:r=>r.dept==='Transport', journey:r=>r.dept==='Journey Mgmt', inspections:r=>r.dept==='Inspections',
@@ -2846,7 +2847,7 @@ function renderSettingsModal(){
     ['inspectionComplianceTarget','Inspection Compliance Target (0–1)'], ['defectRateTarget','Max Acceptable Defect Rate (0–1)'],
     ['prePostPassRateTarget','Pre/Post-Trip Pass Rate Target (0–1)'], ['ltifrTarget','LTIFR Target'],
     ['nearMissWeeklyTarget','Near-Miss Reporting Target (per week)'], ['pmComplianceTarget','PM Compliance Target (0–1)'],
-    ['breakdownRateTarget','Breakdown Rate Target (0 = no breakdowns)'], ['mttrTargetHrs','MTTR Target (hrs)'],
+    ['breakdownRateTarget','Roadside Breakdown Rate Target (0 = none)'], ['repairRateTarget','Repair Rate Target (0 = none)'], ['mttrTargetHrs','MTTR Target (hrs)'],
     ['dailyTruckInspectionTarget','Truck Inspections / Day (Safety & Maint.)'], ['roadPatrolWeeklyTarget','Road Patrols / Week (Safety & Maint.)'],
     ['toolboxTalkWeeklyTarget','Toolbox Talks / Week (Safety & Maint.)'],
     ['checkCoverageTarget','Pre/Post-Trip Check Coverage Target (0–1)'], ['workshopServiceCapacityPerWeek','Workshop Capacity (trucks serviced / week)'], ['cngLongTripsPerFill','CNG: clinker / gypsum trips per fill-up'], ['cngAdumbuTripsPerFill','CNG: Adumbu trips per fill-up (plus 1 clinker/gypsum trip)'], ['truckTripsPerDayTarget','Trips / Truck / Day for Utilization (0 = auto)'], ['dieselPricePerLitre','Default Fuel Price (₦ / litre)'],
@@ -3153,7 +3154,10 @@ function navHTML(badgeCounts){
 /* =================== v5: edit modal, transport truck/driver, maintenance history / parts / weekly comparison,
    best & worst driver rankings (safety + maintenance) =================== */
 const isBd = r => !!r && (r.type==='Breakdown' || r.type==='Repair');
-const isRealBd = r => isBd(r) && !r.srcId;           // not raised automatically from an inspection / pre-trip check           // repairs are treated as breakdowns
+const isRepairJob = r => isBd(r) && (!!r.srcId || r.kind==='workshop');   // repair done in the workshop/yard, incl. jobs raised by a failed inspection or pre/post-trip check
+const isRoadBd = r => isBd(r) && !r.srcId && r.kind!=='workshop';        // roadside breakdown
+const isRealBd = isRoadBd;           // not raised automatically from an inspection / pre-trip check           // repairs are treated as breakdowns
+const bdKindTag = r => isRepairJob(r)?'<span class="tag amber">Repair (workshop)</span>':'<span class="tag red">Roadside breakdown</span>';
 const typeLabel = t => t==='Scheduled' ? 'Scheduled service' : 'Breakdown / Repair';
 function fmtDate(s){ if(!s) return '—'; const d=new Date(s+'T00:00:00'); if(isNaN(d)) return esc(s); return d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); }
 function fmtDay(s){ if(!s) return '—'; const d=new Date(s+'T00:00:00'); if(isNaN(d)) return esc(s); return d.toLocaleDateString(undefined,{day:'numeric',month:'short'}); }
@@ -3176,6 +3180,7 @@ function editSchema(coll){
     {key:'date',label:'Date',type:'date',required:true},
     {key:'vehicleId',label:'Truck',type:'vehicle',required:true},
     {key:'type',label:'Event Type',type:'select',required:true,options:[['Scheduled','Scheduled service'],['Breakdown','Breakdown / Repair']]},
+    {key:'kind',label:'If breakdown / repair — where?',type:'select',options:[['road','Roadside breakdown (on the road)'],['workshop','Repair (workshop / yard)']]},
     {key:'component',label:'Component',type:'select',options:[['','—'],...REPAIR_COMPONENTS]},
     {key:'otherDetail',label:"If 'Other' — what was repaired?",type:'text',list:'dl-other-items',placeholder:'e.g. Air compressor'},
     {key:'downtimeHours',label:'Downtime',unit:'hrs',type:'number',step:'0.1'},
@@ -3350,7 +3355,7 @@ function buildHistory(){
 function histRow(x){
   const r=x.r;
   const sameTxt=x.bd&&x.ck?(x.nth>=2?`<span class="tag ${x.nth>=3?'red':'amber'}">${x.nth>=3?'Chronic':'Repeat'} #${x.nth}</span> <span class="dim small">${x.sinceSame!==null?x.sinceSame+' d after the last '+esc(x.ck.replace(/^Other — /,'').toLowerCase())+' repair':''}</span>`:'<span class="dim">First time</span>'):'<span class="dim">—</span>';
-  return `<tr><td>${fmtDate(r.date)}</td><td>${r.type==='Scheduled'?'<span class="tag teal">Service</span>':'<span class="tag red">Breakdown / Repair</span>'}</td><td style="white-space:normal;min-width:170px;"><b>${esc(whatDone(r))}</b></td><td>${x.bd?(x.gapRep!==null?`<b>${x.gapRep}</b> d`:'<span class="dim">first repair</span>'):'<span class="dim">—</span>'}</td><td style="white-space:normal;min-width:200px;">${sameTxt}</td><td style="white-space:normal;min-width:200px;">${esc(r.notes||'')}${r.parts?' <span class="dim">· Parts: '+esc(r.parts)+'</span>':''}</td><td>${r.downtimeHours?fmt(num(r.downtimeHours),1)+' h':'—'}</td><td>${r.cost?naira(num(r.cost)):'—'}</td><td>${r.status==='Open'?'<span class="tag amber">Open</span>':'<span class="tag green">Done</span>'}</td><td><button type="button" class="btn small" data-edit="maintenance:${esc(r.id)}">Edit</button></td></tr>`;
+  return `<tr><td>${fmtDate(r.date)}</td><td>${r.type==='Scheduled'?'<span class="tag teal">Service</span>':bdKindTag(r)}</td><td style="white-space:normal;min-width:170px;"><b>${esc(whatDone(r))}</b></td><td>${x.bd?(x.gapRep!==null?`<b>${x.gapRep}</b> d`:'<span class="dim">first repair</span>'):'<span class="dim">—</span>'}</td><td style="white-space:normal;min-width:200px;">${sameTxt}</td><td style="white-space:normal;min-width:200px;">${esc(r.notes||'')}${r.parts?' <span class="dim">· Parts: '+esc(r.parts)+'</span>':''}</td><td>${r.downtimeHours?fmt(num(r.downtimeHours),1)+' h':'—'}</td><td>${r.cost?naira(num(r.cost)):'—'}</td><td>${r.status==='Open'?'<span class="tag amber">Open</span>':'<span class="tag green">Done</span>'}</td><td><button type="button" class="btn small" data-edit="maintenance:${esc(r.id)}">Edit</button></td></tr>`;
 }
 function renderMaintHistory(){
   if(!STATE.data.vehicles.length) return `<div class="card dim" style="text-align:center;padding:30px;">Register trucks (KPIs &amp; Registry tab) and log maintenance events to build each truck’s history.</div>`;
@@ -3495,7 +3500,7 @@ function maintWeekMetrics(start, H, P, endOpt){
   const repeats=bds.filter(r=>{ const x=H.byId[r.id]; return x&&x.sinceSame!==null; });
   const parts=P.filter(p=>inW(p.date));
   const mi=(STATE.data.maintInspections||[]).filter(r=>inW(r.date)), daily=(STATE.data.maintenanceDaily||[]).filter(r=>inW(r.date));
-  return {start,bdPct:(new Set(bds.filter(isRealBd).map(r=>r.vehicleId)).size/Math.max(1,(STATE.data.vehicles||[]).length))*100,breakdowns:bds.length,scheduled:sch.length,downtime:bds.reduce((a,r)=>a+num(r.downtimeHours),0),mttr:dt.length?dt.reduce((a,r)=>a+num(r.downtimeHours),0)/dt.length:0,
+  return {start,bdPct:(new Set(bds.filter(isRoadBd).map(r=>r.vehicleId)).size/Math.max(1,(STATE.data.vehicles||[]).length))*100,rpPct:(new Set(bds.filter(isRepairJob).map(r=>r.vehicleId)).size/Math.max(1,(STATE.data.vehicles||[]).length))*100,breakdowns:bds.length,scheduled:sch.length,downtime:bds.reduce((a,r)=>a+num(r.downtimeHours),0),mttr:dt.length?dt.reduce((a,r)=>a+num(r.downtimeHours),0)/dt.length:0,
     cost:ev.reduce((a,r)=>a+num(r.cost),0),trucks:Object.keys(truck).length,repeats:repeats.length,repeatList:repeats,parts:parts.length,
     partsAgain:parts.filter(p=>p.prevGap!==null&&p.prevGap<=90).length,partsAgainList:parts.filter(p=>p.prevGap!==null&&p.prevGap<=90),
     closed:(STATE.data.maintenance||[]).filter(r=>inW(r.completedDate)).length,inspected:trucksInspectedMaint(daily,mi),patrols:sumBy(daily,'roadPatrols'),toolbox:sumBy(daily,'toolboxTalks'),comp,truck,bds};
@@ -3518,7 +3523,7 @@ function renderMaintWeekly(){
     <div style="min-width:260px;flex:1;max-width:440px;"><label>Week (Mon – Sun)</label><select data-maint-week="1">${opts}</select></div>
     <div class="flex gap8"><button class="btn small ${start===addDays(cur,-7)?'primary':''}" data-maint-wk="last">Last week</button><button class="btn small ${start===cur?'primary':''}" data-maint-wk="cur">This week so far</button></div></div>
     <div class="dim small" style="margin-top:8px;">Comparing <b>${weekRangeText(start)}</b> with the week before, <b>${weekRangeText(prevStart)}</b>. ${start===cur?'This week is still in progress, so its totals will keep growing until Sunday.':''}</div></div>`;
-  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Breakdown rate (% of trucks)','bdPct','lower',1,'%'],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
+  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Breakdown rate (roadside, % of trucks)','bdPct','lower',1,'%'],['Repair rate (workshop, % of trucks)','rpPct','lower',1,'%'],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
   const fv=(r,v)=>r[1]==='cost'?naira(v):fmt(v,r[3])+r[4];
   const trs=rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${fv(r,A[r[1]])}</td><td class="dim">${fv(r,B[r[1]])}</td><td>${deltaCell(A[r[1]],B[r[1]],r[2],r[3],r[4],r[1]==='cost')}</td></tr>`).join('');
   // component and truck movement
@@ -3596,7 +3601,8 @@ function lastDriverFor(vid){
   return best?best.name:'';
 }
 function prepMaintRec(rec){
-  if(rec.type==='Repair') rec.type='Breakdown';
+  if(rec.type==='Repair'){ rec.type='Breakdown'; if(!rec.kind) rec.kind='workshop'; }
+  if(rec.type==='Scheduled') delete rec.kind;
   if(rec.component!=='Other') delete rec.otherDetail; else if(rec.otherDetail) rec.otherDetail=String(rec.otherDetail).trim();
   return compactRec(rec);
 }
@@ -3633,7 +3639,7 @@ function renderMaintenancePage(){
   const logFilters=`<div class="filterbar" style="margin-bottom:10px;">
     <div><label>Truck</label>${selectHTML('data-mlog-filter="truck"',mt,[['ALL','All trucks'],...STATE.data.vehicles.map(v=>[v.id,v.regNo])])}</div>
     <div><label>Show</label>${selectHTML('data-mlog-filter="type"',my,[['ALL','Everything'],['bd','Breakdowns / repairs'],['sch','Scheduled services'],['open','Open jobs only']])}</div></div>`;
-  const logRows=shown.map(r=>`<tr><td>${fmtDate(r.date)}</td><td><b>${esc(vehicleLabel(r.vehicleId))}</b></td><td>${r.type==='Scheduled'?'<span class="tag teal">Service</span>':'<span class="tag red">Breakdown / Repair</span>'}</td><td style="white-space:normal;min-width:150px;">${esc(whatDone(r))}</td><td>${r.downtimeHours?fmt(num(r.downtimeHours),1)+' h':'—'}</td><td>${r.cost?naira(num(r.cost)):'—'}</td><td>${r.status==='Open'?'<span class="tag amber">Open</span>':'<span class="tag green">Done</span>'}</td><td>${esc(r.source||'Manual')}</td><td style="white-space:normal;min-width:200px;">${esc(r.notes||'')}${r.parts?' <span class="dim">· Parts: '+esc(r.parts)+'</span>':''}</td><td>${actionButtons('maintenance',r.id,r.status==='Open'?`<button class="btn small" data-complete-job="${r.id}">Mark complete</button>`:'')}</td></tr>`).join('');
+  const logRows=shown.map(r=>`<tr><td>${fmtDate(r.date)}</td><td><b>${esc(vehicleLabel(r.vehicleId))}</b></td><td>${r.type==='Scheduled'?'<span class="tag teal">Service</span>':bdKindTag(r)}</td><td style="white-space:normal;min-width:150px;">${esc(whatDone(r))}</td><td>${r.downtimeHours?fmt(num(r.downtimeHours),1)+' h':'—'}</td><td>${r.cost?naira(num(r.cost)):'—'}</td><td>${r.status==='Open'?'<span class="tag amber">Open</span>':'<span class="tag green">Done</span>'}</td><td>${esc(r.source||'Manual')}</td><td style="white-space:normal;min-width:200px;">${esc(r.notes||'')}${r.parts?' <span class="dim">· Parts: '+esc(r.parts)+'</span>':''}</td><td>${actionButtons('maintenance',r.id,r.status==='Open'?`<button class="btn small" data-complete-job="${r.id}">Mark complete</button>`:'')}</td></tr>`).join('');
 
   return `
   <div class="topbar">
@@ -3655,6 +3661,7 @@ function renderMaintenancePage(){
         <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
         <div><label>Truck</label><select name="vehicleId" required><option value="">Select truck…</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}">${esc(v.regNo)}</option>`).join('')}</select></div>
         <div><label>Event Type</label><select name="type" required><option value="Scheduled">Scheduled service</option><option value="Breakdown">Breakdown / Repair</option></select></div>
+        <div><label>If breakdown / repair — where?</label><select name="kind"><option value="road">Roadside breakdown (on the road)</option><option value="workshop">Repair (workshop / yard)</option></select></div>
         <div><label>Component</label><select name="component"><option value="">—</option>${REPAIR_COMPONENTS.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></div>
         <div id="other-wrap" style="display:none;"><label>“Other” — what was repaired?</label><input type="text" name="otherDetail" list="dl-other-items" placeholder="e.g. Air compressor, Clutch, Battery" autocomplete="off"></div>
         <div><label>Downtime (hrs)</label><input type="number" name="downtimeHours" step="0.1"></div>
@@ -4783,7 +4790,7 @@ function repMaintenance(r,p,L){
   const blocks=[kpiTableBlock('Maintenance KPIs',REPORT_ROW_DEFS.maintenance(kc_),REPORT_ROW_DEFS.maintenance(kp_),hasCur,hasPrev,L)];
   const A=maintMetricsFor(r), B=maintMetricsFor(p);
   blocks.push(compareBlock('Maintenance activity',[
-    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Breakdown rate (% of trucks)',A.bdPct,B.bdPct,'lower',{dec:1,unit:'%'}],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
+    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Breakdown rate (roadside, % of trucks)',A.bdPct,B.bdPct,'lower',{dec:1,unit:'%'}],['Repair rate (workshop, % of trucks)',A.rpPct,B.rpPct,'lower',{dec:1,unit:'%'}],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
     ['Repair downtime',A.downtime,B.downtime,'lower',{dec:1,unit:'h'}],['Average repair time (MTTR)',A.mttr,B.mttr,'lower',{dec:1,unit:'h'}],['Maintenance cost',A.cost,B.cost,'lower',{money:true}],
     ['Scheduled services done',A.scheduled,B.scheduled,'higher'],['Repair jobs closed',A.closed,B.closed,'higher'],['Trucks inspected',A.inspected,B.inspected,'higher'],
     ['Toolbox talks',A.toolbox,B.toolbox,'higher'],['Part lines bought',A.parts,B.parts,null],['Parts bought again within 90 days',A.partsAgain,B.partsAgain,'lower']],L));
@@ -5497,6 +5504,7 @@ window.addEventListener('appinstalled',()=>{ DEFERRED_INSTALL=null; try{ showToa
 function isStandalone(){ return (window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||window.navigator.standalone===true; }
 function typedTrucks(){ const m={}; (STATE.data.transport||[]).forEach(r=>{ if(!r.vehicleId&&r.regNoText){ const k=trKey(r); if(!m[k]) m[k]=String(r.regNoText).trim().toUpperCase(); } }); return Object.entries(m).sort((a,b)=>a[1]<b[1]?-1:1); }
 function attachEventsV10(app){
+  if(STATE.tab==='maintenance'&&(STATE.data.vehicles||[]).length>FLEET_SIZE&&STATE.live&&STATE.live.status==='idle') fetchLive();
   app.querySelectorAll('[data-mx-period]').forEach(b=>b.addEventListener('click',()=>{ STATE.mix.period=b.getAttribute('data-mx-period'); render(); }));
   app.querySelectorAll('[data-mx-reload]').forEach(b=>b.addEventListener('click',()=>{ STATE.mix.status='idle'; mixEnsure(true); }));
   if(STATE.tab==='summary'||STATE.tab==='safety') mixEnsure();
@@ -5517,7 +5525,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v11.4 · 28 Oct 2026';
+const APP_VERSION='v11.6 · 28 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5803,7 +5811,39 @@ function dupGroups(){
   return Object.keys(by).filter(k=>by[k].length>1&&ign.indexOf(k)<0).map(k=>({key:k,list:by[k]}));
 }
 function vehUse(id){ let n=0; VEH_REF_COLLS.forEach(c=>(STATE.data[c]||[]).forEach(r=>{ if(r.vehicleId===id) n++; })); return n; }
-function regDupCard(){
+const FLEET_SIZE=27;
+function fcLev(a,b){ const m=a.length,n=b.length; if(!m||!n) return Math.max(m,n); let p=[...Array(n+1).keys()]; for(let i=1;i<=m;i++){ const c=[i]; for(let j=1;j<=n;j++) c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1)); p=c; } return p[n]; }
+async function fcMerge(loseId,keepId){
+  const keep=STATE.data.vehicles.find(v=>v.id===keepId), lose=STATE.data.vehicles.find(v=>v.id===loseId); const touched=[];
+  VEH_REF_COLLS.forEach(c=>{ let ch=false; (STATE.data[c]||[]).forEach(r=>{ if(r.vehicleId===loseId){ r.vehicleId=keepId; ch=true; } }); if(ch) touched.push(c); });
+  ['currentOdometer','lastServiceOdometer','lastServiceDate','model'].forEach(f=>{ if((keep[f]===undefined||keep[f]===''||keep[f]===null)&&lose[f]) keep[f]=lose[f]; });
+  STATE.data.vehicles=STATE.data.vehicles.filter(v=>v.id!==loseId);
+  for(const c of touched) await persist(c); await persist('vehicles');
+  showToast('Merged into '+keep.regNo+'. The registry now has '+STATE.data.vehicles.length+' trucks.'); render();
+}
+function fleetCheckCard(){
+  const vs=STATE.data.vehicles||[]; const ok=((STATE.data.seeds||{}).fleetOk); if(vs.length<=FLEET_SIZE||ok===vs.length) return '';
+  const L=STATE.live||{}, mix=[]; (L.rows||[]).forEach(r=>mix.push(r.reg||r.name)); (L.silent||[]).forEach(r=>mix.push(r.reg||r.name));
+  const mixKeys=mix.map(x=>normReg(x)).filter(Boolean), mixDig=mix.map(x=>String(x||'').replace(/\D/g,'')).filter(x=>x.length>=3), haveMix=mixKeys.length>0;
+  const lastAct=id=>{ let d=''; VEH_REF_COLLS.forEach(c=>(STATE.data[c]||[]).forEach(r=>{ if(r.vehicleId===id&&r.date&&r.date>d) d=r.date; })); return d; };
+  const seen={}, rows=vs.map(v=>{
+    const k=normReg(v.regNo), dg=String(v.regNo||'').replace(/\D/g,''), use=vehUse(v.id), last=lastAct(v.id), why=[]; let score=0;
+    const inMix=haveMix?(mixKeys.indexOf(k)>-1||(dg.length>=3&&mixDig.indexOf(dg)>-1)):null;
+    if(inMix===false){ why.push('not among the '+mixKeys.length+' trackers in MiX'); score+=3; }
+    if(use===0){ why.push('no trips, fuel or maintenance records'); score+=3; } else if(last&&last<addDays(todayStr(),-60)){ why.push('no activity since '+last); score+=1; }
+    const sim=vs.filter(o=>o.id!==v.id&&fcLev(k,normReg(o.regNo))<=2); if(sim.length){ why.push('plate is almost the same as '+sim.map(o=>o.regNo).join(', ')); score+=2; }
+    if(seen[k]){ why.push('same plate listed twice'); score+=4; } seen[k]=1;
+    return {v,use,last,why,score,sim,inMix};
+  }).sort((a,b)=>b.score-a.score||a.use-b.use);
+  const top=rows.filter(r=>r.score>0).slice(0,6), n=vs.length;
+  const row=r=>`<tr><td><b>${esc(r.v.regNo)}</b></td><td style="white-space:normal;">${r.why.map(esc).join('<br>')||'<span class="dim">—</span>'}</td><td>${r.use}</td><td>${r.last?fmtDate(r.last):'—'}</td><td style="white-space:normal;">${r.use===0?`<button class="btn small danger" data-fc-remove="${r.v.id}">Remove</button>`:`<select data-fc-into="${r.v.id}" style="width:auto;max-width:150px;">${vs.filter(o=>o.id!==r.v.id).sort((a,b)=>(r.sim.includes(b)?1:0)-(r.sim.includes(a)?1:0)||String(a.regNo).localeCompare(String(b.regNo))).map(o=>`<option value="${o.id}">${esc(o.regNo)}</option>`).join('')}</select> <button class="btn small" data-fc-merge="${r.v.id}">Merge into</button>`}</td></tr>`;
+  return `<div class="card" style="margin:0 0 16px;border-left:3px solid var(--amber);"><div style="font-weight:600;font-size:14px;">Fleet check — the registry has ${n} trucks, you have ${FLEET_SIZE}</div>
+   <div class="dim small" style="margin:3px 0 10px;line-height:1.55;">${haveMix?'Compared with the '+mixKeys.length+' trucks MiX tracks, and with each truck’s trip, fuel and maintenance history.':'Open the Live Map once so MiX can be compared. Meanwhile this uses trip, fuel and maintenance history only.'} The likeliest extra ${n-FLEET_SIZE===1?'truck is':'trucks are'} at the top.</div>
+   ${top.length?`<div class="table-wrap"><table><thead><tr><th>Plate</th><th>Why it stands out</th><th>Records</th><th>Last activity</th><th>Fix</th></tr></thead><tbody>${top.map(row).join('')}</tbody></table></div>`:'<div class="dim small">Nothing stands out. Every plate has records and appears in MiX — check the list below for a plate that does not belong to SKB.</div>'}
+   <div style="margin-top:10px;"><button class="btn small ghost" data-fc-ok="1">Keep all ${n} — this is correct</button></div></div>`;
+}
+function regDupCard(){ return regDupCardCore()+fleetCheckCard(); }
+function regDupCardCore(){
   const g=dupGroups(); if(!g.length) return '';
   const total=(STATE.data.vehicles||[]).length;
   return `<div class="card" style="margin:0 0 16px;border-left:3px solid var(--red);"><div style="font-weight:600;font-size:14px;">Registry check — ${g.length} truck${g.length>1?'s look':' looks'} like duplicates</div>
@@ -5823,6 +5863,9 @@ async function mergeDup(key){
 }
 async function ignoreDup(key){ const s=STATE.data.seeds||(STATE.data.seeds={}); s.dupIgnore=(s.dupIgnore||[]).concat(key); await persist('seeds'); render(); }
 function attachBulkExtras(app){
+  app.querySelectorAll('[data-fc-remove]').forEach(b=>b.addEventListener('click',async()=>{ const v=(STATE.data.vehicles||[]).find(x=>x.id===b.dataset.fcRemove); if(!v||!confirm('Remove '+v.regNo+' from the registry? It has no trips, fuel or maintenance records.')) return; STATE.data.vehicles=STATE.data.vehicles.filter(x=>x.id!==v.id); await persist('vehicles'); showToast(v.regNo+' removed. The registry now has '+STATE.data.vehicles.length+' trucks.'); render(); }));
+  app.querySelectorAll('[data-fc-merge]').forEach(b=>b.addEventListener('click',async()=>{ const sel=app.querySelector('[data-fc-into="'+b.dataset.fcMerge+'"]'); const keep=sel&&sel.value; if(!keep) return; const lose=(STATE.data.vehicles||[]).find(x=>x.id===b.dataset.fcMerge), k=(STATE.data.vehicles||[]).find(x=>x.id===keep); if(!lose||!k||!confirm('Move all of '+lose.regNo+'’s records into '+k.regNo+' and remove '+lose.regNo+'?')) return; b.disabled=true; await fcMerge(lose.id,keep); }));
+  app.querySelectorAll('[data-fc-ok]').forEach(b=>b.addEventListener('click',async()=>{ const s=STATE.data.seeds||(STATE.data.seeds={}); s.fleetOk=(STATE.data.vehicles||[]).length; await persist('seeds'); render(); }));
   app.querySelectorAll('[data-dup-merge]').forEach(b=>b.addEventListener('click',()=>{ b.disabled=true; mergeDup(b.getAttribute('data-dup-merge')); }));
   app.querySelectorAll('[data-dup-ignore]').forEach(b=>b.addEventListener('click',()=>{ b.disabled=true; ignoreDup(b.getAttribute('data-dup-ignore')); }));
 }
@@ -5979,7 +6022,7 @@ async function fetchLive(manual){
       else { L.status='notset'; L.msg=''; } }
     if(L.status==='ok') fwRememberPositions();
   }catch(e){ L.status='error'; L.msg='Could not reach the backend: '+(e&&e.message?e.message:e); }
-  L.busy=false; if(STATE.tab==='live') render();
+  L.busy=false; if(STATE.tab==='live'||STATE.tab==='maintenance') render();
   if(L.status==='ok'&&!L.watchOff&&STATE.tab==='live') fetchHist();
 }
 async function fetchHist(hours){
@@ -6374,15 +6417,15 @@ async function applyHsseSeed(){
 
 /* ============================================================ journey2.js ============================================================ */
 /* ===== Journey Management v11: trip timing stamps, approved full routes (synced to the Live Map), route sheets for drivers, CNG truck trip targets ===== */
-const J_TIMES=[['tLeftYard','Left the yard'],['tGateIn','Gate-in at loading location'],['tLoadStart','Loading starts'],['tLoadEnd','Loading ends'],['tLeftLoading','Left loading location'],['tArriveOff','Arrived at offloading location'],['tLeftOff','Left offloading location'],['tBackLoading','Back at loading location']];
+const J_TIMES=[['tLeftYard','Left the yard'],['tGateIn','Gate-in at loading location'],['tLoadStart','Loading starts'],['tLoadEnd','Loading ends'],['tLeftLoading','Left loading location'],['tArriveOff','Arrived at offloading location'],['tLeftOff','Left offloading location'],['tBackLoading','Back at loading location'],['tBackYard','Back at the yard']];
 const J_TRUCK_TARGET={day:2,week:14,month:56};
 STATE.jTimes=null; STATE.jPlan=null; STATE.jShare=null;
 function jNow(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function jMs(v){ const t=Date.parse(v); return isNaN(t)?null:t; }
 function jCalc(r){
   const g=k=>jMs(r[k]), h=(a,b)=>(a!==null&&b!==null&&b>=a)?(b-a)/3600000:null;
-  const out=h(g('tLeftLoading'),g('tArriveOff')), back=h(g('tLeftOff'),g('tBackLoading'));
-  return {wait:h(g('tGateIn'),g('tLoadStart')), load:h(g('tLoadStart'),g('tLoadEnd')), toYard:h(g('tLeftYard'),g('tGateIn')), out, back, total:(out!==null&&back!==null)?out+back:(out!==null?out:null), cycle:h(g('tLeftYard'),g('tBackLoading'))};
+  const out=h(g('tLeftLoading'),g('tArriveOff')), ret=g('tBackLoading')!==null?g('tBackLoading'):g('tBackYard'), back=h(g('tLeftOff'),ret);
+  return {wait:h(g('tGateIn'),g('tLoadStart')), load:h(g('tLoadStart'),g('tLoadEnd')), toYard:h(g('tLeftYard'),g('tGateIn')), out, back, total:(out!==null&&back!==null)?out+back:(out!==null?out:null), cycle:h(g('tLeftYard'),g('tBackYard')!==null?g('tBackYard'):g('tBackLoading'))};
 }
 function jH(v){ return v===null||v===undefined?'—':(v<1?Math.round(v*60)+' min':fmt(v,1)+' h'); }
 function jStampCount(r){ return J_TIMES.filter(([k])=>r[k]).length; }
@@ -6390,7 +6433,7 @@ function jTimeFields(r,prefix){
   return `<div class="form-grid" style="margin-top:6px;">${J_TIMES.map(([k,l])=>`<div><label>${l}</label><div style="display:flex;gap:6px;"><input type="datetime-local" name="${k}" value="${esc(r[k]||'')}" data-jt="1" style="flex:1;min-width:0;"><button type="button" class="btn small" data-jnow="${k}" title="Stamp the time now">Now</button></div></div>`).join('')}</div>
    <div class="dim small" id="${prefix}-calc" style="margin-top:8px;line-height:1.7;"></div>`;
 }
-function jCalcText(r){ const c=jCalc(r); const bits=[]; if(c.toYard!==null) bits.push(`Yard → gate <b>${jH(c.toYard)}</b>`); if(c.wait!==null) bits.push(`Gate wait <b>${jH(c.wait)}</b>`); if(c.load!==null) bits.push(`Loading <b>${jH(c.load)}</b>`); if(c.out!==null) bits.push(`Loaded transit <b>${jH(c.out)}</b>`); if(c.back!==null) bits.push(`Return transit <b>${jH(c.back)}</b>`); if(c.total!==null) bits.push(`<span style="color:var(--teal);">Transit time <b>${jH(c.total)}</b></span>`); return bits.length?bits.join(' · '):'Times are optional: stamp each step with “Now” as it happens, or type them in. Transit time = left loading → arrived offloading + left offloading → back at loading.'; }
+function jCalcText(r){ const c=jCalc(r); const bits=[]; if(c.toYard!==null) bits.push(`Yard → gate <b>${jH(c.toYard)}</b>`); if(c.wait!==null) bits.push(`Gate wait <b>${jH(c.wait)}</b>`); if(c.load!==null) bits.push(`Loading <b>${jH(c.load)}</b>`); if(c.out!==null) bits.push(`Loaded transit <b>${jH(c.out)}</b>`); if(c.back!==null) bits.push(`Return transit (to loading location or yard) <b>${jH(c.back)}</b>`); if(c.total!==null) bits.push(`<span style="color:var(--teal);">Transit time <b>${jH(c.total)}</b></span>`); return bits.length?bits.join(' · '):'Times are optional: stamp each step with “Now” as it happens, or type them in. Transit time = left loading → arrived offloading + left offloading → back at the loading location, or back at the yard if the truck returned there instead.'; }
 function jTarget(routeKey){ const rt=ROUTES[routeKey]; return rt&&rt.durationTargetHrs?rt.durationTargetHrs:null; }
 
 /* ---------- approved routes ---------- */
@@ -6654,7 +6697,7 @@ function renderScoreboard(A,B){
 STATE.jBulk=null;
 const JB_COLS=[['date','Date',/^date$|^tripdate$/],['truck','Truck No.',/^truck|^reg|^vehicle/],['driver','Driver',/^driver/],['route','Route',/^route/],['material','Material',/^material|^cargo|^product/],
  ['tLeftYard','Left the yard',/leftthe?yard|^leftyard|yardout|^yard/],['tGateIn','Gate-in at loading location',/gatein|^gate/],['tLoadStart','Loading starts',/loadingstart|loadstart|startloading|^loadingstarts/],['tLoadEnd','Loading ends',/loadingend|loadend|endloading|^loadingends/],
- ['tLeftLoading','Left loading location',/leftloading|leftthe?loading|^departloading/],['tArriveOff','Arrived at offloading location',/arriv|^atoffloading/],['tLeftOff','Left offloading location',/leftoff|leftthe?offload|^departoff/],['tBackLoading','Back at loading location',/backat|^back|returned?/],
+ ['tLeftLoading','Left loading location',/leftloading|leftthe?loading|^departloading/],['tArriveOff','Arrived at offloading location',/arriv|^atoffloading/],['tLeftOff','Left offloading location',/leftoff|leftthe?offload|^departoff/],['tBackYard','Back at the yard',/backat(the)?yard|backtoyard|returnedtoyard|^yardback|^yardin/],['tBackLoading','Back at loading location',/backat|^back|returned?/],
  ['durationActual','Transit time (hrs)',/transit|duration/],['delayHrs','Delay / idling (hrs)',/delay|idl/],['deviations','Route deviations',/deviation/],['onTime','On-time (Yes/No)',/ontime/],['riskAssessment','Risk assessment done (Yes/No)',/risk/],['driverHoursViolation','Driver hours violation (Yes/No)',/hours?viol|violation/],['notes','Notes',/^note|^remark|^comment/]];
 function jbNorm(s){ return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,''); }
 function jbDate(v){
@@ -6685,7 +6728,8 @@ function jbParse(aoa){
   const miss=['date','truck','driver','route'].filter(k=>idx[k]===undefined); if(miss.length) return {err:'These columns are missing: '+miss.map(k=>JB_COLS.find(x=>x[0]===k)[1]).join(', ')+'.'};
   const exist=STATE.data.journey||[], out=[], seen={};
   rows.slice(hi+1).forEach((r,n)=>{
-    const g=k=>idx[k]===undefined?'':r[idx[k]]; const e=[]; const date=jbDate(g('date')); if(!date) e.push('date not understood');
+    const g=k=>idx[k]===undefined?'':r[idx[k]]; if(['driver','route','material','durationActual'].concat(J_TIMES.map(x=>x[0])).every(k=>String(g(k)==null?'':g(k)).trim()==='')) return;   // rows with only a pre-filled date / truck are left blank on purpose
+    const e=[]; const date=jbDate(g('date')); if(!date) e.push('date not understood');
     const tk=String(g('truck')||'').trim(), m=tk?matchTruck(tk):{v:null}; if(!m.v) e.push(tk?('truck “'+tk+'” is not in the registry'):'truck missing');
     const drv=canonDriver(String(g('driver')||'')); if(!drv) e.push('driver missing');
     const rt=jbRoute(g('route')); if(!rt) e.push('route “'+String(g('route')||'')+'” not recognised');
@@ -6700,7 +6744,48 @@ function jbParse(aoa){
   if(!out.length) return {err:'No trip rows found under the headings.'};
   return {rows:out};
 }
+function jbXlsxStyles(){ return XLSX_STYLES.replace('<numFmts count="2">','<numFmts count="3">').replace('</numFmts>','<numFmt numFmtId="166" formatCode="yyyy\\-mm\\-dd\\ hh:mm"/></numFmts>').replace('<cellXfs count="16">','<cellXfs count="17">').replace('</cellXfs>','<xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>'); }
+function buildJourneyXlsx(dateStr,vs,routes,mats){
+  const [Y,Mo,D]=dateStr.split('-').map(Number), serial=Math.round((Date.UTC(Y,Mo-1,D)-Date.UTC(1899,11,30))/864e5);
+  const heads=JB_COLS.map(c=>c[1]), widths=JB_COLS.map(c=>c[0]==='route'?36:c[0]==='notes'?28:c[0]==='driver'?22:c[0]==='date'?13:c[0]==='truck'?16:c[0].startsWith('t')?20:15);
+  const nRows=Math.max(vs.length+30,60), last=nRows+1, nc=JB_COLS.length, ci=k=>JB_COLS.findIndex(c=>c[0]===k), L=k=>xlCol(ci(k));
+  const str=(r,c,t,st)=>`<c r="${xlCol(c)}${r}" t="inlineStr"${st?` s="${st}"`:''}><is><t xml:space="preserve">${xmlEsc(t)}</t></is></c>`, numc=(r,c,v,st)=>`<c r="${xlCol(c)}${r}"${st?` s="${st}"`:''}><v>${v}</v></c>`, blank=(r,c,st)=>`<c r="${xlCol(c)}${r}" s="${st}"/>`;
+  let rows=`<row r="1" ht="48" customHeight="1">${heads.map((h,i)=>str(1,i,h,1)).join('')}</row>`;
+  for(let i=0;i<nRows;i++){ const r=i+2; let cells=''; JB_COLS.forEach((c,j)=>{ const k=c[0]; if(k==='date') cells+=numc(r,j,serial,2); else if(k==='truck') cells+=vs[i]?str(r,j,vs[i].regNo,3):blank(r,j,0); else if(k.startsWith('t')&&k!=='truck') cells+=blank(r,j,16); else if(k==='durationActual'||k==='delayHrs') cells+=blank(r,j,5); else if(k==='deviations') cells+=blank(r,j,4); else cells+=blank(r,j,0); }); rows+=`<row r="${r}">${cells}</row>`; }
+  const dv=(type,col,extra,f1)=>`<dataValidation type="${type}" ${extra} allowBlank="1" sqref="${col}2:${col}${last}"><formula1>${f1}</formula1></dataValidation>`;
+  const yn=`"Yes,No"`, drv=knownDrivers();
+  const dvs=[dv('date',L('date'),'operator="greaterThan" showErrorMessage="1" errorTitle="Date" error="Enter a valid date, e.g. '+dateStr+'."','43831'),
+    dv('list',L('truck'),'showErrorMessage="0"','Lists!$A$2:$A$'+Math.max(vs.length+1,2)), dv('list',L('driver'),'showErrorMessage="0"','Lists!$D$2:$D$'+Math.max(drv.length+1,2)),
+    dv('list',L('route'),'showErrorMessage="1" errorTitle="Route" error="Pick a route from the list."','Lists!$B$2:$B$'+(routes.length+1)), dv('list',L('material'),'showErrorMessage="0"','Lists!$C$2:$C$'+Math.max(mats.length+1,2)),
+    `<dataValidation type="decimal" operator="greaterThanOrEqual" allowBlank="1" showErrorMessage="1" errorTitle="Number" error="Enter a number (0 or more)." sqref="${L('durationActual')}2:${L('delayHrs')}${last}"><formula1>0</formula1></dataValidation>`,
+    dv('list',L('onTime'),'showErrorMessage="1" errorTitle="Yes / No" error="Choose Yes or No."',yn), dv('list',L('riskAssessment'),'showErrorMessage="1" errorTitle="Yes / No" error="Choose Yes or No."',yn), dv('list',L('driverHoursViolation'),'showErrorMessage="1" errorTitle="Yes / No" error="Choose Yes or No."',yn)];
+  const sheet1=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" tabSelected="1"><pane xSplit="3" ySplit="1" topLeftCell="D2" activePane="bottomRight" state="frozen"/><selection pane="topRight"/><selection pane="bottomLeft"/><selection pane="bottomRight" activeCell="D2" sqref="D2"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${rows}</sheetData><dataValidations count="${dvs.length}">${dvs.join('')}</dataValidations></worksheet>`;
+  const nL=Math.max(vs.length,routes.length,mats.length,drv.length); let lr=`<row r="1">${str(1,0,'Trucks',6)}${str(1,1,'Routes',6)}${str(1,2,'Materials',6)}${str(1,3,'Drivers',6)}</row>`;
+  for(let i=0;i<nL;i++){ lr+=`<row r="${i+2}">${vs[i]?str(i+2,0,vs[i].regNo):''}${routes[i]?str(i+2,1,routes[i]):''}${mats[i]?str(i+2,2,mats[i]):''}${drv[i]?str(i+2,3,drv[i]):''}</row>`; }
+  const sheet2=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="2" width="40" customWidth="1"/><col min="3" max="3" width="20" customWidth="1"/><col min="4" max="4" width="24" customWidth="1"/></cols><sheetData>${lr}</sheetData></worksheet>`;
+  const help=['FLEETDESK — JOURNEY MANAGEMENT BULK TRIP UPLOAD','',
+   '1. Every truck in your registry is already listed on the "Journey Trips" sheet, one row each, with the date filled in. Leave a truck\'s row empty if it did not run — empty rows are ignored.',
+   '2. Fill Driver, Route and Material (drop-downs; you can also TYPE a different driver or truck). Route is needed, and so is the Driver.',
+   '3. A truck that did two trips? Copy its row and fill the second trip — one row per trip.',
+   '4. Trip times are optional. Type them as 2026-10-27 06:30, or just 06:30 (the trip date in column A is used). Left the yard · Gate-in · Loading starts · Loading ends · Left loading · Arrived at offloading · Left offloading · then EITHER Back at loading location OR Back at the yard (if the truck went straight back to the yard).',
+   '5. Leave "Transit time (hrs)" empty when you fill the times — it is worked out: left loading → arrived at offloading, plus left offloading → back at loading location (or yard). If you have no times, type the transit hours yourself.',
+   '6. Do not rename the column headings or the sheet names.',
+   '7. In FleetDesk open Journey Mgmt → Log a trip → Bulk upload → Choose Excel / CSV file. You see a check list first; nothing is saved until you press Import.','',
+   'Trips already logged for the same truck, date, route and start time are skipped, so uploading the same file twice is safe.'];
+  const sheet3=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="130" customWidth="1"/></cols><sheetData>${help.map((t,i)=>t?`<row r="${i+1}">${str(i+1,0,t,i===0?7:8)}</row>`:'').join('')}</sheetData></worksheet>`;
+  const ns='xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  return zipStore([
+    {name:'[Content_Types].xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`},
+    {name:'_rels/.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:'xl/workbook.xml',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook ${ns}><bookViews><workbookView activeTab="0"/></bookViews><sheets><sheet name="Journey Trips" sheetId="1" r:id="rId1"/><sheet name="Lists" sheetId="2" r:id="rId2"/><sheet name="How to use" sheetId="3" r:id="rId3"/></sheets></workbook>`},
+    {name:'xl/_rels/workbook.xml.rels',data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:'xl/styles.xml',data:jbXlsxStyles()},{name:'xl/worksheets/sheet1.xml',data:sheet1},{name:'xl/worksheets/sheet2.xml',data:sheet2},{name:'xl/worksheets/sheet3.xml',data:sheet3}]);
+}
 function jbTemplate(){
+  try{ const vs=(STATE.data.vehicles||[]).slice().sort((a,b)=>String(a.regNo).localeCompare(String(b.regNo),undefined,{numeric:true})); triggerDownload(buildJourneyXlsx(todayStr(),vs,Object.keys(ROUTES).map(k=>ROUTES[k].label),materialNames()),'FleetDesk_Journey_Trip_Template_'+todayStr()+'.xlsx'); return; }catch(e){ console.warn('Journey template builder failed, using the plain one',e); }
+  jbTemplatePlain();
+}
+function jbTemplatePlain(){
   if(typeof XLSX==='undefined'){ alert('The spreadsheet library did not load. Check your internet connection and reload.'); return; }
   const heads=JB_COLS.map(c=>c[1]), v=(STATE.data.vehicles||[])[0], t=todayStr();
   const ex1=[t,v?v.regNo:'AKM123XX','Adamu Yusuf','Gypsum — Apapa → Ewekoro','Gypsum',t+' 05:30',t+' 07:10',t+' 08:00',t+' 08:45',t+' 09:00',t+' 16:30',t+' 17:15',t+' 23:40','','0',0,'Yes','Yes','No',''];
@@ -6719,7 +6804,7 @@ function jbBlock(){
    ${B&&B.paste?`<div style="margin-top:10px;"><textarea data-jb-paste="1" rows="5" placeholder="Copy the rows in Excel, including the heading row, and paste here" style="width:100%;"></textarea><div style="margin-top:6px;"><button class="btn small" type="button" data-jb-readpaste="1">Check pasted rows</button></div></div>`:''}
    ${B&&B.err?`<div class="note warn" style="margin-top:10px;">${esc(B.err)}</div>`:''}
    ${info?`<div style="margin-top:12px;"><b>${esc(B.name||'Pasted rows')}</b> — <span style="color:var(--green);">${info.ok} ready</span>${info.dup?` · <span style="color:var(--amber);">${info.dup} already logged</span>`:''}${info.er?` · <span style="color:var(--red);">${info.er} need fixing</span>`:''}</div>
-   <div class="table-wrap" style="margin-top:8px;max-height:340px;overflow:auto;"><table><thead><tr><th>Row</th><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Transit</th><th>Times</th><th>Check</th></tr></thead><tbody>${B.rows.slice(0,200).map(x=>`<tr><td>${x.n}</td><td>${esc(x.rec.date||'—')}</td><td>${esc(x.rec.vehicleId?vehicleLabel(x.rec.vehicleId):'—')}</td><td>${esc(x.rec.driverName||'—')}</td><td style="white-space:normal;">${esc(x.rec.route?fwRouteLabel(x.rec.route):'—')}</td><td>${x.rec.durationActual?esc(x.rec.durationActual)+' h':'—'}</td><td>${jStampCount(x.rec)}/8</td><td>${tag(x)}</td></tr>`).join('')}</tbody></table></div>
+   <div class="table-wrap" style="margin-top:8px;max-height:340px;overflow:auto;"><table><thead><tr><th>Row</th><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Transit</th><th>Times</th><th>Check</th></tr></thead><tbody>${B.rows.slice(0,200).map(x=>`<tr><td>${x.n}</td><td>${esc(x.rec.date||'—')}</td><td>${esc(x.rec.vehicleId?vehicleLabel(x.rec.vehicleId):'—')}</td><td>${esc(x.rec.driverName||'—')}</td><td style="white-space:normal;">${esc(x.rec.route?fwRouteLabel(x.rec.route):'—')}</td><td>${x.rec.durationActual?esc(x.rec.durationActual)+' h':'—'}</td><td>${jStampCount(x.rec)}/9</td><td>${tag(x)}</td></tr>`).join('')}</tbody></table></div>
    ${B.rows.length>200?`<div class="dim small">Showing the first 200 of ${B.rows.length} rows.</div>`:''}
    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn primary small" type="button" data-jb-import="1"${info.ok?'':' disabled'}>Import ${info.ok} trip${info.ok===1?'':'s'}</button><button class="btn small" type="button" data-jb-cancel="1">Cancel</button></div>`:''}</div>`;
 }
@@ -6744,21 +6829,22 @@ function attachJourneyBulk(app){
 
 /* ---------- Maintenance: breakdown rate with a clear basis, target zero ---------- */
 function bdStats(start,end){
-  const all=(STATE.data.maintenance||[]).filter(r=>isBd(r)&&r.date&&r.date>=start&&r.date<=end), ev=all.filter(isRealBd), fleet=Math.max(1,(STATE.data.vehicles||[]).length), tr=new Set(ev.map(r=>r.vehicleId)).size;
-  return {n:ev.length,trucks:tr,rate:tr/fleet*100,down:ev.reduce((a,r)=>a+num(r.downtimeHours),0),fleet,insp:all.length-ev.length};
+  const all=(STATE.data.maintenance||[]).filter(r=>isBd(r)&&r.date&&r.date>=start&&r.date<=end), fleet=Math.max(1,(STATE.data.vehicles||[]).length);
+  const road=all.filter(isRoadBd), rep=all.filter(isRepairJob), rt=new Set(road.map(r=>r.vehicleId)).size, pt=new Set(rep.map(r=>r.vehicleId)).size;
+  return {n:road.length,trucks:rt,rate:rt/fleet*100,rn:rep.length,rtrucks:pt,rrate:pt/fleet*100,fleet};
 }
 function maintBreakdownBasis(){
   const t=todayStr(), fleet=Math.max(1,(STATE.data.vehicles||[]).length);
   const days=[...Array(7)].map((_,i)=>addDays(t,-i)).map(d=>({l:fmtDate(d)+(d===t?' (today)':''),s:d,e:d}));
   const wk0=wkStart(t), weeks=[...Array(8)].map((_,i)=>{ const s=addDays(wk0,-7*i); return {l:rangeText({start:s,end:addDays(s,6)})+(i===0?' (this week)':''),s,e:addDays(s,6)}; });
   const m0=monthStartOf(t), months=[...Array(6)].map((_,i)=>{ const s=addMonthsStr(m0,-i); return {l:new Date(s+'T00:00:00').toLocaleDateString(undefined,{month:'long',year:'numeric'})+(i===0?' (so far)':''),s,e:monthEndOf(s)}; });
-  const tbl=(title,rows)=>`<div class="card"><div style="font-weight:600;margin-bottom:6px;">${title}</div><div class="table-wrap" style="border:none;background:none;"><table><thead><tr><th></th><th>Breakdowns</th><th>Trucks</th><th>Rate</th><th title="Failed inspection / pre-trip items raised as repair jobs — not counted as breakdowns">Check defects</th></tr></thead><tbody>${rows.map(x=>{ const s=bdStats(x.s,x.e); return `<tr><td style="white-space:normal;">${esc(x.l)}</td><td>${s.n}</td><td>${s.trucks}</td><td>${s.trucks===0?'<span class="tag green">0%  ✓</span>':'<span class="tag red">'+fmt(s.rate,1)+'%</span>'}</td><td class="dim">${s.insp||'—'}</td></tr>`; }).join('')}</tbody></table></div></div>`;
-  return `<div class="section-title"><span>Breakdown rate — how it is measured</span><div class="line"></div><span class="dim small">Target: 0 every day, week and month</span></div>
-  <div class="card" style="margin-bottom:12px;border-left:3px solid var(--teal);"><div class="small" style="line-height:1.8;"><b>Breakdown rate (%) = trucks that broke down in the period ÷ trucks in the fleet (${fleet}) × 100.</b><br>
-   • A breakdown is a <i>Breakdown / Repair</i> entry that the team logged in the Maintenance log, counted on the date it happened. A truck counts once per period, however many times it broke down; the “Breakdowns” column shows the number of events.<br>
-   • <b>Not counted:</b> scheduled services, and repair jobs that the app raises automatically when an inspection or pre/post-trip check fails an item (shown in “Check defects”). Those are defects found early, not trucks that failed on the road.<br>
-   • The same rule is used for the day, the week (Mon–Sun) and the month. One truck = ${fmt(100/fleet,1)}% of the fleet.<br>
-   • Target is <b>0</b> — a period is green only when no truck broke down.</div></div>
+  const pill=(n,r)=>n===0?'<span class="tag green">0%  ✓</span>':'<span class="tag red">'+fmt(r,1)+'%</span>';
+  const tbl=(title,rows)=>`<div class="card"><div style="font-weight:600;margin-bottom:6px;">${title}</div><div class="table-wrap" style="border:none;background:none;"><table><thead><tr><th></th><th title="Trucks that broke down on the road">Roadside trucks</th><th>Breakdown rate</th><th title="Trucks that needed a workshop repair">Repair trucks</th><th>Repair rate</th></tr></thead><tbody>${rows.map(x=>{ const s=bdStats(x.s,x.e); return `<tr><td style="white-space:normal;">${esc(x.l)}</td><td>${s.trucks}</td><td>${pill(s.trucks,s.rate)}</td><td>${s.rtrucks}</td><td>${pill(s.rtrucks,s.rrate)}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+  return `<div class="section-title"><span>Breakdown rate and repair rate — how they are measured</span><div class="line"></div><span class="dim small">Both targets: 0 every day, week and month</span></div>
+  <div class="grid cols-2" style="margin-bottom:12px;">
+   <div class="card" style="border-left:3px solid var(--red);"><div style="font-weight:600;">Breakdown rate (roadside)</div><div class="small" style="line-height:1.75;margin-top:4px;"><b>= trucks that broke down on the road in the period ÷ trucks in the fleet (${fleet}) × 100.</b><br>Counts Breakdown entries logged as “Roadside breakdown”. Target 0.</div></div>
+   <div class="card" style="border-left:3px solid var(--amber);"><div style="font-weight:600;">Repair rate (workshop)</div><div class="small" style="line-height:1.75;margin-top:4px;"><b>= trucks that needed a repair in the workshop or yard in the period ÷ trucks in the fleet (${fleet}) × 100.</b><br>Counts entries logged as “Repair (workshop / yard)” and the repair jobs raised automatically when an inspection or pre/post-trip check fails an item. Target 0.</div></div></div>
+  <div class="dim small" style="margin-bottom:12px;line-height:1.7;">A truck counts once per period, however many times it was involved. Scheduled services never count. The same rule is used for the day, the week (Mon–Sun) and the month. One truck = ${fmt(100/fleet,1)}% of the fleet. If an entry sits in the wrong group, open it in the Maintenance Log, press Edit and change “where?”.</div>
   <div class="grid cols-3" style="margin-bottom:14px;">${tbl('Daily — last 7 days',days)}${tbl('Weekly — last 8 weeks',weeks)}${tbl('Monthly — last 6 months',months)}</div>`;
 }
 async function applyBreakdownSeed(){
