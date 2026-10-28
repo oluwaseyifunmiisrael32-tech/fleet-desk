@@ -798,7 +798,8 @@ function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   const pmDue = sumBy(recs,'pmDue') || scheduled.length;
   const pmCompliance = pmDue? scheduled.length/Math.max(pmDue,scheduled.length) : (scheduled.length?1:0);
   const totalVehicles = vehicles.length || 1;
-  const breakdownRate = breakdowns.length / totalVehicles;   // breakdown/repair events ÷ trucks in the fleet, for the period shown. Target 0.
+  const bdReal = breakdowns.filter(isRealBd), bdTrucks = new Set(bdReal.map(r=>r.vehicleId)).size;
+  const breakdownRate = bdTrucks / totalVehicles;   // trucks that broke down in the period ÷ trucks in the fleet. Target 0.
   const mttr = avgBy(breakdowns,'downtimeHours');
   const alerts = vehicles.map(maintenanceStatusForVehicle);
   const overdue = alerts.filter(a=>a.status==='red').length;
@@ -808,7 +809,7 @@ function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   const toolboxTarget = scaledTarget(STATE.targets.toolboxTalkWeeklyTarget,'week',period);
   return [
     {key:'pm', label:'PM Compliance', actual:pmCompliance, target:STATE.targets.pmComplianceTarget, fmt:'pct', good:'higher', ratio:attainment(pmCompliance,STATE.targets.pmComplianceTarget,'higher')},
-    {key:'breakdown', label:'Breakdown Rate (% of fleet)', actual:breakdownRate, target:STATE.targets.breakdownRateTarget||0, fmt:'pct', good:'lower', ratio:(breakdowns.length===0?1:0.5/breakdowns.length)},
+    {key:'breakdown', label:'Breakdown Rate (% of trucks)', actual:breakdownRate, target:STATE.targets.breakdownRateTarget||0, fmt:'pct', good:'lower', ratio:(bdTrucks===0?1:0.5/bdTrucks)},
     {key:'mttr', label:'Avg Repair Time (MTTR)', actual:mttr, target:STATE.targets.mttrTargetHrs, fmt:1, unit:'hrs', good:'lower', ratio:attainment(mttr,STATE.targets.mttrTargetHrs,'lower')},
     {key:'predictive', label:'Predictive Alerts (open)', actual:overdue+dueSoon, target:0, fmt:0, good:'lower', ratio:(overdue+dueSoon)===0?1:(overdue?0.3:0.7)},
     {key:'truckinsp', label:'Trucks Inspected (Maint.)', actual:trucksInspected, target:truckInspTarget, fmt:0, good:'higher', ratio:attainment(trucksInspected,truckInspTarget,'higher')},
@@ -1400,7 +1401,7 @@ const REPORT_ROW_DEFS = {
   journey: k=>[['Total Trips',k.find(x=>x.key==='trips')],['On-Time Arrival',k.find(x=>x.key==='ontime')],['Risk Assessment Compliance',k.find(x=>x.key==='risk')],['Avg Delay / Idling (hrs)',k.find(x=>x.key==='delay')],['Route Deviations',k.find(x=>x.key==='deviations')],['Driver Hours Violations',k.find(x=>x.key==='violations')]],
   inspections: k=>[['Inspection Compliance',k.find(x=>x.key==='compliance')],['Defect Rate',k.find(x=>x.key==='defectrate')],['Critical Defects',k.find(x=>x.key==='critical')],['Vehicles Inspected',k.find(x=>x.key==='done')]],
   safety: k=>[['LTIFR',k.find(x=>x.key==='ltifr')],['Incidents',k.find(x=>x.key==='incidents')],['Near-Misses Reported',k.find(x=>x.key==='nearmiss')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Road Patrols',k.find(x=>x.key==='patrol')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
-  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate (% of fleet)',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
+  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate (% of trucks)',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
 };
 const REPORT_DEPT_MATCH = {
   transport:r=>r.dept==='Transport', journey:r=>r.dept==='Journey Mgmt', inspections:r=>r.dept==='Inspections',
@@ -3151,7 +3152,8 @@ function navHTML(badgeCounts){
 }
 /* =================== v5: edit modal, transport truck/driver, maintenance history / parts / weekly comparison,
    best & worst driver rankings (safety + maintenance) =================== */
-const isBd = r => !!r && (r.type==='Breakdown' || r.type==='Repair');           // repairs are treated as breakdowns
+const isBd = r => !!r && (r.type==='Breakdown' || r.type==='Repair');
+const isRealBd = r => isBd(r) && !r.srcId;           // not raised automatically from an inspection / pre-trip check           // repairs are treated as breakdowns
 const typeLabel = t => t==='Scheduled' ? 'Scheduled service' : 'Breakdown / Repair';
 function fmtDate(s){ if(!s) return '—'; const d=new Date(s+'T00:00:00'); if(isNaN(d)) return esc(s); return d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); }
 function fmtDay(s){ if(!s) return '—'; const d=new Date(s+'T00:00:00'); if(isNaN(d)) return esc(s); return d.toLocaleDateString(undefined,{day:'numeric',month:'short'}); }
@@ -3493,7 +3495,7 @@ function maintWeekMetrics(start, H, P, endOpt){
   const repeats=bds.filter(r=>{ const x=H.byId[r.id]; return x&&x.sinceSame!==null; });
   const parts=P.filter(p=>inW(p.date));
   const mi=(STATE.data.maintInspections||[]).filter(r=>inW(r.date)), daily=(STATE.data.maintenanceDaily||[]).filter(r=>inW(r.date));
-  return {start,bdPct:(bds.length/Math.max(1,(STATE.data.vehicles||[]).length))*100,breakdowns:bds.length,scheduled:sch.length,downtime:bds.reduce((a,r)=>a+num(r.downtimeHours),0),mttr:dt.length?dt.reduce((a,r)=>a+num(r.downtimeHours),0)/dt.length:0,
+  return {start,bdPct:(new Set(bds.filter(isRealBd).map(r=>r.vehicleId)).size/Math.max(1,(STATE.data.vehicles||[]).length))*100,breakdowns:bds.length,scheduled:sch.length,downtime:bds.reduce((a,r)=>a+num(r.downtimeHours),0),mttr:dt.length?dt.reduce((a,r)=>a+num(r.downtimeHours),0)/dt.length:0,
     cost:ev.reduce((a,r)=>a+num(r.cost),0),trucks:Object.keys(truck).length,repeats:repeats.length,repeatList:repeats,parts:parts.length,
     partsAgain:parts.filter(p=>p.prevGap!==null&&p.prevGap<=90).length,partsAgainList:parts.filter(p=>p.prevGap!==null&&p.prevGap<=90),
     closed:(STATE.data.maintenance||[]).filter(r=>inW(r.completedDate)).length,inspected:trucksInspectedMaint(daily,mi),patrols:sumBy(daily,'roadPatrols'),toolbox:sumBy(daily,'toolboxTalks'),comp,truck,bds};
@@ -3516,7 +3518,7 @@ function renderMaintWeekly(){
     <div style="min-width:260px;flex:1;max-width:440px;"><label>Week (Mon – Sun)</label><select data-maint-week="1">${opts}</select></div>
     <div class="flex gap8"><button class="btn small ${start===addDays(cur,-7)?'primary':''}" data-maint-wk="last">Last week</button><button class="btn small ${start===cur?'primary':''}" data-maint-wk="cur">This week so far</button></div></div>
     <div class="dim small" style="margin-top:8px;">Comparing <b>${weekRangeText(start)}</b> with the week before, <b>${weekRangeText(prevStart)}</b>. ${start===cur?'This week is still in progress, so its totals will keep growing until Sunday.':''}</div></div>`;
-  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Breakdown rate (% of fleet)','bdPct','lower',1,'%'],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
+  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Breakdown rate (% of trucks)','bdPct','lower',1,'%'],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
   const fv=(r,v)=>r[1]==='cost'?naira(v):fmt(v,r[3])+r[4];
   const trs=rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${fv(r,A[r[1]])}</td><td class="dim">${fv(r,B[r[1]])}</td><td>${deltaCell(A[r[1]],B[r[1]],r[2],r[3],r[4],r[1]==='cost')}</td></tr>`).join('');
   // component and truck movement
@@ -4781,7 +4783,7 @@ function repMaintenance(r,p,L){
   const blocks=[kpiTableBlock('Maintenance KPIs',REPORT_ROW_DEFS.maintenance(kc_),REPORT_ROW_DEFS.maintenance(kp_),hasCur,hasPrev,L)];
   const A=maintMetricsFor(r), B=maintMetricsFor(p);
   blocks.push(compareBlock('Maintenance activity',[
-    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Breakdown rate (% of fleet)',A.bdPct,B.bdPct,'lower',{dec:1,unit:'%'}],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
+    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Breakdown rate (% of trucks)',A.bdPct,B.bdPct,'lower',{dec:1,unit:'%'}],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
     ['Repair downtime',A.downtime,B.downtime,'lower',{dec:1,unit:'h'}],['Average repair time (MTTR)',A.mttr,B.mttr,'lower',{dec:1,unit:'h'}],['Maintenance cost',A.cost,B.cost,'lower',{money:true}],
     ['Scheduled services done',A.scheduled,B.scheduled,'higher'],['Repair jobs closed',A.closed,B.closed,'higher'],['Trucks inspected',A.inspected,B.inspected,'higher'],
     ['Toolbox talks',A.toolbox,B.toolbox,'higher'],['Part lines bought',A.parts,B.parts,null],['Parts bought again within 90 days',A.partsAgain,B.partsAgain,'lower']],L));
@@ -5515,7 +5517,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v11.3 · 28 Oct 2026';
+const APP_VERSION='v11.4 · 28 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6742,21 +6744,21 @@ function attachJourneyBulk(app){
 
 /* ---------- Maintenance: breakdown rate with a clear basis, target zero ---------- */
 function bdStats(start,end){
-  const ev=(STATE.data.maintenance||[]).filter(r=>isBd(r)&&r.date&&r.date>=start&&r.date<=end), fleet=Math.max(1,(STATE.data.vehicles||[]).length);
-  return {n:ev.length,trucks:new Set(ev.map(r=>r.vehicleId)).size,rate:ev.length/fleet*100,down:ev.reduce((a,r)=>a+num(r.downtimeHours),0),fleet};
+  const all=(STATE.data.maintenance||[]).filter(r=>isBd(r)&&r.date&&r.date>=start&&r.date<=end), ev=all.filter(isRealBd), fleet=Math.max(1,(STATE.data.vehicles||[]).length), tr=new Set(ev.map(r=>r.vehicleId)).size;
+  return {n:ev.length,trucks:tr,rate:tr/fleet*100,down:ev.reduce((a,r)=>a+num(r.downtimeHours),0),fleet,insp:all.length-ev.length};
 }
 function maintBreakdownBasis(){
   const t=todayStr(), fleet=Math.max(1,(STATE.data.vehicles||[]).length);
   const days=[...Array(7)].map((_,i)=>addDays(t,-i)).map(d=>({l:fmtDate(d)+(d===t?' (today)':''),s:d,e:d}));
   const wk0=wkStart(t), weeks=[...Array(8)].map((_,i)=>{ const s=addDays(wk0,-7*i); return {l:rangeText({start:s,end:addDays(s,6)})+(i===0?' (this week)':''),s,e:addDays(s,6)}; });
   const m0=monthStartOf(t), months=[...Array(6)].map((_,i)=>{ const s=addMonthsStr(m0,-i); return {l:new Date(s+'T00:00:00').toLocaleDateString(undefined,{month:'long',year:'numeric'})+(i===0?' (so far)':''),s,e:monthEndOf(s)}; });
-  const tbl=(title,rows)=>`<div class="card"><div style="font-weight:600;margin-bottom:6px;">${title}</div><div class="table-wrap" style="border:none;background:none;"><table><thead><tr><th></th><th>Breakdowns</th><th>Trucks</th><th>Rate</th></tr></thead><tbody>${rows.map(x=>{ const s=bdStats(x.s,x.e); return `<tr><td style="white-space:normal;">${esc(x.l)}</td><td>${s.n}</td><td>${s.trucks}</td><td>${s.n===0?'<span class="tag green">0%  ✓</span>':'<span class="tag red">'+fmt(s.rate,1)+'%</span>'}</td></tr>`; }).join('')}</tbody></table></div></div>`;
+  const tbl=(title,rows)=>`<div class="card"><div style="font-weight:600;margin-bottom:6px;">${title}</div><div class="table-wrap" style="border:none;background:none;"><table><thead><tr><th></th><th>Breakdowns</th><th>Trucks</th><th>Rate</th><th title="Failed inspection / pre-trip items raised as repair jobs — not counted as breakdowns">Check defects</th></tr></thead><tbody>${rows.map(x=>{ const s=bdStats(x.s,x.e); return `<tr><td style="white-space:normal;">${esc(x.l)}</td><td>${s.n}</td><td>${s.trucks}</td><td>${s.trucks===0?'<span class="tag green">0%  ✓</span>':'<span class="tag red">'+fmt(s.rate,1)+'%</span>'}</td><td class="dim">${s.insp||'—'}</td></tr>`; }).join('')}</tbody></table></div></div>`;
   return `<div class="section-title"><span>Breakdown rate — how it is measured</span><div class="line"></div><span class="dim small">Target: 0 every day, week and month</span></div>
-  <div class="card" style="margin-bottom:12px;border-left:3px solid var(--teal);"><div class="small" style="line-height:1.8;"><b>Breakdown rate (%) = breakdown or repair events logged in the period ÷ trucks in the fleet (${fleet}) × 100.</b><br>
-   • An event is any <i>Breakdown / Repair</i> entry in the Maintenance log, counted on the date it happened. Scheduled services do not count.<br>
-   • A truck that breaks down twice counts twice; the “Trucks” column shows how many different trucks were affected.<br>
-   • The same rule is used for the day, the week (Mon–Sun) and the month, so they can be compared directly. One breakdown = ${fmt(100/fleet,1)}% of the fleet.<br>
-   • Target is <b>0</b> — a period is green only with no breakdowns at all.</div></div>
+  <div class="card" style="margin-bottom:12px;border-left:3px solid var(--teal);"><div class="small" style="line-height:1.8;"><b>Breakdown rate (%) = trucks that broke down in the period ÷ trucks in the fleet (${fleet}) × 100.</b><br>
+   • A breakdown is a <i>Breakdown / Repair</i> entry that the team logged in the Maintenance log, counted on the date it happened. A truck counts once per period, however many times it broke down; the “Breakdowns” column shows the number of events.<br>
+   • <b>Not counted:</b> scheduled services, and repair jobs that the app raises automatically when an inspection or pre/post-trip check fails an item (shown in “Check defects”). Those are defects found early, not trucks that failed on the road.<br>
+   • The same rule is used for the day, the week (Mon–Sun) and the month. One truck = ${fmt(100/fleet,1)}% of the fleet.<br>
+   • Target is <b>0</b> — a period is green only when no truck broke down.</div></div>
   <div class="grid cols-3" style="margin-bottom:14px;">${tbl('Daily — last 7 days',days)}${tbl('Weekly — last 8 weeks',weeks)}${tbl('Monthly — last 6 months',months)}</div>`;
 }
 async function applyBreakdownSeed(){
