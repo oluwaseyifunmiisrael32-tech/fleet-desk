@@ -2254,7 +2254,9 @@ function finalizeCheck(rec){
   const items=rec.type==='Pre-Trip'?PRE_ITEMS:POST_ITEMS;
   const bad=items.filter(([k])=>rec['c_'+k]==='Defect').map(i=>i[0]);
   Object.keys(rec).forEach(k=>{ if(k.indexOf('c_')===0) delete rec[k]; });
-  rec.result=bad.length?'Fail':'Pass';
+  if(rec.type!=='Pre-Trip') delete rec.alcoholTest;
+  const alcFail=rec.type==='Pre-Trip'&&rec.alcoholTest==='No';
+  rec.result=(bad.length||alcFail)?'Fail':'Pass';
   if(bad.length) rec.defects=bad.join(',');
   return compactRec(rec);
 }
@@ -2286,6 +2288,7 @@ function prePostForm(type){
         <div><label>Route</label><select name="route">${routeSelectOptions('— Route (optional) —')}</select></div>
         <div><label>Material</label><input type="text" name="material" list="dl-materials" placeholder="e.g. Clinker"></div>
         <div><label>${type==='Pre-Trip'?'Start':'End'} Odometer (km)</label><input type="number" name="odometer" step="0.1" min="0"></div>
+        ${type==='Pre-Trip'?`<div><label>Does the driver pass the alcohol test?</label><select name="alcoholTest" required><option value="">— Select —</option><option value="Yes">Yes — passed</option><option value="No">No — failed</option></select></div>`:''}
       </div>
       <div class="chk-grid">${checklistRows(items,'c_',['OK','Defect','N/A'])}</div>
       <div class="form-grid"><div style="grid-column:1/-1"><label>Defect details / remarks</label><input type="text" name="notes" placeholder="Describe any defect or observation"></div></div>
@@ -2299,7 +2302,7 @@ function checkLogTable(limit){
   const rows=all.slice(0,limit||100);
   return `<div class="table-wrap"><table>
     <thead><tr><th>Date</th><th>Time</th><th>Truck</th><th>Driver</th><th>Type</th><th>Route</th><th>Material</th><th>Odo</th><th>Result</th><th>Defects / notes</th><th>Maint.</th><th></th></tr></thead>
-    <tbody>${rows.length?rows.map(r=>{ const d=splitKeys(r.defects).map(k=>chkLabel(r.type,k)); return `<tr><td>${esc(r.date)}</td><td>${esc(r.time||'—')}</td><td>${esc(vehicleLabel(r.vehicleId))}</td><td style="white-space:normal;">${esc(r.driverName||'—')}</td><td>${esc(r.type)}</td><td style="white-space:normal;">${r.route&&ROUTES[r.route]?esc(ROUTES[r.route].label.split(' — ')[0]+(ROUTES[r.route].label.indexOf(' — ')>-1?' — '+ROUTES[r.route].label.split(' — ')[1]:'')):'—'}</td><td>${esc(r.material||'—')}</td><td>${r.odometer?fmt(num(r.odometer),0):'—'}</td><td><span class="tag ${r.result==='Pass'?'green':'red'}">${esc(r.result)}</span></td><td style="white-space:normal;min-width:180px;">${d.length?esc(d.join('; ')):''}${r.notes?(d.length?' — ':'')+esc(r.notes):''}</td><td>${r.result==='Fail'&&r.defects?(r.raised?'<span class="tag green">Raised</span>':`<button class="btn small" data-raise-check="${r.id}">Raise job</button>`):'—'}</td><td><button class="btn ghost small" data-delete="pretrip:${r.id}">Delete</button></td></tr>`; }).join(''):`<tr class="empty-row"><td colspan="12">No pre-trip / post-trip checks logged yet.</td></tr>`}</tbody>
+    <tbody>${rows.length?rows.map(r=>{ const d=splitKeys(r.defects).map(k=>chkLabel(r.type,k)); if(r.alcoholTest==='No') d.unshift('ALCOHOL TEST FAILED'); return `<tr><td>${esc(r.date)}</td><td>${esc(r.time||'—')}</td><td>${esc(vehicleLabel(r.vehicleId))}</td><td style="white-space:normal;">${esc(r.driverName||'—')}</td><td>${esc(r.type)}</td><td style="white-space:normal;">${r.route&&ROUTES[r.route]?esc(ROUTES[r.route].label.split(' — ')[0]+(ROUTES[r.route].label.indexOf(' — ')>-1?' — '+ROUTES[r.route].label.split(' — ')[1]:'')):'—'}</td><td>${esc(r.material||'—')}</td><td>${r.odometer?fmt(num(r.odometer),0):'—'}</td><td><span class="tag ${r.result==='Pass'?'green':'red'}">${esc(r.result)}</span></td><td style="white-space:normal;min-width:180px;">${d.length?esc(d.join('; ')):''}${r.notes?(d.length?' — ':'')+esc(r.notes):''}</td><td>${r.result==='Fail'&&r.defects?(r.raised?'<span class="tag green">Raised</span>':`<button class="btn small" data-raise-check="${r.id}">Raise job</button>`):'—'}</td><td><button class="btn ghost small" data-delete="pretrip:${r.id}">Delete</button></td></tr>`; }).join(''):`<tr class="empty-row"><td colspan="12">No pre-trip / post-trip checks logged yet.</td></tr>`}</tbody>
   </table></div>${all.length>rows.length?`<div class="dim small" style="margin-top:6px;">Showing the latest ${rows.length} of ${all.length} checks.</div>`:''}`;
 }
 function dailyChecksSection(){
@@ -5525,7 +5528,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v11.6 · 28 Oct 2026';
+const APP_VERSION='v11.7 · 28 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6660,6 +6663,7 @@ function bestDriversData(P){
   const get=c=>rec[c.name]||(rec[c.name]={name:c.name,trips:0,viol:0,why:[],bd:0,down:0,tripDays:0,hasMaint:false});
   (D.transport||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(c) get(c).trips+=num(r.tripsActual); });
   (D.journey||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); const dv=num(r.deviations); if(dv>0){ o.viol+=dv; o.why.push(dv+' route deviation'+(dv>1?'s':'')); } if(r.driverHoursViolation==='Yes'){ o.viol++; o.why.push('driving-hours violation'); } });
+  (D.pretrip||[]).filter(r=>inPeriod(r.date,P)&&r.driverName&&r.alcoholTest==='No').forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); o.viol+=2; o.why.push('failed alcohol test'); });
   const wk=(((D.hsseScores||{}).weeks)||[]).find(w=>(w.start||(typeof startOfOrd==='function'?startOfOrd(w.n):''))===R.start);
   if(wk) (wk.drivers||[]).forEach(d=>{ if(d.na||!d.n) return; const c=idx.ensure(d.n); if(!c||!rec[c.name]) { if(c&&num(d.t)>0){ const o=get(c); o.viol++; o.why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } return; } if(num(d.t)>0){ rec[c.name].viol++; rec[c.name].why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } });
   if(STATE.mix.rows&&!STATE.mix.empty){ mxScore(R).list.forEach(x=>{ if(x.pts>0){ const o=rec[x.name]||(rec[x.name]={name:x.name,trips:0,viol:0,why:[],bd:0,down:0,tripDays:0,hasMaint:false}); o.viol+=x.n; o.why.push(x.n+' MiX event'+(x.n>1?'s':'')); } }); }
