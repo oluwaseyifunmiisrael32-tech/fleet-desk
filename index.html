@@ -772,7 +772,9 @@ function kpisSafety(recs, period){
   const patrolTarget = scaledTarget(STATE.targets.roadPatrolWeeklyTarget,'week',period);
   const toolboxTarget = scaledTarget(STATE.targets.toolboxTalkWeeklyTarget,'week',period);
   const nearMissTarget = scaledTarget(STATE.targets.nearMissWeeklyTarget,'week',period);
+  const hr = (typeof mxHighRisk==='function') ? mxHighRisk(period) : null;
   return [
+    ...(hr!==null?[{key:'highrisk', label:'High-Risk Drivers (MiX)', actual:hr, target:0, fmt:0, good:'lower', ratio: hr===0?1:0.3}]:[]),
     {key:'ltifr', label:'LTIFR', actual:ltifr, target:STATE.targets.ltifrTarget, fmt:2, good:'lower', ratio:attainment(ltifr,STATE.targets.ltifrTarget,'lower')},
     {key:'incidents', label:'Incidents', actual:incidents, target:0, fmt:0, good:'lower', ratio: incidents===0?1:(0.5/incidents)},
     {key:'nearmiss', label:'Near-Misses Reported', actual:nearMiss, target:nearMissTarget, fmt:0, good:'higher', ratio:attainment(nearMiss,nearMissTarget,'higher')},
@@ -781,6 +783,14 @@ function kpisSafety(recs, period){
     {key:'toolbox', label:'Toolbox Talks', actual:toolbox, target:toolboxTarget, fmt:0, good:'higher', ratio:attainment(toolbox,toolboxTarget,'higher')},
   ];
 }
+function maintInspTarget(period){
+  if(period==='day') return 5;
+  if(period==='week'){ const d=Math.min(7,periodDays('week')); return Math.max(1,Math.round(27*d/7)); }
+  if(period==='lastweek'||period==='prevweek') return 27;
+  if(period==='lastmonth'||period==='prevmonth') return 108;
+  if(period==='month'){ const t=todayStr(), dim=new Date(+t.slice(0,4),+t.slice(5,7),0).getDate(); return Math.max(1,Math.round(108*(+t.slice(8,10))/dim)); }
+  return scaledTarget(5,'day',period);
+}
 function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   miRecs = miRecs || filterPeriod(STATE.data.maintInspections||[], period);
   const scheduled = recs.filter(r=>r.type==='Scheduled');
@@ -788,22 +798,21 @@ function kpisMaintenance(recs, vehicles, dailyRecs, period, miRecs){
   const pmDue = sumBy(recs,'pmDue') || scheduled.length;
   const pmCompliance = pmDue? scheduled.length/Math.max(pmDue,scheduled.length) : (scheduled.length?1:0);
   const totalVehicles = vehicles.length || 1;
-  const breakdownRate = breakdowns.length / totalVehicles;
+  const bdWeeks = Math.max(1, periodDays(period)/7);
+  const breakdownRate = breakdowns.length / totalVehicles / bdWeeks;   // weekly basis: breakdowns per truck per week
   const mttr = avgBy(breakdowns,'downtimeHours');
   const alerts = vehicles.map(maintenanceStatusForVehicle);
   const overdue = alerts.filter(a=>a.status==='red').length;
   const dueSoon = alerts.filter(a=>a.status==='amber').length;
-  const trucksInspected=trucksInspectedMaint(dailyRecs, miRecs), roadPatrols=sumBy(dailyRecs,'roadPatrols'), toolbox=sumBy(dailyRecs,'toolboxTalks');
-  const truckInspTarget = scaledTarget(STATE.targets.dailyTruckInspectionTarget,'day',period);
-  const patrolTarget = scaledTarget(STATE.targets.roadPatrolWeeklyTarget,'week',period);
+  const trucksInspected=trucksInspectedMaint(dailyRecs, miRecs), toolbox=sumBy(dailyRecs,'toolboxTalks');
+  const truckInspTarget = maintInspTarget(period);
   const toolboxTarget = scaledTarget(STATE.targets.toolboxTalkWeeklyTarget,'week',period);
   return [
     {key:'pm', label:'PM Compliance', actual:pmCompliance, target:STATE.targets.pmComplianceTarget, fmt:'pct', good:'higher', ratio:attainment(pmCompliance,STATE.targets.pmComplianceTarget,'higher')},
-    {key:'breakdown', label:'Breakdown Rate', actual:breakdownRate, target:STATE.targets.breakdownRateTarget, fmt:'pct', good:'lower', ratio:attainment(breakdownRate,STATE.targets.breakdownRateTarget,'lower')},
+    {key:'breakdown', label:(bdWeeks>1?'Breakdown Rate (weekly avg)':'Breakdown Rate (weekly)'), actual:breakdownRate, target:STATE.targets.breakdownRateTarget, fmt:'pct', good:'lower', ratio:attainment(breakdownRate,STATE.targets.breakdownRateTarget,'lower')},
     {key:'mttr', label:'Avg Repair Time (MTTR)', actual:mttr, target:STATE.targets.mttrTargetHrs, fmt:1, unit:'hrs', good:'lower', ratio:attainment(mttr,STATE.targets.mttrTargetHrs,'lower')},
     {key:'predictive', label:'Predictive Alerts (open)', actual:overdue+dueSoon, target:0, fmt:0, good:'lower', ratio:(overdue+dueSoon)===0?1:(overdue?0.3:0.7)},
     {key:'truckinsp', label:'Trucks Inspected (Maint.)', actual:trucksInspected, target:truckInspTarget, fmt:0, good:'higher', ratio:attainment(trucksInspected,truckInspTarget,'higher')},
-    {key:'patrol', label:'Road Patrols (Maint.)', actual:roadPatrols, target:patrolTarget, fmt:0, good:'higher', ratio:attainment(roadPatrols,patrolTarget,'higher')},
     {key:'toolbox', label:'Toolbox Talks (Maint.)', actual:toolbox, target:toolboxTarget, fmt:0, good:'higher', ratio:attainment(toolbox,toolboxTarget,'higher')},
   ];
 }
@@ -1035,8 +1044,7 @@ function buildRecommendations(filtered, period){
   pushIfBad('Maintenance', g(m,'pm'), `PM compliance slipping — reschedule overdue services in the coming week.`, `PM compliance critically low — overdue services are elevating breakdown risk fleet-wide.`);
   pushIfBad('Maintenance', g(m,'breakdown'), `Breakdown rate above target — review recent failure patterns by component.`, `Breakdown rate high — consider a fleet reliability review and spares stock check.`);
   pushIfBad('Maintenance', g(m,'truckinsp'), `Maintenance truck-inspection count behind the 5/day target — schedule catch-up inspections.`, `Maintenance truck inspections well behind target — daily inspection cadence has broken down.`);
-  pushIfBad('Maintenance', g(m,'patrol'), `Maintenance road patrols behind the twice-weekly target — schedule the missing patrol(s) in the coming week.`, `Maintenance road patrols significantly behind target.`);
-  pushIfBad('Maintenance', g(m,'toolbox'), `Weekly maintenance toolbox talk was not held — schedule one in the coming week.`, `Maintenance toolbox talk compliance critically low.`);
+    pushIfBad('Maintenance', g(m,'toolbox'), `Weekly maintenance toolbox talk was not held — schedule one in the coming week.`, `Maintenance toolbox talk compliance critically low.`);
   const chronic = repairs.repeated.filter(r=>r.count>=3);
   const repeat2 = repairs.repeated.filter(r=>r.count===2);
   if(chronic.length) recs.push({dept:'Maintenance', severity:'red', text:`Chronic repeat repairs: ${chronic.map(r=>`${r.regNo} (${r.component}, ${r.count}x)`).join('; ')} — investigate root cause, consider component replacement over repeat repair.`});
@@ -1170,6 +1178,15 @@ function renderDeptPage(deptKey){
   </div>
   ${safetyViewTabs()}
   ${renderHsseReports()}`;
+  }
+  if(deptKey==='safety' && STATE.safetyView==='mix'){
+    return `
+  <div class="topbar">
+    <div><h1>${cfg.label}</h1><div class="sub">Driver scorecard from MiX — updated daily, weekly and monthly. Target: zero high-risk drivers.</div></div>
+    <div class="topbar-right">${syncBadge()}</div>
+  </div>
+  ${safetyViewTabs()}
+  ${renderMixScorecard()}`;
   }
   const period = STATE.periodByDept[deptKey];
   let recs = filterPeriod(STATE.data[deptKey], period);
@@ -1384,7 +1401,7 @@ const REPORT_ROW_DEFS = {
   journey: k=>[['Total Trips',k.find(x=>x.key==='trips')],['On-Time Arrival',k.find(x=>x.key==='ontime')],['Risk Assessment Compliance',k.find(x=>x.key==='risk')],['Avg Delay / Idling (hrs)',k.find(x=>x.key==='delay')],['Route Deviations',k.find(x=>x.key==='deviations')],['Driver Hours Violations',k.find(x=>x.key==='violations')]],
   inspections: k=>[['Inspection Compliance',k.find(x=>x.key==='compliance')],['Defect Rate',k.find(x=>x.key==='defectrate')],['Critical Defects',k.find(x=>x.key==='critical')],['Vehicles Inspected',k.find(x=>x.key==='done')]],
   safety: k=>[['LTIFR',k.find(x=>x.key==='ltifr')],['Incidents',k.find(x=>x.key==='incidents')],['Near-Misses Reported',k.find(x=>x.key==='nearmiss')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Road Patrols',k.find(x=>x.key==='patrol')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
-  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Road Patrols',k.find(x=>x.key==='patrol')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
+  maintenance: k=>[['PM Compliance',k.find(x=>x.key==='pm')],['Breakdown Rate (weekly)',k.find(x=>x.key==='breakdown')],['Avg Repair Time / MTTR (hrs)',k.find(x=>x.key==='mttr')],['Predictive Alerts (open)',k.find(x=>x.key==='predictive')],['Trucks Inspected',k.find(x=>x.key==='truckinsp')],['Toolbox Talks',k.find(x=>x.key==='toolbox')]],
 };
 const REPORT_DEPT_MATCH = {
   transport:r=>r.dept==='Transport', journey:r=>r.dept==='Journey Mgmt', inspections:r=>r.dept==='Inspections',
@@ -1920,7 +1937,7 @@ function stackRows(rows){
 /* ---------------- Safety tab: view switcher + HSSE reports UI ---------------- */
 function safetyViewTabs(){
   const v=STATE.safetyView||'kpi';
-  return `<div class="tabs" style="margin-bottom:16px;"><button data-safety-view="kpi" class="${v==='kpi'?'active':''}">Daily KPIs</button><button data-safety-view="reports" class="${v==='reports'?'active':''}">HSSE Reports</button></div>`;
+  return `<div class="tabs" style="margin-bottom:16px;"><button data-safety-view="kpi" class="${v==='kpi'?'active':''}">Daily KPIs</button><button data-safety-view="reports" class="${v==='reports'?'active':''}">HSSE Reports</button><button data-safety-view="mix" class="${v==='mix'?'active':''}">MiX Driver Scorecard</button></div>`;
 }
 function kc(label,val,sub,tag,tagText){
   return `<div class="card kpi"><div class="label"><span>${label}</span>${tag?`<span class="tag ${tag}">${tagText||''}</span>`:''}</div><div class="value">${val}</div><div class="target">${sub||''}</div></div>`;
@@ -3477,7 +3494,7 @@ function maintWeekMetrics(start, H, P, endOpt){
   const repeats=bds.filter(r=>{ const x=H.byId[r.id]; return x&&x.sinceSame!==null; });
   const parts=P.filter(p=>inW(p.date));
   const mi=(STATE.data.maintInspections||[]).filter(r=>inW(r.date)), daily=(STATE.data.maintenanceDaily||[]).filter(r=>inW(r.date));
-  return {start,breakdowns:bds.length,scheduled:sch.length,downtime:bds.reduce((a,r)=>a+num(r.downtimeHours),0),mttr:dt.length?dt.reduce((a,r)=>a+num(r.downtimeHours),0)/dt.length:0,
+  return {start,bdPct:(bds.length/Math.max(1,(STATE.data.vehicles||[]).length))*100,breakdowns:bds.length,scheduled:sch.length,downtime:bds.reduce((a,r)=>a+num(r.downtimeHours),0),mttr:dt.length?dt.reduce((a,r)=>a+num(r.downtimeHours),0)/dt.length:0,
     cost:ev.reduce((a,r)=>a+num(r.cost),0),trucks:Object.keys(truck).length,repeats:repeats.length,repeatList:repeats,parts:parts.length,
     partsAgain:parts.filter(p=>p.prevGap!==null&&p.prevGap<=90).length,partsAgainList:parts.filter(p=>p.prevGap!==null&&p.prevGap<=90),
     closed:(STATE.data.maintenance||[]).filter(r=>inW(r.completedDate)).length,inspected:trucksInspectedMaint(daily,mi),patrols:sumBy(daily,'roadPatrols'),toolbox:sumBy(daily,'toolboxTalks'),comp,truck,bds};
@@ -3500,7 +3517,7 @@ function renderMaintWeekly(){
     <div style="min-width:260px;flex:1;max-width:440px;"><label>Week (Mon – Sun)</label><select data-maint-week="1">${opts}</select></div>
     <div class="flex gap8"><button class="btn small ${start===addDays(cur,-7)?'primary':''}" data-maint-wk="last">Last week</button><button class="btn small ${start===cur?'primary':''}" data-maint-wk="cur">This week so far</button></div></div>
     <div class="dim small" style="margin-top:8px;">Comparing <b>${weekRangeText(start)}</b> with the week before, <b>${weekRangeText(prevStart)}</b>. ${start===cur?'This week is still in progress, so its totals will keep growing until Sunday.':''}</div></div>`;
-  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Road patrols','patrols','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
+  const rows=[['Breakdowns / repairs','breakdowns','lower',0,''],['Breakdown rate (% of fleet, weekly)','bdPct','lower',1,'%'],['Trucks that broke down','trucks','lower',0,''],['Repeat repairs (same fault again)','repeats','lower',0,''],['Repair downtime','downtime','lower',1,' h'],['Avg repair time (MTTR)','mttr','lower',1,' h'],['Maintenance cost','cost','lower',0,''],['Scheduled services done','scheduled','higher',0,''],['Repair jobs closed','closed','higher',0,''],['Trucks inspected','inspected','higher',0,''],['Toolbox talks','toolbox','higher',0,''],['Parts lines bought','parts',null,0,''],['Parts bought again within 90 d','partsAgain','lower',0,'']];
   const fv=(r,v)=>r[1]==='cost'?naira(v):fmt(v,r[3])+r[4];
   const trs=rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${fv(r,A[r[1]])}</td><td class="dim">${fv(r,B[r[1]])}</td><td>${deltaCell(A[r[1]],B[r[1]],r[2],r[3],r[4],r[1]==='cost')}</td></tr>`).join('');
   // component and truck movement
@@ -3680,20 +3697,19 @@ function renderMaintenancePage(){
   </table></div>
 
   <details class="form-card" style="margin-top:20px;">
-    <summary>Daily activity — inspections, patrols &amp; toolbox talks (${allDaily.length} entr${allDaily.length===1?'y':'ies'})</summary>
-    <div class="section-sub" style="margin-top:10px;">Targets: 5 truck inspections/day · 2 road patrols/week · 1 toolbox talk/week. Inspections saved with the Maintenance Inspection form are counted automatically — for each day the higher of the form count and this manual count is used, so nothing is double-counted.</div>
+    <summary>Daily activity — inspections &amp; toolbox talks (${allDaily.length} entr${allDaily.length===1?'y':'ies'})</summary>
+    <div class="section-sub" style="margin-top:10px;">Targets: 5 truck inspections/day · 27/week · 108/month · 1 toolbox talk/week. Inspections saved with the Maintenance Inspection form are counted automatically — for each day the higher of the form count and this manual count is used, so nothing is double-counted.</div>
     <form data-log-form="maintenanceDaily">
       <div class="form-grid">
         <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
         <div><label>Trucks Inspected</label><input type="number" name="trucksInspected"></div>
-        <div><label>Road Patrols</label><input type="number" name="roadPatrols"></div>
         <div><label>Toolbox Talks</label><input type="number" name="toolboxTalks"></div>
       </div>
       <div class="form-actions"><button type="submit" class="btn primary">Save Entry</button></div>
     </form>
     <div class="table-wrap" style="margin-top:14px;"><table>
-      <thead><tr><th>Date</th><th>Trucks Insp.</th><th>Patrols</th><th>Toolbox</th><th></th></tr></thead>
-      <tbody>${allDaily.length? allDaily.map(r=>`<tr><td>${fmtDate(r.date)}</td><td>${fmt(num(r.trucksInspected))}</td><td>${fmt(num(r.roadPatrols))}</td><td>${fmt(num(r.toolboxTalks))}</td><td><div class="row-actions"><button class="btn danger small" data-delete="maintenanceDaily:${r.id}">Delete</button></div></td></tr>`).join('') : `<tr class="empty-row"><td colspan="5">No daily activity logged yet.</td></tr>`}</tbody>
+      <thead><tr><th>Date</th><th>Trucks Insp.</th><th>Toolbox</th><th></th></tr></thead>
+      <tbody>${allDaily.length? allDaily.map(r=>`<tr><td>${fmtDate(r.date)}</td><td>${fmt(num(r.trucksInspected))}</td><td>${fmt(num(r.toolboxTalks))}</td><td><div class="row-actions"><button class="btn danger small" data-delete="maintenanceDaily:${r.id}">Delete</button></div></td></tr>`).join('') : `<tr class="empty-row"><td colspan="5">No daily activity logged yet.</td></tr>`}</tbody>
     </table></div>
   </details>
 
@@ -3794,7 +3810,7 @@ const DAILY_SRC=[
   {k:'inspections',dept:'Inspections',what:()=>'Inspection summary',d:genericDesc},
   {k:'safety',dept:'Safety (HSE)',what:()=>'Daily safety entry',d:r=>['Hours worked: '+num(r.hoursWorked),'Incidents: '+num(r.incidents),'Near-misses: '+num(r.nearMisses),'Trucks inspected: '+num(r.trucksInspected),'Patrols: '+num(r.roadPatrols),'Toolbox talks: '+num(r.toolboxTalks)]},
   {k:'maintenance',dept:'Maintenance',what:r=>typeLabel(r.type),d:r=>[vehicleLabel(r.vehicleId),whatDone(r),r.status==='Open'?'Open job':'',r.downtimeHours?r.downtimeHours+' h down':'',r.parts?'Parts: '+r.parts:'',r.cost?naira(num(r.cost)):'',r.notes]},
-  {k:'maintenanceDaily',dept:'Maintenance',what:()=>'Daily activity',d:r=>['Trucks inspected: '+num(r.trucksInspected),'Patrols: '+num(r.roadPatrols),'Toolbox talks: '+num(r.toolboxTalks)]},
+  {k:'maintenanceDaily',dept:'Maintenance',what:()=>'Daily activity',d:r=>['Trucks inspected: '+num(r.trucksInspected),'Toolbox talks: '+num(r.toolboxTalks)]},
   {k:'maintInspections',dept:'Maintenance',what:()=>'Truck inspection',d:r=>[vehicleLabel(r.vehicleId),r.inspector&&('By '+r.inspector),r.odometer?fmt(num(r.odometer))+' km':'',r.result]},
   {k:'fuel',dept:'Fuel & Deliveries',what:()=>'Fuel log',d:genericDesc},
   {k:'portUpdates',dept:'Port Files',what:r=>r.delivered?'File delivered':'File update',d:r=>[r.ref,r.text,Object.entries(r.fields||{}).filter(([k,v])=>v!==''&&v!=null).map(([k,v])=>k+': '+v).join(', ')]},
@@ -4765,10 +4781,10 @@ function repMaintenance(r,p,L){
   const blocks=[kpiTableBlock('Maintenance KPIs',REPORT_ROW_DEFS.maintenance(kc_),REPORT_ROW_DEFS.maintenance(kp_),hasCur,hasPrev,L)];
   const A=maintMetricsFor(r), B=maintMetricsFor(p);
   blocks.push(compareBlock('Maintenance activity',[
-    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
+    ['Breakdowns / repairs',A.breakdowns,B.breakdowns,'lower'],['Breakdown rate (% of fleet, weekly)',A.bdPct,B.bdPct,'lower',{dec:1,unit:'%'}],['Trucks that broke down',A.trucks,B.trucks,'lower'],['Repeat repairs (same fault again)',A.repeats,B.repeats,'lower'],
     ['Repair downtime',A.downtime,B.downtime,'lower',{dec:1,unit:'h'}],['Average repair time (MTTR)',A.mttr,B.mttr,'lower',{dec:1,unit:'h'}],['Maintenance cost',A.cost,B.cost,'lower',{money:true}],
     ['Scheduled services done',A.scheduled,B.scheduled,'higher'],['Repair jobs closed',A.closed,B.closed,'higher'],['Trucks inspected',A.inspected,B.inspected,'higher'],
-    ['Road patrols',A.patrols,B.patrols,'higher'],['Toolbox talks',A.toolbox,B.toolbox,'higher'],['Part lines bought',A.parts,B.parts,null],['Parts bought again within 90 days',A.partsAgain,B.partsAgain,'lower']],L));
+    ['Toolbox talks',A.toolbox,B.toolbox,'higher'],['Part lines bought',A.parts,B.parts,null],['Parts bought again within 90 days',A.partsAgain,B.partsAgain,'lower']],L));
   const comps=[...new Set([...Object.keys(A.comp),...Object.keys(B.comp)])].sort((x,y)=>(A.comp[y]||0)-(A.comp[x]||0));
   if(comps.length) blocks.push(tableBlock('Breakdowns by component',['Component',L.cur,L.prev,'Change'],comps.map(c=>[c,fmt(A.comp[c]||0),fmt(B.comp[c]||0),chg(A.comp[c]||0,B.comp[c]||0,'lower')])));
   const tids=[...new Set([...Object.keys(A.truck),...Object.keys(B.truck)])].sort((x,y)=>(A.truck[y]||0)-(A.truck[x]||0));
@@ -5457,6 +5473,8 @@ function renderSummary(){
   return `
   <div class="topbar"><div><h1>Fleet Summary</h1><div class="sub">Last week (Mon–Sun) · <b>${esc(rangeText(W))}</b> <span class="dim">— compared with the week before, ${esc(rangeText(V))}</span></div></div><div class="topbar-right">${syncBadge()}</div></div>
   ${yesterdayBanner()}
+  ${renderScoreboard(A,B)}
+  ${renderBestDrivers('lastweek')}
   <div class="board">
     <div class="board-seg red"><div class="k">Critical</div><div class="v">${red}<small>action needed</small></div></div>
     <div class="board-seg amber"><div class="k">Warning</div><div class="v">${amber}<small>watch list</small></div></div>
@@ -5477,6 +5495,9 @@ window.addEventListener('appinstalled',()=>{ DEFERRED_INSTALL=null; try{ showToa
 function isStandalone(){ return (window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||window.navigator.standalone===true; }
 function typedTrucks(){ const m={}; (STATE.data.transport||[]).forEach(r=>{ if(!r.vehicleId&&r.regNoText){ const k=trKey(r); if(!m[k]) m[k]=String(r.regNoText).trim().toUpperCase(); } }); return Object.entries(m).sort((a,b)=>a[1]<b[1]?-1:1); }
 function attachEventsV10(app){
+  app.querySelectorAll('[data-mx-period]').forEach(b=>b.addEventListener('click',()=>{ STATE.mix.period=b.getAttribute('data-mx-period'); render(); }));
+  app.querySelectorAll('[data-mx-reload]').forEach(b=>b.addEventListener('click',()=>{ STATE.mix.status='idle'; mixEnsure(true); }));
+  if(STATE.tab==='summary'||STATE.tab==='safety') mixEnsure();
   attachCombos(app);
   attachReportEvents(app);
   attachPortEvents(app);
@@ -5494,7 +5515,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v11.1 · 27 Oct 2026';
+const APP_VERSION='v11.2 · 28 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6388,7 +6409,10 @@ function jPlanSection(){
 function jTargetCard(){
   const route=(k,txt)=>`<tr><td>${esc(ROUTES[k].label)}</td><td>${txt}</td><td>${ROUTES[k].durationTargetHrs} h</td></tr>`;
   const vs=STATE.data.vehicles||[], J=STATE.data.journey||[]; const cnt={day:{},week:{},month:{}};
-  J.forEach(r=>{ ['day','week','month'].forEach(p=>{ if(inPeriod(r.date,p)) cnt[p][r.vehicleId]=(cnt[p][r.vehicleId]||0)+1; }); });
+  const cj={day:{},week:{},month:{}}, ct={day:{},week:{},month:{}};
+  J.forEach(r=>{ ['day','week','month'].forEach(p=>{ if(inPeriod(r.date,p)) cj[p][r.vehicleId]=(cj[p][r.vehicleId]||0)+1; }); });
+  (STATE.data.transport||[]).forEach(r=>{ if(!r.vehicleId) return; ['day','week','month'].forEach(p=>{ if(inPeriod(r.date,p)) ct[p][r.vehicleId]=(ct[p][r.vehicleId]||0)+num(r.tripsActual); }); });
+  ['day','week','month'].forEach(p=>{ new Set([...Object.keys(cj[p]),...Object.keys(ct[p])]).forEach(v=>{ cnt[p][v]=Math.max(cj[p][v]||0,ct[p][v]||0); }); });   // trips from Transport Ops or the Journey log, whichever is higher, so nothing is counted twice
   const seen={}; const rows=vs.filter(v=>{ const k=normReg(v.regNo); if(seen[k]) return false; seen[k]=1; return true; }).map(v=>({v,d:cnt.day[v.id]||0,w:cnt.week[v.id]||0,m:cnt.month[v.id]||0}));
   const cell=(a,t)=>{ const r=a/t; return `<td><span class="tag ${r>=1?'green':r>=.5?'amber':'red'}">${a} / ${t}</span></td>`; };
   return `<div class="section-title"><span>CNG Truck Trip Targets</span><div class="line"></div></div>
@@ -6396,7 +6420,7 @@ function jTargetCard(){
    <div class="card"><b>Targets per route</b><div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Route</th><th>Trips per truck</th><th>Transit target</th></tr></thead><tbody>
     ${route('gypsum_sagamu','1 round trip daily')}${route('gypsum_ewekoro','1 round trip daily')}${route('gypsum_adumbu_sagamu','2 trips daily')}${route('clinker','2 trips daily')}</tbody></table></div>
     <div class="dim small" style="margin-top:8px;">Every CNG truck: <b>2 trips a day · 14 a week · 56 a month</b>.</div></div>
-   <div class="card"><b>Trips per truck so far</b><div class="dim small">Today · this week · this month, from the trip log below.</div><div class="table-wrap" style="margin-top:8px;max-height:260px;overflow:auto;"><table><thead><tr><th>Truck</th><th>Today</th><th>Week</th><th>Month</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.v.regNo)}</b></td>${cell(x.d,J_TRUCK_TARGET.day)}${cell(x.w,J_TRUCK_TARGET.week)}${cell(x.m,J_TRUCK_TARGET.month)}</tr>`).join('')||'<tr><td colspan="4" class="dim">No trucks.</td></tr>'}</tbody></table></div></div>
+   <div class="card"><b>Trips per truck so far</b><div class="dim small">Today · this week · this month, from Transport Ops entries and the trip log (whichever is higher per truck).</div><div class="table-wrap" style="margin-top:8px;max-height:260px;overflow:auto;"><table><thead><tr><th>Truck</th><th>Today</th><th>Week</th><th>Month</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.v.regNo)}</b></td>${cell(x.d,J_TRUCK_TARGET.day)}${cell(x.w,J_TRUCK_TARGET.week)}${cell(x.m,J_TRUCK_TARGET.month)}</tr>`).join('')||'<tr><td colspan="4" class="dim">No trucks.</td></tr>'}</tbody></table></div></div>
   </div>`;
 }
 function jTimesModal(){
@@ -6525,6 +6549,100 @@ async function applyTargetSeed(){
   await persistTargets(); await persist('seeds');
 }
 
+
+/* ============================================================ weekly2.js ============================================================ */
+/* ===== v11.2: MiX driver scorecard (daily / weekly / monthly), best drivers of the week, department scoreboard ===== */
+STATE.mix=STATE.mix||{status:'idle',rows:null,drivers:{},at:0,busy:false,empty:false,err:'',period:'lastweek'};
+const MX_CATS=[['speed','Speeding',3,/speed/i],['brake','Harsh braking',2,/brak/i],['accel','Harsh acceleration',2,/accel/i],['corner','Harsh cornering',2,/corner|swerv/i],['belt','Seatbelt',3,/belt/i],['fatigue','Fatigue / distraction',5,/fatigue|drows|distract|phone|lane|tailgat|follow|collision/i],['idle','Excess idling',1,/idl/i]];
+const MX_DEVICE_RE=/tamper|disconnect|power|jam|battery|antenna/i;
+function mxCat(name){ const n=String(name||''); if(MX_DEVICE_RE.test(n)&&!/speed|brak|accel/i.test(n)) return null; for(const c of MX_CATS){ if(c[3].test(n)) return c; } return ['other','Other safety event',1,null]; }
+async function mixEnsure(force){
+  const M=STATE.mix; if(!GAS_CONFIGURED||M.busy) return; if(!force&&M.rows&&Date.now()-M.at<600000) return; if(!force&&M.status==='fail'&&Date.now()-M.at<600000) return;
+  M.busy=true; try{ const res=await fetch(`${GAS_URL}?action=driverscore&days=62&_=${Date.now()}`); const j=JSON.parse(await res.text());
+    if(j&&j.ok){ M.rows=j.rows||[]; M.drivers=j.drivers||{}; M.empty=!!j.empty; M.status='ok'; M.err=''; } else { M.status='fail'; M.err=(j&&j.error)||'The scorecard feed is not available yet.'; if(!M.rows) M.rows=null; }
+  }catch(e){ M.status='fail'; M.err='The scorecard feed is not available yet (add the latest Watch script).'; }
+  M.at=Date.now(); M.busy=false; if(STATE.tab==='safety'||STATE.tab==='summary') render();
+}
+function mxRange(p){ if(p==='yesterday'){ const y=addDays(todayStr(),-1); return {start:y,end:y}; } return periodRange(p); }
+function mxPrev(p){ return {day:'yesterday',yesterday:null,week:'lastweek',lastweek:'prevweek',prevweek:null,month:'lastmonth',lastmonth:'prevmonth',prevmonth:null}[p]||null; }
+/* who was driving a truck on a given day: MiX driver id, else the driver logged in Transport Ops / Journey for that truck that day */
+function mxDriverName(row,idx){
+  const id=row[3]; if(id&&STATE.mix.drivers[id]) { const c=idx.ensure(STATE.mix.drivers[id]); if(c) return c; }
+  const v=(matchTruck(row[2]).v)||((STATE.data.vehicles||[]).find(x=>String(x.regNo).replace(/\D/g,'')===String(row[2]).replace(/\D/g,'')&&String(row[2]).replace(/\D/g,'').length>=3));
+  if(v){ const rec=(STATE.data.transport||[]).concat(STATE.data.journey||[]).find(r=>r.vehicleId===v.id&&r.date===row[0]&&r.driverName); if(rec){ const c=idx.ensure(rec.driverName); if(c) return c; } const ld=lastDriverOf(v.id); if(ld){ const c=idx.ensure(ld); if(c) return c; } return idx.ensure('Truck '+v.regNo+' (driver not logged)'); }
+  return idx.ensure(id?('MiX driver '+id):('Unidentified — '+row[2]));
+}
+function mxScore(range){
+  const M=STATE.mix, idx=makeDriverIndex(), out={}; if(!M.rows||!range) return {list:[],days:periodDaysRange(range)};
+  const get=c=>out[c.name]||(out[c.name]={name:c.name,pts:0,n:0,cats:{},dates:{}});
+  M.rows.forEach(r=>{ if(r[0]<range.start||r[0]>range.end) return; const cat=mxCat(r[5]||('Event type '+r[4])); if(!cat) return; const c=mxDriverName(r,idx); if(!c) return; const o=get(c); o.pts+=cat[2]*r[6]; o.n+=r[6]; o.cats[cat[1]]=(o.cats[cat[1]]||0)+r[6]; o.dates[r[0]]=(o.dates[r[0]]||0)+cat[2]*r[6]; });
+  // drivers who drove in the period but had no events are clean (they count for the "no violations" list)
+  (STATE.data.transport||[]).concat(STATE.data.journey||[]).forEach(r=>{ if(r.driverName&&r.date>=range.start&&r.date<=range.end){ const c=idx.ensure(r.driverName); if(c) get(c); } });
+  const days=periodDaysRange(range), cap=Math.min(days,Math.max(1,Math.round((Date.parse(todayStr()+'T00:00:00')-Date.parse(range.start+'T00:00:00'))/86400000)+1));
+  const list=Object.values(out).map(o=>Object.assign(o,{perDay:o.pts/cap,band:bandOf(o.pts/cap)})).sort((a,b)=>b.perDay-a.perDay||a.name.localeCompare(b.name));
+  return {list,days:cap};
+}
+function periodDaysRange(r){ return r?Math.round((Date.parse(r.end+'T00:00:00')-Date.parse(r.start+'T00:00:00'))/86400000)+1:7; }
+function mxHighRisk(period){ const M=STATE.mix; if(!M.rows||M.empty) return null; const S=mxScore(mxRange(period)); return S.list.filter(x=>x.band==='RED').length; }
+
+const MX_PERIODS=[['yesterday','Yesterday'],['day','Today'],['lastweek','Last week'],['prevweek','Week before'],['week','This week'],['lastmonth','Last month'],['month','This month']];
+function renderMixScorecard(){
+  const M=STATE.mix, p=M.period||'lastweek'; if(!M.rows&&M.status!=='fail'){ mixEnsure(); }
+  const tabs=`<div class="tabs" style="margin-bottom:14px;">${MX_PERIODS.map(([k,l])=>`<button data-mx-period="${k}" class="${p===k?'active':''}">${l}</button>`).join('')}</div>`;
+  if(M.status==='fail'&&!M.rows) return `<div class="note warn">${esc(M.err)} Add the updated <b>FleetDesk_Watch.gs</b> to Apps Script, run <b>fdInstallLogger</b> once, deploy a new version, then reopen this page.</div><button class="btn small" data-mx-reload="1">Try again</button>`;
+  if(!M.rows) return `<div class="card dim" style="padding:22px;text-align:center;">Loading driver events from MiX…</div>`;
+  const R=mxRange(p), S=mxScore(R), pv=mxPrev(p), SP=pv?mxScore(mxRange(pv)):null, pm={}; if(SP) SP.list.forEach(x=>{ pm[x.name]=x; });
+  const red=S.list.filter(x=>x.band==='RED').length, amb=S.list.filter(x=>x.band==='AMBER').length, clean=S.list.filter(x=>x.pts===0).length, ev=S.list.reduce((a,x)=>a+x.n,0);
+  const pr=SP?SP.list.filter(x=>x.band==='RED').length:null;
+  const kpi=(l,v,sub,col)=>`<div class="card kpi"><div class="label">${l}</div><div class="value" style="color:${col};">${v}</div><div class="target">${sub||''}</div></div>`;
+  const cats=MX_CATS.map(c=>c[1]).concat(['Other safety event']).filter(c=>S.list.some(x=>x.cats[c]));
+  const dayRows={}; S.list.forEach(x=>Object.keys(x.dates).forEach(d=>{ (dayRows[d]=dayRows[d]||{pts:0,drivers:0}); dayRows[d].pts+=x.dates[d]; dayRows[d].drivers++; }));
+  const bandTag=b=>b==='RED'?'<span class="tag red">High risk</span>':b==='AMBER'?'<span class="tag amber">Medium</span>':'<span class="tag green">Low</span>';
+  const delta=x=>{ const o=pm[x.name]; if(!SP) return ''; if(!o) return '<span class="dim">new</span>'; const d=x.perDay-o.perDay; return Math.abs(d)<0.05?'<span class="dim">no change</span>':`<span class="${d>0?'up-bad':'up-good'}">${d>0?'▲ +':'▼ −'}${fmt(Math.abs(d),1)}</span>`; };
+  return `${tabs}<div class="dim small" style="margin:-4px 0 12px;">${esc(rangeText(R))}${pv?` · compared with ${esc(rangeText(mxRange(pv)))}`:''}. Built from MiX driver events saved every hour. Points: speeding 3 · harsh braking/acceleration/cornering 2 · seatbelt 3 · fatigue or distraction 5 · idling and other 1. Score = points per day; <b>5 or more is High risk</b>, 2 to 5 Medium (same bands as the HSSE scorecard).</div>
+  ${M.empty?`<div class="note warn" style="margin-bottom:12px;">No driver events saved yet. The hourly event log starts after <b>fdInstallLogger</b> is run with the latest Watch script, then fills in over the next hours.</div>`:''}
+  <div class="grid cols-4" style="margin-bottom:14px;">${kpi('High-risk drivers',red,`Target: 0${pr!==null?' · before: '+pr:''}`,red?'var(--red)':'var(--green)')}${kpi('Medium risk',amb,'',amb?'var(--amber)':'var(--dim)')}${kpi('No violations',clean,'drivers with zero points','var(--green)')}${kpi('Events',ev,'safety events in the period','var(--text)')}</div>
+  ${S.list.length?`<div class="table-wrap"><table><thead><tr><th>Driver</th><th>Risk</th><th>Points / day</th><th>Points</th>${cats.map(c=>`<th>${esc(c)}</th>`).join('')}${SP?'<th>vs before</th>':''}</tr></thead><tbody>${S.list.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${bandTag(x.band)}</td><td>${fmt(x.perDay,1)}</td><td>${fmt(x.pts,0)}</td>${cats.map(c=>`<td>${x.cats[c]||'—'}</td>`).join('')}${SP?`<td>${delta(x)}</td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="card dim" style="padding:18px;">No drivers or events in this period yet.</div>'}
+  ${Object.keys(dayRows).length>1?`<div class="section-title" style="margin-top:16px;"><span>Day by day</span><div class="line"></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Drivers with events</th><th>Points</th></tr></thead><tbody>${Object.keys(dayRows).sort().map(d=>`<tr><td>${fmtDate(d)}</td><td>${dayRows[d].drivers}</td><td>${fmt(dayRows[d].pts,0)}</td></tr>`).join('')}</tbody></table></div>`:''}`;
+}
+
+/* ---------- best drivers of the week ---------- */
+function bestDriversData(P){
+  const R=periodRange(P), idx=makeDriverIndex(), D=STATE.data, rec={};
+  const get=c=>rec[c.name]||(rec[c.name]={name:c.name,trips:0,viol:0,why:[],bd:0,down:0,tripDays:0,hasMaint:false});
+  (D.transport||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(c) get(c).trips+=num(r.tripsActual); });
+  (D.journey||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); const dv=num(r.deviations); if(dv>0){ o.viol+=dv; o.why.push(dv+' route deviation'+(dv>1?'s':'')); } if(r.driverHoursViolation==='Yes'){ o.viol++; o.why.push('driving-hours violation'); } });
+  const wk=(((D.hsseScores||{}).weeks)||[]).find(w=>(w.start||(typeof startOfOrd==='function'?startOfOrd(w.n):''))===R.start);
+  if(wk) (wk.drivers||[]).forEach(d=>{ if(d.na||!d.n) return; const c=idx.ensure(d.n); if(!c||!rec[c.name]) { if(c&&num(d.t)>0){ const o=get(c); o.viol++; o.why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } return; } if(num(d.t)>0){ rec[c.name].viol++; rec[c.name].why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } });
+  if(STATE.mix.rows&&!STATE.mix.empty){ mxScore(R).list.forEach(x=>{ if(x.pts>0){ const o=rec[x.name]||(rec[x.name]={name:x.name,trips:0,viol:0,why:[],bd:0,down:0,tripDays:0,hasMaint:false}); o.viol+=x.n; o.why.push(x.n+' MiX event'+(x.n>1?'s':'')); } }); }
+  try{ maintDriverWeek(R.start).forEach(m=>{ const nm=idx.ensure(m.name); if(!nm) return; const o=rec[nm.name]; if(!o) return; o.bd=m.bd||0; o.down=m.down||0; o.tripDays=m.tripDays||0; o.hasMaint=true; }); }catch(e){}
+  return {R,list:Object.values(rec),mixOn:!!(STATE.mix.rows&&!STATE.mix.empty),hsseOn:!!wk};
+}
+function renderBestDrivers(P){
+  P=P||'lastweek'; const B=bestDriversData(P), L=B.list.filter(x=>x.trips>0);
+  const top=L.slice().sort((a,b)=>b.trips-a.trips||a.viol-b.viol).slice(0,3);
+  const clean=L.filter(x=>x.viol===0).sort((a,b)=>b.trips-a.trips).slice(0,3);
+  const maint=L.filter(x=>x.hasMaint).sort((a,b)=>a.bd-b.bd||a.down-b.down||b.trips-a.trips).slice(0,3);
+  const star=L.filter(x=>x.viol===0&&x.bd===0).sort((a,b)=>b.trips-a.trips).slice(0,3);
+  const tgt=J_TRUCK_TARGET.week;
+  const list=(a,f)=>a.length?`<div style="display:grid;gap:6px;">${a.map((x,i)=>`<div style="display:flex;gap:8px;align-items:baseline;"><span class="rank good">${i+1}</span><b>${esc(x.name)}</b><span class="dim small">${f(x)}</span></div>`).join('')}</div>`:'<div class="dim small">Nobody qualifies yet.</div>';
+  return `<div class="section-title"><span>Best drivers of the week</span><div class="line"></div><span class="dim small mono">${esc(rangeText(B.R))}</span></div>
+  <div class="grid cols-3" style="margin-bottom:12px;">
+   <div class="card"><div style="font-weight:600;margin-bottom:8px;">Most trips</div>${list(top,x=>x.trips+' trips'+(tgt?' of '+tgt+' target':'')+(x.viol?' · '+x.viol+' violation'+(x.viol>1?'s':''):''))}</div>
+   <div class="card"><div style="font-weight:600;margin-bottom:8px;">No safety violations</div>${list(clean,x=>x.trips+' trips · clean week')}<div class="dim small" style="margin-top:8px;">Checked: journey deviations and hours violations${B.hsseOn?', HSSE scorecard':''}${B.mixOn?', MiX events':''}.</div></div>
+   <div class="card"><div style="font-weight:600;margin-bottom:8px;">Lowest maintenance</div>${list(maint,x=>(x.bd?x.bd+' breakdown'+(x.bd>1?'s':''):'no breakdowns')+(x.down?' · '+fmt(x.down,1)+' h down':''))}<div class="dim small" style="margin-top:8px;">Breakdowns on the truck they were driving.</div></div></div>
+  ${star.length?`<div class="note ok" style="margin-bottom:14px;"><b>Driver of the week:</b> ${star.map(x=>esc(x.name)+' ('+x.trips+' trips)').join(' · ')} — most trips with no safety violation and no breakdown.</div>`:'<div class="dim small" style="margin-bottom:14px;">No driver has all three yet (trips logged, no violations, no breakdowns).</div>'}`;
+}
+
+/* ---------- department scoreboard: last week vs the week before ---------- */
+function renderScoreboard(A,B){
+  const names={t:'Transport',j:'Journey',i:'Inspections',s:'Safety',m:'Maintenance'}; const dir=(k,k2)=>{ if(!k||!k2||k.actual==null||k2.actual==null||isNaN(k.actual)||isNaN(k2.actual)) return 0; const d=k.actual-k2.actual; if(Math.abs(d)<1e-9) return 0; return (k.good==='lower')===(d<0)?1:-1; };
+  const rows=Object.keys(names).map(d=>{ let up=0,down=0,same=0; (A[d]||[]).forEach((k,i)=>{ const r=dir(k,(B[d]||[])[i]); if(r>0) up++; else if(r<0) down++; else same++; }); return {n:names[d],up,down,same,tot:up+down+same}; });
+  const mixNow=mxHighRisk('lastweek'), mixPrev=mxHighRisk('prevweek');
+  return `<div class="section-title"><span>Improving or slipping?</span><div class="line"></div><span class="dim small">last week against the week before</span></div>
+  <div class="grid cols-3" style="margin-bottom:14px;">${rows.map(r=>`<div class="card"><div style="font-weight:600;">${r.n}</div><div style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><span class="tag green">▲ ${r.up} improved</span><span class="tag red">▼ ${r.down} slipped</span><span class="tag teal">${r.same} same</span></div><div class="small" style="margin-top:6px;color:var(--${r.down>r.up?'red':r.up>r.down?'green':'dim'});">${r.down>r.up?'Regression — look at the red KPIs below':r.up>r.down?'Improvement':'Holding steady'}</div></div>`).join('')}
+   ${mixNow!==null?`<div class="card"><div style="font-weight:600;">High-risk drivers (MiX)</div><div style="margin-top:6px;font-size:22px;font-weight:600;color:var(--${mixNow?'red':'green'});">${mixNow}</div><div class="small dim">Target 0 · week before: ${mixPrev===null?'—':mixPrev}</div></div>`:''}</div>`;
+}
 
 loadAll();
 </script>
