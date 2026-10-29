@@ -561,6 +561,7 @@ async function loadAll(opts){
       routeRefs: safeParseJSON(json[STORAGE_KEYS.routeRefs], {}),
       routePlans: safeParseJSON(json[STORAGE_KEYS.routePlans], []),
     };
+    newData.monthIndex=safeParseJSON(json[STORAGE_KEYS.monthIndex],[]);
     WS_COLLS.forEach(k=>{ newData[k]=safeParseJSON(json[STORAGE_KEYS[k]],[]); }); newData.apprCfg=safeParseJSON(json[STORAGE_KEYS.apprCfg],{});
     normalizeHsseWeeks(newData.hsseScores);
     const newTargets = {...DEFAULT_TARGETS, ...safeParseJSON(json[STORAGE_KEYS.targets], {})};
@@ -5496,6 +5497,7 @@ function renderSummary(){
   <div class="topbar"><div><h1>Fleet Summary</h1><div class="sub">Last week (Mon–Sun) · <b>${esc(rangeText(W))}</b> <span class="dim">— compared with the week before, ${esc(rangeText(V))}</span></div></div><div class="topbar-right">${syncBadge()}</div></div>
   ${yesterdayBanner()}
   ${renderScoreboard(A,B)}
+  ${renderOverallBest()}
   ${renderBestDrivers('lastweek')}
   <div class="board">
     <div class="board-seg red"><div class="k">Critical</div><div class="v">${red}<small>action needed</small></div></div>
@@ -5538,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.1 · 29 Oct 2026';
+const APP_VERSION='v12.2 · 29 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6677,10 +6679,10 @@ function bestDriversData(P){
   (D.transport||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(c) get(c).trips+=num(r.tripsActual); });
   (D.journey||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); const dv=num(r.deviations); if(dv>0){ o.viol+=dv; o.why.push(dv+' route deviation'+(dv>1?'s':'')); } if(r.driverHoursViolation==='Yes'){ o.viol++; o.why.push('driving-hours violation'); } });
   (D.pretrip||[]).filter(r=>inPeriod(r.date,P)&&r.driverName&&r.alcoholTest==='No').forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); o.viol+=2; o.why.push('failed alcohol test'); });
-  const wk=(((D.hsseScores||{}).weeks)||[]).find(w=>(w.start||(typeof startOfOrd==='function'?startOfOrd(w.n):''))===R.start);
-  if(wk) (wk.drivers||[]).forEach(d=>{ if(d.na||!d.n) return; const c=idx.ensure(d.n); if(!c||!rec[c.name]) { if(c&&num(d.t)>0){ const o=get(c); o.viol++; o.why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } return; } if(num(d.t)>0){ rec[c.name].viol++; rec[c.name].why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } });
+  const wks=(((D.hsseScores||{}).weeks)||[]).filter(w=>{ const s0=(w.start||(typeof startOfOrd==='function'?startOfOrd(w.n):'')); return s0>=R.start&&s0<=R.end; }); const wk=wks[0];
+  wks.forEach(wk=>(wk.drivers||[]).forEach(d=>{ if(d.na||!d.n) return; const c=idx.ensure(d.n); if(!c||!rec[c.name]) { if(c&&num(d.t)>0){ const o=get(c); o.viol++; o.why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } return; } if(num(d.t)>0){ rec[c.name].viol++; rec[c.name].why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } }));
   if(STATE.mix.rows&&!STATE.mix.empty){ mxScore(R).list.forEach(x=>{ if(x.pts>0){ const o=rec[x.name]||(rec[x.name]={name:x.name,trips:0,viol:0,why:[],bd:0,down:0,tripDays:0,hasMaint:false}); o.viol+=x.n; o.why.push(x.n+' MiX event'+(x.n>1?'s':'')); } }); }
-  try{ maintDriverWeek(R.start).forEach(m=>{ const nm=idx.ensure(m.name); if(!nm) return; const o=rec[nm.name]; if(!o) return; o.bd=m.bd||0; o.down=m.down||0; o.tripDays=m.tripDays||0; o.hasMaint=true; }); }catch(e){}
+  try{ for(let ws=wkStart(R.start); ws<=R.end; ws=addDays(ws,7)){ maintDriverWeek(ws).forEach(m=>{ const nm=idx.ensure(m.name); if(!nm) return; const o=rec[nm.name]; if(!o) return; o.bd+=m.bd||0; o.down+=m.down||0; o.tripDays+=m.tripDays||0; o.hasMaint=true; }); } }catch(e){}
   return {R,list:Object.values(rec),mixOn:!!(STATE.mix.rows&&!STATE.mix.empty),hsseOn:!!wk};
 }
 function renderBestDrivers(P){
@@ -7700,6 +7702,148 @@ function jtAttach(){
   }));
 }
 const _attach1=attachEvents; attachEvents=function(){ _attach1(); try{ jtAttach(); }catch(e){ console.error('jtAttach',e); } };
+
+
+/* ============================================================ ws_f.js ============================================================ */
+/* ===== v12.2: overall top-3 drivers + month-end folders (save, then clean slate) ===== */
+STORAGE_KEYS.monthIndex='vms:monthIndex'; if(!STATE.data.monthIndex) STATE.data.monthIndex=[];
+
+/* ---------- top 3 drivers overall ---------- */
+function obScore(x,target){
+  const t=target?Math.min(x.trips/target,1.5):0;
+  const clean=x.viol===0?20:0, noBd=(x.bd||0)===0?20:0;
+  return Math.round(t*60+clean+noBd-x.viol*10-(x.bd||0)*8-(x.down||0)*0.5);
+}
+function overallTop(P,n){
+  const B=bestDriversData(P), tgt=P==='month'||P==='lastmonth'?J_TRUCK_TARGET.month:J_TRUCK_TARGET.week;
+  const L=B.list.filter(x=>x.trips>0).map(x=>Object.assign({},x,{score:obScore(x,tgt),pctT:tgt?Math.round(x.trips/tgt*100):null}));
+  L.sort((a,b)=>b.score-a.score||b.trips-a.trips||a.viol-b.viol);
+  return {R:B.R,top:L.slice(0,n||3),count:L.length,tgt};
+}
+function obList(top){
+  if(!top.length) return '<div class="dim small">No driver has logged trips in this period yet.</div>';
+  const medal=['🥇','🥈','🥉'];
+  return `<div style="display:grid;gap:8px;">${top.map((x,i)=>`<div style="display:flex;gap:10px;align-items:flex-start;"><span style="font-size:20px;line-height:1.2;">${medal[i]||''}</span><div><b>${esc(x.name)}</b> <span class="tag grey">${x.score} pts</span><div class="dim small">${fmt(x.trips)} trips${x.pctT!=null?' ('+x.pctT+'% of target)':''} · ${x.viol?x.viol+' violation'+(x.viol>1?'s':''):'no violations'} · ${x.bd?fmt(x.bd,0)+' breakdown'+(x.bd>1?'s':''):'no breakdowns'}</div></div></div>`).join('')}</div>`;
+}
+function renderOverallBest(){
+  const W=overallTop('lastweek'), M=overallTop('month');
+  const last=(STATE.data.monthIndex||[]).filter(m=>m.top3&&m.top3.length).sort((a,b)=>a.ym<b.ym?1:-1)[0];
+  return `<div class="section-title"><span>Top 3 drivers overall</span><div class="line"></div><span class="dim small">all departments combined</span></div>
+  <div class="grid cols-${last?3:2}" style="margin-bottom:6px;">
+   <div class="card"><div style="font-weight:600;margin-bottom:2px;">Last week</div><div class="dim small mono" style="margin-bottom:8px;">${esc(rangeText(W.R))}</div>${obList(W.top)}</div>
+   <div class="card"><div style="font-weight:600;margin-bottom:2px;">This month so far</div><div class="dim small mono" style="margin-bottom:8px;">${esc(rangeText(M.R))}</div>${obList(M.top)}</div>
+   ${last?`<div class="card"><div style="font-weight:600;margin-bottom:2px;">${esc(mcLabel(last.ym))} — final</div><div class="dim small mono" style="margin-bottom:8px;">saved in the month folder</div>${obList(last.top3)}</div>`:''}
+  </div>
+  <div class="dim small" style="margin-bottom:14px;line-height:1.55;">Points: trips against target (up to 60) + 20 for no safety violations + 20 for no breakdowns, minus 10 per violation, 8 per breakdown and ½ per hour of repair downtime. A driver must have logged trips to be ranked.</div>`;
+}
+
+/* ---------- month-end close ---------- */
+function mcLabel(ym){ const d=new Date(ym+'-01T00:00:00'); return d.toLocaleDateString(undefined,{month:'long',year:'numeric'}); }
+const MC_SIMPLE=['transport','inspections','safety','maintenanceDaily','fuel','maintInspections','cngFills','dieselTrips','tyreInsp','jsas','breakdowns'];
+function mcPlan(monthStart){
+  const D=STATE.data, old={}, pending=r=>r.apprReq&&!r.appr;
+  const isOld=r=>r&&r.date&&r.date<monthStart;
+  MC_SIMPLE.forEach(c=>{ old[c]=(D[c]||[]).filter(isOld); });
+  old.journey=(D.journey||[]).filter(r=>isOld(r)&&!pending(r));
+  old.pretrip=(D.pretrip||[]).filter(r=>isOld(r)&&!pending(r));
+  old.jplans=(D.jplans||[]).filter(r=>isOld(r)&&!pending(r));
+  old.maintenance=(D.maintenance||[]).filter(r=>isOld(r)&&r.status==='Completed');
+  old.defects=(D.defects||[]).filter(r=>isOld(r)&&r.status==='Closed');
+  const keptDef=new Set((D.defects||[]).filter(d=>!old.defects.includes(d)).map(d=>d.id));
+  old.jobcards=(D.jobcards||[]).filter(r=>isOld(r)&&r.status==='Released'&&!keptDef.has(r.defectId));
+  old.rcas=(D.rcas||[]).filter(r=>isOld(r)&&r.status==='Verified'&&!pending(r));
+  old.repairReqs=(D.repairReqs||[]).filter(r=>isOld(r)&&(r.stage==='Approved'||r.stage==='Rejected'));
+  let n=0; Object.keys(old).forEach(c=>{ n+=old[c].length; }); return {old,n};
+}
+function mcSane(monthStart){
+  // never close automatically if the device clock looks wrong
+  let newest=''; ['transport','journey','pretrip','maintenance','fuel'].forEach(c=>(STATE.data[c]||[]).forEach(r=>{ if(r.date&&r.date>newest&&r.date<='9999') newest=r.date; }));
+  if(newest>addDays(todayStr(),1)) return false;                     // records dated in the future: clock is behind
+  if(newest&&addMonthsStr(newest.slice(0,8)+'01',2)<=monthStart) return false;   // a gap of more than a month: ask first
+  return true;
+}
+async function mcClose(manual){
+  if(STATE.mcBusy||STATE.loading||STATE.connectionError||!GAS_CONFIGURED) return;
+  const monthStart=monthStartOf(todayStr()), P=mcPlan(monthStart); if(!P.n) return;
+  if(!manual&&!mcSane(monthStart)){ STATE.mcAsk=true; render(); return; }
+  STATE.mcBusy=true; STATE.mcMsg='Saving the finished month to its folder…'; render();
+  try{
+    const D=STATE.data, byYm={};
+    Object.keys(P.old).forEach(c=>P.old[c].forEach(r=>{ const ym=r.date.slice(0,7); ((byYm[ym]=byYm[ym]||{})[c]=byYm[ym][c]||[]).push(r); }));
+    const prevYm=addMonthsStr(monthStart,-1).slice(0,7); const idx=[...(D.monthIndex||[])];
+    try{ if(!STATE.mix.rows) await mixEnsure(true); }catch(e){}
+    for(const ym of Object.keys(byYm).sort()){
+      const key='vms:arch:'+ym; let obj={ym,data:{},snap:{}};
+      try{ const got=await gasGetAllChunked([key]); if(got[key]){ const j=JSON.parse(got[key]); if(j&&j.data) obj=j; } }catch(e){}
+      Object.keys(byYm[ym]).forEach(c=>{ const have=new Set((obj.data[c]||[]).map(r=>r.id)); obj.data[c]=(obj.data[c]||[]).concat(byYm[ym][c].filter(r=>!have.has(r.id))); });
+      let top3=null; if(ym===prevYm){ try{ top3=overallTop('lastmonth',3).top.map(x=>({name:x.name,trips:x.trips,viol:x.viol,bd:x.bd||0,score:x.score,pctT:x.pctT})); }catch(e){} }
+      obj.snap={vehicles:D.vehicles,targets:STATE.targets,hsseScores:D.hsseScores,hsseLogs:D.hsseLogs,tyres:D.tyres,routePlans:D.routePlans}; obj.savedAt=new Date().toISOString(); if(top3) obj.top3=top3;
+      const str=JSON.stringify(obj); await gasSetChunked(key,str);
+      const back=await gasGetAllChunked([key]); let ok=false; try{ const j=JSON.parse(back[key]); ok=j&&j.ym===ym&&Object.keys(obj.data).every(c=>(j.data[c]||[]).length===obj.data[c].length); }catch(e){}
+      if(!ok) throw new Error('The saved copy of '+mcLabel(ym)+' could not be verified, so nothing was cleared.');
+      const counts={}; let tot=0; Object.keys(obj.data).forEach(c=>{ counts[c]=obj.data[c].length; tot+=counts[c]; });
+      const e={ym,savedAt:obj.savedAt,counts,total:tot,top3:top3||((idx.find(x=>x.ym===ym)||{}).top3)||null}; const i=idx.findIndex(x=>x.ym===ym); if(i>-1) idx[i]=e; else idx.push(e);
+    }
+    D.monthIndex=idx; await persist('monthIndex');
+    // everything is saved and checked — now start the new month clean
+    try{ if(reconcileServices()) await persist('vehicles'); }catch(e){}
+    for(const c of Object.keys(P.old)){ if(!P.old[c].length) continue; const gone=new Set(P.old[c].map(r=>r.id)); D[c]=(D[c]||[]).filter(r=>!gone.has(r.id)); await persist(c); }
+    const cfg=STATE.data.apprCfg||{}; if(cfg.sent){ const keep={}; Object.keys(cfg.sent).forEach(k=>{ if(String(cfg.sent[k])>=monthStart) keep[k]=cfg.sent[k]; }); STATE.data.apprCfg=Object.assign({},cfg,{sent:keep}); await persist('apprCfg'); }
+    STATE.mcMsg=''; STATE.mcAsk=false; STATE.mcBusy=false; showToast('Month saved to its folder — a clean month has started. Open items were carried over.');
+    wsNotify('Month closed',`${Object.keys(byYm).map(mcLabel).join(', ')} saved to Report Folders. New month started.`,3);
+  }catch(e){ console.error('month close',e); STATE.mcBusy=false; STATE.mcMsg=''; STATE.mcErr=String(e&&e.message||e); render(); return; }
+  render();
+}
+function mcBanner(){
+  if(STATE.mcBusy) return `<div class="note warn" style="margin-bottom:12px;">⏳ ${esc(STATE.mcMsg||'Closing the month…')} Please keep this page open.</div>`;
+  if(STATE.mcErr) return `<div class="note warn" style="margin-bottom:12px;">Month close stopped: ${esc(STATE.mcErr)} Nothing was lost. <button class="btn small" data-mc-retry="1">Try again</button></div>`;
+  if(STATE.mcAsk){ const n=mcPlan(monthStartOf(todayStr())).n; return `<div class="note warn" style="margin-bottom:12px;">A new month has started and ${n} records from earlier months are still in the app. Your device date looks unusual, so FleetDesk will not clear them by itself. <button class="btn small primary" data-mc-now="1">Save to folder &amp; start clean</button></div>`; }
+  return '';
+}
+/* ---------- viewing a saved month (Report Folders) ---------- */
+function mcShape(obj){
+  const live=STATE.data, out={}; Object.keys(live).forEach(k=>{ out[k]=Array.isArray(live[k])?[]:(k==='hsseScores'?{weeks:[]}:{}); });
+  Object.assign(out,obj.snap||{}); Object.keys(obj.data||{}).forEach(c=>{ out[c]=obj.data[c]; }); return out;
+}
+function mcSwap(fn){
+  if(!STATE.archData||STATE.tab!=='archive') return fn();
+  const d=STATE.data,t=STATE.targets; STATE.data=STATE.archData.d; STATE.targets=STATE.archData.t||t;
+  try{ return fn(); } finally{ STATE.data=d; STATE.targets=t; }
+}
+async function mcOpen(ym){
+  STATE.archMonth=ym; STATE.archData=null; STATE.mcLoading=true; render();
+  try{ const key='vms:arch:'+ym; const got=await gasGetAllChunked([key]); const obj=JSON.parse(got[key]); STATE.archData={d:mcShape(obj),t:Object.assign({},STATE.targets,(obj.snap||{}).targets||{}),raw:obj}; STATE.archDept=null; STATE.archKind='month'; }
+  catch(e){ STATE.archMonth=null; showToast('Could not open that month folder.'); }
+  STATE.mcLoading=false; render();
+}
+function mcSection(){
+  const idx=[...(STATE.data.monthIndex||[])].sort((a,b)=>a.ym<b.ym?1:-1);
+  if(STATE.archMonth) return `<div class="note" style="margin:0 0 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b>📂 Month folder: ${esc(mcLabel(STATE.archMonth))}</b><span class="dim small">${STATE.mcLoading?'loading…':'saved at month end — everything below shows that month only'}</span><button class="btn small" data-mc-back="1">‹ Back to live reports</button><button class="btn small" data-mc-json="${STATE.archMonth}">Download backup (JSON)</button></div>`;
+  if(!idx.length) return `<div class="note" style="margin:0 0 14px;">📂 <b>Month-end folders:</b> on the first day of each month FleetDesk saves the finished month here and starts the new month clean. Unfinished items (open defects, pending approvals, open jobs) carry over.</div>`;
+  return `<div class="section-title" style="margin-top:0;"><span>📂 Month-end folders</span><div class="line"></div></div>
+  <div class="grid cols-3" style="margin-bottom:16px;">${idx.map(m=>`<div class="card"><div style="font-weight:600;">${esc(mcLabel(m.ym))}</div><div class="dim small">${fmt(m.total||0)} records saved · ${esc(fmtDate((m.savedAt||'').slice(0,10)))}</div>
+   ${m.top3&&m.top3.length?`<div class="dim small" style="margin-top:6px;">🏆 ${m.top3.map(x=>esc(x.name)).join(' · ')}</div>`:''}
+   <div class="flex gap8" style="margin-top:10px;flex-wrap:wrap;"><button class="btn small primary" data-mc-open="${m.ym}">Open reports</button><button class="btn small" data-mc-json="${m.ym}">Backup (JSON)</button></div></div>`).join('')}</div>`;
+}
+async function mcJson(ym){
+  try{ let obj; if(STATE.archData&&STATE.archMonth===ym) obj=STATE.archData.raw; else { const got=await gasGetAllChunked(['vms:arch:'+ym]); obj=JSON.parse(got['vms:arch:'+ym]); }
+    triggerDownload(new Blob([JSON.stringify(obj)],{type:'application/json'}),'FleetDesk_'+ym+'_backup.json'); }catch(e){ showToast('Could not download that month.'); }
+}
+const _rap=renderArchivePage; renderArchivePage=function(){ const h=mcSwap(_rap); return mcBanner()+mcSection()+(STATE.mcLoading?'':h); };
+const _ram=renderArchiveModal; renderArchiveModal=function(){ return mcSwap(_ram); };
+const _rpk=reportPackage; reportPackage=function(){ const a=arguments; return mcSwap(()=>_rpk.apply(null,a)); };
+function mcAttach(){
+  const app=document.getElementById('app'); if(!app) return; const $$=(s,f)=>app.querySelectorAll(s).forEach(f);
+  $$('[data-mc-open]',e=>e.addEventListener('click',()=>mcOpen(e.getAttribute('data-mc-open'))));
+  $$('[data-mc-back]',e=>e.addEventListener('click',()=>{ STATE.archMonth=null; STATE.archData=null; STATE.archDept=null; STATE.archView=null; render(); }));
+  $$('[data-mc-json]',e=>e.addEventListener('click',()=>mcJson(e.getAttribute('data-mc-json'))));
+  $$('[data-mc-retry]',e=>e.addEventListener('click',()=>{ STATE.mcErr=''; mcClose(false); }));
+  $$('[data-mc-now]',e=>e.addEventListener('click',()=>{ if(!wsAuth(['General Manager','MD'],'close the month')) return; if(confirm('Save every record before this month to its folder and clear them from the app? Open items stay.')) mcClose(true); }));
+}
+const _attach2=attachEvents; attachEvents=function(){ _attach2(); try{ mcAttach(); }catch(e){ console.error('mcAttach',e); } };
+/* the banner also shows on the Summary page */
+const _rs=renderSummary; renderSummary=function(){ return mcBanner()+_rs(); };
+setTimeout(()=>{ try{ mcClose(false); }catch(e){} },14000); setInterval(()=>{ try{ mcClose(false); }catch(e){} },3600000);
 
 loadAll();
 </script>
