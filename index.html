@@ -99,6 +99,12 @@
   .tag.red{background:var(--red-bg);color:var(--red);}
   .tag.teal{background:var(--teal-bg);color:var(--teal);}
   .tag.grey{background:var(--border);color:var(--muted);}
+  .tag.blue{background:rgba(74,144,226,.16);color:#6aa9ee;}
+  .ws-sec{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);margin:14px 0 8px;}
+  .oem-card{border:1px solid var(--border);border-left:3px solid var(--teal);border-radius:8px;padding:10px 12px;background:var(--panel);}
+  .oem-h{font-weight:600;font-size:12.5px;margin-bottom:6px;color:var(--teal);}
+  .ws-ins{padding:8px 10px;border-left:3px solid var(--border);margin:6px 0;font-size:13px;line-height:1.5;}
+  .ws-ins.red{border-color:var(--red);}.ws-ins.amber{border-color:var(--amber);}.ws-ins.green{border-color:var(--green);}.ws-ins.blue{border-color:var(--teal);}
 
   .section-title{font-size:14px;font-weight:600;margin:26px 0 10px;display:flex;align-items:center;gap:8px;}
   .section-title .line{flex:1;height:1px;background:var(--border);}
@@ -555,6 +561,7 @@ async function loadAll(opts){
       routeRefs: safeParseJSON(json[STORAGE_KEYS.routeRefs], {}),
       routePlans: safeParseJSON(json[STORAGE_KEYS.routePlans], []),
     };
+    WS_COLLS.forEach(k=>{ newData[k]=safeParseJSON(json[STORAGE_KEYS[k]],[]); }); newData.apprCfg=safeParseJSON(json[STORAGE_KEYS.apprCfg],{});
     normalizeHsseWeeks(newData.hsseScores);
     const newTargets = {...DEFAULT_TARGETS, ...safeParseJSON(json[STORAGE_KEYS.targets], {})};
     if(silent && (STATE.saveSeq||0) !== seq) return;      // something was saved while we were fetching: this snapshot is stale
@@ -1343,7 +1350,7 @@ function renderInspectionsPage(){
   <div class="section-title"><span>Pre-Trip / Post-Trip Checks</span><div class="line"></div></div>
   <div class="grid cols-4">${kpiGrid(ppKpis,ppPrev,PERIOD_WORD[icmp])}</div>
   <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0;border-left:3px solid var(--teal);">
-    <div><div style="font-weight:600;">Linked to Journey Management</div><div class="dim small">Each check is matched to that truck's trips for the same day. Failed checks can be raised straight into Maintenance repair jobs.</div></div>
+    <div><div style="font-weight:600;">Linked to Journey Management</div><div class="dim small">Each check is matched to that truck's trips for the same day. Defects found go straight into the Fault Log with a job card.</div></div>
     <button class="btn small" data-goto="journey">Open Journey Mgmt →</button>
   </div>
   ${prePostForms()}
@@ -2889,7 +2896,7 @@ function renderShell(){
       ${STATE.connectionError? `<div class="tag red" style="display:block;margin-top:8px;padding:8px 10px;white-space:normal;line-height:1.4;">${STATE.connectionError}</div>` : ''}
     </aside>
     <main id="main">
-      ${STATE.tab==='summary'?renderSummary(): STATE.tab==='daily'?renderDailyInputs(): STATE.tab==='journey'?renderJourneyPage(): STATE.tab==='inspections'?renderInspectionsPage(): STATE.tab==='maintenance'?regDupCard()+renderMaintenancePage(): STATE.tab==='costkm'?renderCostKmPage(): STATE.tab==='fuel'?renderFuelPage(): STATE.tab==='reports'?renderReportsPage(): STATE.tab==='monthly'?renderMonthlyPage(): STATE.tab==='archive'?renderArchivePage(): STATE.tab==='live'?renderLivePage(): STATE.tab==='port'?renderPortPage(): (STATE.tab==='transport'?regDupCard():'')+renderDeptPage(STATE.tab)}
+      ${WS_TABS[STATE.tab]?WS_TABS[STATE.tab]():STATE.tab==='summary'?renderSummary(): STATE.tab==='daily'?renderDailyInputs(): STATE.tab==='journey'?renderJourneyPage(): STATE.tab==='inspections'?renderInspectionsPage(): STATE.tab==='maintenance'?regDupCard()+renderMaintenancePage(): STATE.tab==='costkm'?renderCostKmPage(): STATE.tab==='fuel'?renderFuelPage(): STATE.tab==='reports'?renderReportsPage(): STATE.tab==='monthly'?renderMonthlyPage(): STATE.tab==='archive'?renderArchivePage(): STATE.tab==='live'?renderLivePage(): STATE.tab==='port'?renderPortPage(): (STATE.tab==='transport'?regDupCard():'')+renderDeptPage(STATE.tab)}
     </main>
   </div>
   ${renderSettingsModal()}
@@ -2897,6 +2904,7 @@ function renderShell(){
   ${renderTruckModal()}
   ${renderEditModal()}
   ${renderBulkModal()}
+  ${wsModals()}
   ${renderCngBulkModal()}
   ${renderDieselModal()}
   ${renderArchiveModal()}
@@ -3004,7 +3012,7 @@ function attachEvents(){
       for(const [k,v] of fd.entries()){ rec[k]=v; }
       if(dept==='transport') normalizeCombo(rec);
       let jobs = 0;
-      if(dept==='pretrip' && form.hasAttribute('data-check-form')) finalizeCheck(rec);
+      if(dept==='pretrip' && form.hasAttribute('data-check-form')){ finalizeCheck(rec); raiseDefectsFromCheck(rec); }
       if(dept==='maintInspections') jobs = finalizeMaintInspection(rec);
       if(dept==='maintenance') prepMaintRec(rec);
       let issueAdded=false; if(dept==='fuel') issueAdded=finalizeFuelEntry(rec);
@@ -3016,6 +3024,7 @@ function attachEvents(){
       if(dateEl) dateEl.value = todayStr();
       const regChanged = dept==='maintenance' && reconcileServices();
       await persist(dept);
+      if(wsDirty.size) await wsFlush();
       if(regChanged) await persist('vehicles');
       if(jobs) await persist('maintenance');
       showToast(jobs ? `Inspection saved — ${jobs} repair job(s) raised in Maintenance.` : (dept==='pretrip' && rec.result==='Fail') ? 'Check saved with defects — raise it to Maintenance from the log.' : (regChanged ? 'Entry saved — the truck registry was updated with the new service.' : 'Entry saved and synced.'));
@@ -5528,7 +5537,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v11.7 · 28 Oct 2026';
+const APP_VERSION='v12.0 · 29 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6857,6 +6866,716 @@ async function applyBreakdownSeed(){
   STATE.data.seeds=Object.assign({},STATE.data.seeds||{},{bd_zero:{at:new Date().toISOString()}});
   await persistTargets(); await persist('seeds');
 }
+
+
+/* ============================================================ ws_a.js ============================================================ */
+/* ===== v12: Workshop & Approvals — infrastructure, OEM guide, defect reports, new pre-trip form (SKB VMS manual) ===== */
+const WS_COLLS=['defects','jobcards','breakdowns','rcas','tyres','tyreInsp','jsas','jplans','repairReqs'];
+WS_COLLS.forEach(k=>{ STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
+STORAGE_KEYS.apprCfg='vms:apprCfg'; if(!STATE.data.apprCfg) STATE.data.apprCfg={};
+STATE.wsView=STATE.wsView||'kpi'; STATE.tyreView=STATE.tyreView||'register'; STATE.apprView=STATE.apprView||'pending';
+const WS_ROLES=['Yard Admin','Maintenance Manager','Logistics Manager','General Manager','MD','Viewer'];
+function myRole(){ try{ return localStorage.getItem('fd_role')||'Viewer'; }catch(e){ return 'Viewer'; } }
+function setRole(r){ try{ localStorage.setItem('fd_role',r); }catch(e){} }
+function wsHash(s){ let h=5381; s=String(s)+'|fleetdesk'; for(let i=0;i<s.length;i++) h=((h<<5)+h+s.charCodeAt(i))|0; return String(h); }
+/* returns true if the current person may act as `roles`; asks for the PIN when one is set */
+function wsAuth(roles,what){
+  const me=myRole();
+  if(roles.indexOf(me)<0){ showToast(`Only ${roles.join(' or ')} can ${what}. Change “You are” at the top of this page.`); return false; }
+  const pin=((STATE.data.apprCfg||{}).pins||{})[me];
+  if(pin){ const p=prompt(`Enter the ${me} PIN to ${what}`); if(p===null) return false; if(wsHash(p)!==pin){ showToast('Wrong PIN.'); return false; } }
+  return true;
+}
+function wsWho(){ const n=(STATE.data.apprCfg||{}).names||{}; return (n[myRole()]?n[myRole()]+' · ':'')+myRole(); }
+function wsRef(coll,prefix){ let mx=0; (STATE.data[coll]||[]).forEach(r=>{ const m=String(r.ref||'').match(/(\d+)$/); if(m) mx=Math.max(mx,parseInt(m[1],10)); }); return prefix+'-'+String(mx+1).padStart(4,'0'); }
+const wsDirty=new Set();
+async function wsFlush(){ const ks=[...wsDirty]; wsDirty.clear(); for(const k of ks) await persist(k); }
+function wsNotify(title,msg,prio){
+  const t=(STATE.data.apprCfg||{}).topic; if(!t) return;
+  try{ fetch('https://ntfy.sh/',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({topic:t,title:title,message:msg,priority:prio||3,tags:['truck'],click:location.href.split('#')[0]})}).catch(()=>{}); }catch(e){}
+}
+function wsTag(t,c){ return `<span class="tag ${c||'grey'}">${esc(t)}</span>`; }
+function wsDt(r){ return esc(fmtDate(r.date))+(r.time?' <span class="dim">'+esc(r.time)+'</span>':''); }
+function wsSys2comp(s){ return {'Brake':'Brakes','Steering':'Suspension','Tyre/wheel':'Tyres / Wheels','Engine':'Engine','Electrical':'Electrical','Body/load':'Body / Chassis'}[s]||'Other'; }
+function wsComp2sys(c){ return {'Brakes':'Brake','Suspension':'Steering','Tyres / Wheels':'Tyre/wheel','Engine':'Engine','Cooling System':'Engine','Gearbox / Transmission':'Other','Electrical':'Electrical','Body / Chassis':'Body/load','Hydraulics':'Body/load'}[c]||'Other'; }
+const WS_SYSTEMS=['Brake','Steering','Tyre/wheel','Engine','Electrical','Body/load','Other'];
+
+/* ---------- HOWO NX430 CNG side-tipping truck: OEM-aligned routine + corrective guidance ----------
+   Indicative guidance for HOWO NX430-class CNG heavy tippers. Always confirm intervals, torques and part numbers
+   against the Sinotruk / HOWO operator and service manual and your authorised dealer. */
+const OEM_NOTE='Indicative OEM-aligned guidance for the HOWO NX430 CNG side tipper — confirm intervals, torques and part numbers in the Sinotruk/HOWO service manual or with your authorised dealer before work.';
+const OEM_ROUTINE=[
+  ['Every trip (driver)','Walk-round per the daily inspection form: tyres & wheel nuts, lights, leaks, brake air pressure, cab warnings. CNG: smell/hiss check at cylinders, lines and valves; gas gauge and shut-off valve operation.','Any gas smell, hissing or frost on a fitting = stop, ventilate, no ignition sources, OUT OF SERVICE.'],
+  ['Weekly','Tyre pressures (cold) and tread depth; battery terminals; coolant, engine oil, washer and power-steering levels; grease tipping hinge, side-tip cylinder pins and fifth-wheel/suspension points; drain air tanks.','Record tyre readings in the Tyre Register.'],
+  ['10,000 km','Engine oil and filter (use low-ash gas-engine oil approved for the CNG engine); inspect CNG lines, fittings, regulator and cylinder brackets with an approved leak detector; air filter restriction check; belts; tipping hoist hoses and pins.','Do not use naked flames or open lighting near the gas system.'],
+  ['20,000 km','Gas filter / dryer element service; air filter service; clean/inspect breather; tighten wheel nuts to spec; brake lining thickness and slack-adjuster check.','Torque wheel nuts after tyre work and re-torque after the first trip.'],
+  ['30,000–40,000 km','Spark plugs and ignition coils inspection / replacement (spark-ignited gas engine); coolant condition; propshaft and U-joint play; steering joints and king-pin play.','Misfire or hard starting often points to plugs/coils or gas pressure regulation.'],
+  ['60,000 km','Gearbox oil and rear-axle (hub-reduction) oil change; clutch adjustment/wear check; brake drums/linings measurement; suspension bushes, spring hangers and U-bolts re-torque.','Magnetic plug debris = investigate before refilling.'],
+  ['Annual / per regulation','CNG cylinder periodic inspection and expiry check by an accredited body; pressure regulator and solenoid valve test; road-worthiness / VIO inspection; fire extinguisher service.','Never use a cylinder past its test date.'],
+];
+const OEM_GUIDE={
+ 'Brakes':{why:'Brake air system, linings and drums drive the most critical safety defects on tippers.',check:['Brake lining/drum thickness and slack-adjuster stroke on all axles','Air leaks (pressure drop test), compressor, air dryer and governor','Brake chambers, relay valves and parking-brake spring brakes'],fix:'Replace linings in axle sets (never one side only); renew worn drums; fix every air leak; re-test on a brake tester or controlled road test before release.',safety:'Critical — tag OUT OF SERVICE until QC release.',routine:'Measure linings every 20,000 km.'},
+ 'Tyres / Wheels':{why:'Overloaded tippers on poor roads see cuts, uneven wear and heat damage.',check:['Cold pressure vs placard, tread depth (replace below 3 mm), sidewall cuts/bulges','Wheel nuts torque, rim cracks, studs, dual spacing and matching','Alignment, toe and suspension condition if wear is uneven'],fix:'Replace damaged tyres in matched pairs on dual axles where possible; correct alignment and load distribution; re-torque nuts after fitting.',safety:'Critical for bulge, cord exposure, loose or missing nuts, wheel-off risk.',routine:'Weekly pressure/tread; rotate at 20,000–30,000 km.'},
+ 'Engine':{why:'On the CNG gas engine most faults are ignition, gas supply/regulation or air intake.',check:['Fault codes (diagnostic tool), spark plugs/coils, gas filter and pressure regulator','CNG lines, fittings and cylinder valves with an approved leak detector','Air filter, intercooler hoses, oil level/pressure and coolant temperature'],fix:'Diagnose with the OEM tool before parts-swapping; repeat misfires or power loss need the gas filter, plugs, coils and regulator checked in that order; use only the OEM-approved low-ash gas-engine oil.',safety:'Gas leak = OUT OF SERVICE. No ignition sources while testing.',routine:'Oil/filter every 10,000 km; plugs 30,000–40,000 km.'},
+ 'Cooling System':{why:'Overheating damages gas engines quickly.',check:['Coolant level and condition, radiator core and cap','Hoses, clamps and water pump weep hole','Fan clutch / fan drive and thermostat'],fix:'Pressure-test the system; flush and renew coolant to spec; replace weeping pump/hoses; do not run the engine hot.',safety:'Do not open the cap hot.',routine:'Check coolant weekly.'},
+ 'Electrical':{why:'Electrical faults raise road-safety (lights) and no-start risks.',check:['Battery voltage/terminals, alternator output, earth straps','Lamp circuits, relays, fuses and connector corrosion','Gas solenoid / ECU power and sensor wiring'],fix:'Clean and tighten terminals, repair chafed harnesses with sealed connectors, fix the cause of blown fuses rather than up-rating them.',safety:'Isolate the battery before work.',routine:'Check terminals weekly.'},
+ 'Gearbox / Transmission':{why:'Heavy start/stop loading wears clutch and gearbox.',check:['Gearbox and axle oil level, leaks and metal debris on magnetic plug','Clutch free play, release bearing and linkage','Propshaft, U-joints and centre bearing play'],fix:'Change gearbox/axle oil per schedule with the OEM grade; replace clutch as a set; renew U-joints in sets; check driver gear-shift habits.',safety:'Chock wheels and support the vehicle when under it.',routine:'Oil change at 60,000 km.'},
+ 'Suspension':{why:'Overload and rough roads loosen hangers and crack leaf springs.',check:['Leaf springs, centre bolts, U-bolts and hanger brackets','Shock absorbers, bushes and torque rods','Steering joints, drag link and king-pin play'],fix:'Replace cracked springs in pairs; renew bushes and re-torque U-bolts; align after repair.',safety:'Steering play or broken spring = critical.',routine:'Inspect every 20,000 km.'},
+ 'Hydraulics':{why:'The side-tipping hoist works hard and leaks at hoses and seals.',check:['Hoist/side-tip cylinder seals, hoses and fittings for leaks','Hydraulic oil level and contamination, PTO and pump','Hinge pins, bushes and body locks'],fix:'Replace leaking hoses/seals with rated parts; clean/renew oil and filter; grease pins; test the lift under no load first.',safety:'Never work under a raised body without mechanical props.',routine:'Grease weekly; inspect hoses every 10,000 km.'},
+ 'Body / Chassis':{why:'Body and chassis cracks grow under overload.',check:['Chassis rails, cross-members and body hinges for cracks','Doors/tailgate locks, mudguards, mirrors and glass','Fifth-wheel / coupling (if used) and landing gear'],fix:'Stop-drill and plate cracks per OEM repair guidance, or replace the member; do not weld on a gas vehicle until the system is isolated and vented.',safety:'Hot work needs a permit and a gas-system isolation.',routine:'Inspect at every service.'},
+ 'Other':{why:'General defect.',check:['Confirm the symptom with the driver and reproduce it','Check service history for repeats'],fix:'Diagnose to root cause before replacing parts and record the cause on the job card.',safety:'',routine:''},
+};
+function oemInsight(comp){ return OEM_GUIDE[comp]||OEM_GUIDE.Other; }
+function oemCard(comp,compact){
+  const g=oemInsight(comp); if(!g) return '';
+  return `<div class="oem-card"><div class="oem-h">OEM insight · ${esc(comp||'General')}</div>
+    <div class="small" style="margin-bottom:6px;">${esc(g.why)}</div>
+    <div class="small"><b>Check first:</b> ${g.check.map(esc).join(' · ')}</div>
+    <div class="small" style="margin-top:4px;"><b>Recommended repair:</b> ${esc(g.fix)}</div>
+    ${g.routine?`<div class="small" style="margin-top:4px;"><b>Routine:</b> ${esc(g.routine)}</div>`:''}
+    ${g.safety?`<div class="small" style="margin-top:4px;color:var(--amber);"><b>Safety:</b> ${esc(g.safety)}</div>`:''}
+    ${compact?'':`<div class="dim small" style="margin-top:6px;">${esc(OEM_NOTE)}</div>`}</div>`;
+}
+
+/* ---------- start date: only defects raised from now are mirrored in the fault log ---------- */
+function wsStart(){ const s=(STATE.data.seeds||{}).ws_start; return s&&s.date?s.date:todayStr(); }
+async function wsSeed(){ const sd=STATE.data.seeds||{}; if(sd.ws_start) return; STATE.data.seeds=Object.assign({},sd,{ws_start:{date:todayStr()}}); await persist('seeds'); }
+
+/* ---------- defect report + job card (Appendix B / D) ---------- */
+function raiseDefect(o){
+  const D=STATE.data, sev=o.severity||'Major';
+  const d={id:uid(),ref:wsRef('defects','FR'),date:o.date||todayStr(),time:o.time||nowTime(),vehicleId:o.vehicleId,trailer:o.trailer||'',location:o.location||'',reportedBy:o.reportedBy||'',phone:o.phone||'',system:o.system||'Other',desc:o.desc||'',immediate:o.immediate||'',severity:sev,
+    vehStatus:o.vehStatus||(sev==='Critical'?'OUT OF SERVICE':'Awaiting inspection'),notifiedName:o.notifiedName||'',notifiedTime:o.notifiedTime||'',source:o.source||'Manual',srcId:o.srcId||'',status:'Open'};
+  if(o.mId) d.mId=o.mId;
+  else if(!o.noMaint){
+    const m={id:uid(),date:d.date,vehicleId:d.vehicleId,type:o.mType||'Breakdown',component:o.component||wsSys2comp(d.system),status:'Open',defectId:d.id,notes:`${d.ref}: ${d.desc}`};
+    if(o.srcId){ m.source=o.source; m.srcId=o.srcId; if(o.srcItem) m.srcItem=o.srcItem; } else m.kind='workshop';
+    D.maintenance=[...D.maintenance,m]; d.mId=m.id; wsDirty.add('maintenance');
+  }
+  const jc={id:uid(),ref:wsRef('jobcards','JC'),defectId:d.id,vehicleId:d.vehicleId,date:d.date,complaint:o.complaint||d.desc,status:'Open'};
+  d.jobId=jc.id; D.defects=[...D.defects,d]; D.jobcards=[...D.jobcards,jc]; wsDirty.add('defects'); wsDirty.add('jobcards');
+  if(d.vehStatus==='Restricted (authorized)') d.apprReq='1';
+  wsNotify(sev==='Critical'?'🔴 CRITICAL defect — truck out of service':'Defect reported',`${vehicleLabel(d.vehicleId)} · ${d.system} · ${d.desc.slice(0,90)} (${d.ref})`,sev==='Critical'?5:3);
+  return d;
+}
+/* maintenance jobs raised elsewhere (inspection auto-raise, old "Raise job" button) are mirrored into the fault log */
+function wsLinkMaint(){
+  const st=wsStart(); let n=0;
+  (STATE.data.maintenance||[]).forEach(m=>{
+    if(m.defectId||!m.srcId||m.date<st||!m.vehicleId) return;
+    const sev=(m.source==='Inspection'||/critical/i.test(m.notes||''))?'Major':'Major';
+    const d=raiseDefect({vehicleId:m.vehicleId,date:m.date,system:wsComp2sys(m.component),desc:m.notes||m.component||'Defect',severity:sev,source:m.source||'Inspection',srcId:m.srcId,mId:m.id,reportedBy:'Inspection',component:m.component});
+    m.defectId=d.id; n++;
+  });
+  return n;
+}
+/* hook: any save of maintenance mirrors new inspection-raised jobs into the fault log */
+const _persist0=persist;
+persist=async function(k){
+  if(k==='maintenance'){ try{ if(wsLinkMaint()){ wsDirty.add('defects'); wsDirty.add('jobcards'); setTimeout(wsFlush,50); } }catch(e){ console.error(e); } }
+  return _persist0(k);
+};
+
+/* ---------- Pre-trip / post-trip form: Appendix A ---------- */
+const OLD_ITEMS=PRE_ITEMS.concat(POST_ITEMS);
+PRE_ITEMS.length=0; POST_ITEMS.length=0;
+[
+ ['docs','Documents, permit, licence confirmation and journey plan',0,'Other','Other'],
+ ['cab','Cab: seatbelt, horn, dashboard, mirrors, windscreen, wipers, washer',0,'Body / Chassis','Body/load'],
+ ['safetykit','Fire extinguisher, triangles, first-aid kit, PPE, communication device',0,'Other','Other'],
+ ['lights','Lights, indicators, hazard lamps, brake lamps and reflectors',0,'Electrical','Electrical'],
+ ['tyres','Tyres, wheels, wheel nuts, rims, valve caps, tread and dual spacing',1,'Tyres / Wheels','Tyre/wheel'],
+ ['fluids','Leaks, fluid levels / indicators, fuel / gas cap, battery condition / security',0,'Engine','Engine'],
+ ['brakes','Steering, service brake, parking brake, air pressure / warnings',1,'Brakes','Brake'],
+ ['coupling','Coupling / kingpin / fifth wheel, air and electrical lines, landing legs',0,'Other','Other'],
+ ['load','Load, doors, tarpaulin, restraint, tipper body and cargo security',0,'Hydraulics','Body/load'],
+ ['damage','Damage, loose parts, abnormal noise / vibration / smell and new warning lamps',0,'Other','Other'],
+].forEach(i=>{ PRE_ITEMS.push(i); POST_ITEMS.push(i); });
+function chkLabel(type,k){ const i=PRE_ITEMS.find(x=>x[0]===k)||OLD_ITEMS.find(x=>x[0]===k); return i?i[1]:k; }
+function finalizeCheck(rec){
+  const bad=PRE_ITEMS.filter(([k])=>rec['c_'+k]==='Defect').map(i=>i[0]);
+  const crit=PRE_ITEMS.filter(i=>i[2]&&bad.indexOf(i[0])>-1).length;
+  Object.keys(rec).forEach(k=>{ if(k.indexOf('c_')===0) delete rec[k]; });
+  if(rec.type!=='Pre-Trip') delete rec.alcoholTest;
+  const alcFail=rec.type==='Pre-Trip'&&rec.alcoholTest==='No';
+  rec.result=(bad.length||alcFail)?'Fail':'Pass';
+  if(bad.length) rec.defects=bad.join(',');
+  if(crit&&(!rec.vehStatus||rec.vehStatus==='Roadworthy')) rec.vehStatus='OUT OF SERVICE';   // status-tag rule: a critical defect means out of service
+  if(alcFail) rec.apprReq='1';
+  if(!rec.vehStatus) rec.vehStatus='Roadworthy';
+  rec.critical=String(crit);
+  return compactRec(rec);
+}
+/* after a check is saved, each defect becomes a fault report + job card automatically */
+function raiseDefectsFromCheck(rec){
+  const refs=[]; const bad=splitKeys(rec.defects);
+  bad.forEach(k=>{
+    const it=PRE_ITEMS.find(x=>x[0]===k); if(!it) return;
+    const d=raiseDefect({vehicleId:rec.vehicleId,date:rec.date,time:rec.time,trailer:rec.trailer,reportedBy:rec.driverName,system:it[4],desc:`${rec.type} defect — ${it[1]}`+(rec.notes?`: ${rec.notes}`:''),severity:it[2]?'Critical':'Major',vehStatus:rec.vehStatus,source:rec.type,srcId:rec.id,srcItem:k,component:it[3],immediate:rec.vehStatus==='OUT OF SERVICE'?'Truck tagged OUT OF SERVICE':''});
+    refs.push(d.ref);
+  });
+  if(refs.length){ rec.defectRefs=refs.join(', '); rec.raised='1'; }
+  if(rec.apprReq) wsNotify('⚠ Driver failed alcohol test',`${rec.driverName||'Driver'} · ${vehicleLabel(rec.vehicleId)} — management review needed in Approvals`,5);
+  return refs.length;
+}
+function prePostForm(type){
+  const pre=type==='Pre-Trip';
+  return `<details class="form-card" style="margin-top:12px;"><summary>Daily ${type} inspection — log</summary>
+    <form data-log-form="pretrip" data-check-form="${type}">
+      <input type="hidden" name="type" value="${type}">
+      <div class="ws-sec">Trip and vehicle details</div>
+      <div class="form-grid">
+        <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+        <div><label>Time</label><input type="time" name="time" value="${nowTime()}"></div>
+        <div><label>Truck fleet no. / registration</label><select name="vehicleId" required>${vehicleOptions()}</select></div>
+        <div><label>Trailer no. / registration</label><input type="text" name="trailer" placeholder="If any"></div>
+        <div><label>Driver name</label><input type="text" name="driverName" required placeholder="e.g. John Doe"></div>
+        <div><label>Employee ID</label><input type="text" name="driverId"></div>
+        <div><label>Odometer / engine hours</label><input type="number" name="odometer" step="0.1" min="0"></div>
+        <div><label>Route / dispatch reference</label><select name="route">${routeSelectOptions('— Route (optional) —')}</select></div>
+        ${pre?`<div><label>Does the driver pass the alcohol test?</label><select name="alcoholTest" required><option value="">— Select —</option><option value="Yes">Yes — passed</option><option value="No">No — failed</option></select></div>`:''}
+      </div>
+      <div class="ws-sec">${type} checks — tick OK or record a defect</div>
+      <div class="chk-grid">${checklistRows(PRE_ITEMS,'c_',['OK','Defect','N/A'])}</div>
+      <div class="form-grid"><div style="grid-column:1/-1"><label>Defect description / comment</label><input type="text" name="notes" placeholder="Describe any defect — it goes straight into the Fault Log"></div></div>
+      <div class="ws-sec">Declaration</div>
+      <div class="form-grid">
+        <div><label>Vehicle status</label><select name="vehStatus"><option>Roadworthy</option><option>Restricted (authorized)</option><option>OUT OF SERVICE</option></select></div>
+        <div><label>Supervisor acknowledgement</label><input type="text" name="supervisor" placeholder="Supervisor name"></div>
+        <div style="grid-column:1/-1;"><label class="chk-opt" style="display:inline-flex;gap:8px;align-items:center;"><input type="checkbox" name="driverSigned" value="Yes" required> I confirm this inspection is accurate (driver signature)</label></div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn primary">Submit ${type} inspection</button><span class="dim small">A defect creates a Defect Report and Job Card automatically. A critical defect (tyres, brakes) puts the truck OUT OF SERVICE until QC release.</span></div>
+    </form></details>`;
+}
+function prePostForms(){ return prePostForm('Pre-Trip')+prePostForm('Post-Trip'); }
+function checkLogTable(limit){
+  const all=[...STATE.data.pretrip].sort((a,b)=>(a.date<b.date?1:a.date>b.date?-1:String(b.time||'').localeCompare(String(a.time||''))));
+  const rows=all.slice(0,limit||100);
+  return `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Type</th><th>Alcohol</th><th>Result</th><th>Status</th><th>Defects</th><th>Fault ref</th><th></th></tr></thead>
+  <tbody>${rows.length?rows.map(r=>{ const d=splitKeys(r.defects).map(k=>chkLabel(r.type,k));
+    const st=r.vehStatus==='OUT OF SERVICE'?wsTag('OUT OF SERVICE','red'):r.vehStatus&&r.vehStatus.indexOf('Restricted')===0?wsTag('Restricted','amber'):r.vehStatus?wsTag('Roadworthy','green'):'—';
+    return `<tr><td>${wsDt(r)}</td><td>${esc(vehicleLabel(r.vehicleId))}</td><td style="white-space:normal;">${esc(r.driverName||'—')}</td><td>${esc(r.type)}</td><td>${r.alcoholTest==='No'?wsTag('FAILED','red'):r.alcoholTest==='Yes'?wsTag('Passed','green'):'<span class="dim">—</span>'}</td><td>${wsTag(r.result,r.result==='Pass'?'green':'red')}</td><td>${st}</td>
+    <td style="white-space:normal;min-width:180px;">${d.length?esc(d.join('; ')):'<span class="dim">None</span>'}${r.notes?'<div class="dim small">'+esc(r.notes)+'</div>':''}</td>
+    <td>${r.defectRefs?esc(r.defectRefs):(r.result==='Fail'&&r.defects&&!r.raised?`<button class="btn small" data-raise-check="${r.id}">Raise</button>`:'—')}</td><td><button class="btn ghost small" data-delete="pretrip:${r.id}">Delete</button></td></tr>`; }).join(''):`<tr class="empty-row"><td colspan="10">No inspections logged yet.</td></tr>`}</tbody></table></div>${all.length>rows.length?`<div class="dim small" style="margin-top:6px;">Showing the latest ${rows.length} of ${all.length} inspections.</div>`:''}`;
+}
+
+/* ============================================================ ws_b.js ============================================================ */
+/* ===== Workshop tab: KPIs · Fault log · Job cards & QC · Roadside breakdowns · OEM guide ===== */
+const WS_STATUS_TAG={Open:'amber','In workshop':'amber','QC pending':'blue',Closed:'green'};
+function wsField(o){
+  const [n,l,t,opts,req,ph,span]=o; const r=req?' required':'';
+  let c;
+  if(t==='select') c=`<select name="${n}"${r}>${(opts||[]).map(x=>{ const v=Array.isArray(x)?x[0]:x, lab=Array.isArray(x)?x[1]:x; return `<option value="${esc(v)}">${esc(lab)}</option>`; }).join('')}</select>`;
+  else if(t==='truck') c=`<select name="${n}"${r}>${vehicleOptions()}</select>`;
+  else if(t==='textarea') c=`<textarea name="${n}" rows="2"${r} placeholder="${esc(ph||'')}"></textarea>`;
+  else c=`<input type="${t||'text'}" name="${n}"${r} placeholder="${esc(ph||'')}"${t==='number'?' step="any" min="0"':''}${t==='date'?` value="${todayStr()}"`:''}${t==='time'?` value="${nowTime()}"`:''}>`;
+  return `<div${span?' style="grid-column:1/-1"':''}><label>${esc(l)}</label>${c}</div>`;
+}
+function wsForm(coll,title,fields,hook,btn,open){
+  return `<details class="form-card"${open?' open':''}><summary>${esc(title)}</summary><form data-ws-form="${coll}" data-ws-hook="${hook||''}"><div class="form-grid">${fields.map(wsField).join('')}</div><div class="form-actions"><button class="btn primary" type="submit">${esc(btn||'Save')}</button></div></form></details>`;
+}
+function wsHead(title,sub,extra){ return `<div class="topbar"><div><h1>${esc(title)}</h1><div class="sub">${esc(sub)}</div></div><div class="topbar-right">${extra||''}${syncBadge()}</div></div>`; }
+function wsTabs(attr,cur,list){ return `<div class="tabs" style="margin-bottom:16px;flex-wrap:wrap;">${list.map(([k,l])=>`<button data-${attr}="${k}" class="${cur===k?'active':''}">${l}</button>`).join('')}</div>`; }
+function wsEmpty(t){ return `<div class="card dim" style="padding:22px;text-align:center;">${esc(t)}</div>`; }
+function wsDays(n){ return addDays(todayStr(),-n); }
+const wsVeh=vid=>esc(vehicleLabel(vid));
+
+/* ---------- KPI board ---------- */
+function wsKm(from){
+  let km=0; (STATE.data.fuel||[]).forEach(r=>{ if(r.date>=from){ const c=fuelCalc(r); km+=c.dist||0; } });
+  return km;
+}
+function wsRepeats(days){
+  const from=wsDays(days), rows=(STATE.data.maintenance||[]).filter(m=>m.type!=='Scheduled'&&m.vehicleId&&m.date>=from);
+  const seen={}, rep=[]; rows.sort((a,b)=>a.date<b.date?-1:1).forEach(m=>{ const k=m.vehicleId+'|'+(m.component||'Other'); if(seen[k]&&(Date.parse(m.date)-Date.parse(seen[k]))/864e5<=60) rep.push(m); seen[k]=m.date; });
+  return {rows,rep};
+}
+function wsKpis(){
+  const D=STATE.data, fleet=Math.max(FLEET_SIZE, (D.vehicles||[]).length)||27, from30=wsDays(30), from7=wsDays(7), V=D.vehicles||[];
+  const oos=new Set(), cause={}, cls={};
+  (D.defects||[]).filter(d=>d.status!=='Closed'&&d.vehStatus==='OUT OF SERVICE').forEach(d=>{ oos.add(d.vehicleId); cause[d.system]=(cause[d.system]||0)+1; });
+  (D.maintenance||[]).filter(m=>m.status!=='Completed'&&m.type!=='Scheduled'&&m.kind!=='workshop'&&!m.srcId&&m.vehicleId).forEach(m=>{ if(!oos.has(m.vehicleId)){ oos.add(m.vehicleId); cause['Roadside breakdown']=(cause['Roadside breakdown']||0)+1; } });
+  V.forEach(v=>{ const c=v.model||'Unclassified'; (cls[c]=cls[c]||{n:0,off:0}).n++; if(oos.has(v.id)) cls[c].off++; });
+  const avail=fleet?(fleet-oos.size)/fleet:null;
+  const st=V.map(v=>maintenanceStatusForVehicle(v).status); const pmOk=V.length?st.filter(s=>s!=='red').length/V.length:null;
+  const bd=(D.maintenance||[]).filter(m=>isRoadBd(m)&&m.date>=from30); const km=wsKm(from30), rate=km>0?bd.length/km*1e5:null;
+  const bySys={}, byVeh={}; bd.forEach(m=>{ const s=m.component||'Other'; bySys[s]=(bySys[s]||0)+1; byVeh[vehicleLabel(m.vehicleId)]=(byVeh[vehicleLabel(m.vehicleId)]||0)+1; });
+  const rp=wsRepeats(90), repRate=rp.rows.length?rp.rep.length/rp.rows.length:null;
+  const tv=new Set(); (D.journey||[]).concat(D.transport||[]).forEach(r=>{ if(r.date>=from7&&r.vehicleId) tv.add(r.vehicleId+'|'+r.date); });
+  const done=[...tv].filter(k=>{ const [v,d]=k.split('|'); return dayChecks(v,d).some(c=>c.type==='Pre-Trip'); }).length;
+  const insp=tv.size?done/tv.size:null;
+  const pre7=(D.pretrip||[]).filter(r=>r.date>=from7&&r.result==='Fail'&&r.defects); const refd=pre7.filter(r=>r.defectRefs||r.raised).length; const dq=pre7.length?refd/pre7.length:null;
+  const maintCost={planned:0,unplanned:0}; (D.maintenance||[]).filter(m=>m.date>=from30).forEach(m=>{ maintCost[m.type==='Scheduled'?'planned':'unplanned']+=num(m.cost); });
+  const reqCost=(D.repairReqs||[]).filter(r=>r.stage==='Approved'&&(r.mdAt||r.date)>=from30).reduce((a,r)=>a+num(r.total),0);
+  const recov=(D.breakdowns||[]).filter(b=>b.date>=from30).reduce((a,b)=>a+num(b.recoveryCost),0);
+  const tyreCost=wsTyreCosts(from30); const unplanned=maintCost.unplanned+reqCost+recov;
+  const crit=(D.defects||[]).filter(d=>d.date>=from30&&d.severity==='Critical').length;
+  const wheelOff=(D.breakdowns||[]).filter(b=>b.date>=from30&&b.wheelOff==='Yes').length;
+  const tyreFail=(D.breakdowns||[]).filter(b=>b.date>=from30&&b.system==='Tyre/wheel').length+(D.tyreInsp||[]).filter(t=>t.date>=from30&&/Failed|Bulge|Puncture/.test(t.condition||'')).length;
+  const shop=(D.rcas||[]).filter(r=>r.date>=from30&&r.trigger==='Workshop incident').length+(D.jsas||[]).filter(j=>j.date>=from30&&j.changed==='Yes').length;
+  const road=(D.breakdowns||[]).filter(b=>b.date>=from30&&b.incident==='Yes').length+sumBy((D.safety||[]).filter(s=>s.date>=from30),'incidents');
+  const overdue=(D.defects||[]).filter(d=>d.status!=='Closed'&&d.severity!=='Minor'&&daysAgo(d.date)>(d.severity==='Critical'?1:5)).length;
+  return {fleet,oos:oos.size,avail,cause,cls,pmOk,pmBad:st.filter(s=>s==='red').length,bd:bd.length,km,rate,bySys,byVeh,repRate,repN:rp.rep.length,repTot:rp.rows.length,insp,inspDone:done,inspTot:tv.size,dq,maintCost,reqCost,recov,tyreCost,unplanned,crit,wheelOff,tyreFail,shop,road,overdue};
+}
+function wsKpiTile(l,v,sub,col,hint){ return `<div class="card kpi"><div class="label"><span>${l}</span>${col?`<span class="tag ${col}">${col==='green'?'On track':col==='amber'?'Watch':'Action'}</span>`:''}</div><div class="value">${v}</div><div class="target">${sub||''}</div>${hint?`<div class="dim small" style="margin-top:4px;">${hint}</div>`:''}</div>`; }
+const wsStat=(v,good,warn)=>v===null||v===undefined?'':(v>=good?'green':v>=warn?'amber':'red');
+function wsBreak(o){ const e=Object.entries(o).sort((a,b)=>b[1]-a[1]).slice(0,5); return e.length?e.map(([k,n])=>esc(k)+' '+n).join(' · '):'none'; }
+function wsKpiBoard(){
+  const K=wsKpis(), P=v=>v===null?'—':pct(v);
+  const cls=Object.entries(K.cls).map(([c,o])=>`${esc(c)}: ${o.n-o.off}/${o.n}`).join(' · ')||'—';
+  const T=K.tyreCost;
+  return `<div class="section-title"><span>Workshop KPIs — last 30 days</span><div class="line"></div></div>
+  <div class="section-sub">Planned fleet = ${K.fleet} trucks. Suggested targets: availability 90%+, PM compliance 95%+, repeat defects under 5%, inspection compliance 100%, roadside breakdown rate target 0.</div>
+  <div class="grid cols-3">
+    ${wsKpiTile('Vehicle availability',P(K.avail),`${K.fleet-K.oos} of ${K.fleet} roadworthy · ${K.oos} out of service`,wsStat(K.avail,.9,.8),'By class: '+cls+'<br>Causes: '+wsBreak(K.cause))}
+    ${wsKpiTile('PM compliance',P(K.pmOk),`${K.pmBad} truck(s) overdue for service`,wsStat(K.pmOk,.95,.85),'Trucks with planned service not overdue ÷ all trucks')}
+    ${wsKpiTile('Roadside breakdown rate',K.rate===null?'—':fmt(K.rate,1),`${K.bd} breakdown(s) per 100,000 km${K.km?` (${fmt(K.km)} km)`:''}`,K.bd===0?'green':'red',K.km?'':'Add fuel entries with odometers to get the km base.')+''}
+    ${wsKpiTile('Repeat-defect rate',P(K.repRate),`${K.repN} repeat of ${K.repTot} repairs (90 days)`,K.repRate===null?'':K.repRate<=.05?'green':K.repRate<=.15?'amber':'red','Same truck + same system again within 60 days of a repair')}
+    ${wsKpiTile('Inspection compliance',P(K.insp),`${K.inspDone} of ${K.inspTot} truck-days with trips had a pre-trip (7 days)`,wsStat(K.insp,.98,.9),'Defect quality: '+P(K.dq)+' of failed inspections have a defect report')}
+    ${wsKpiTile('Maintenance cost',naira(K.maintCost.planned+K.unplanned+K.tyreCost.total),`Planned ${naira(K.maintCost.planned)} · Unplanned ${naira(K.unplanned)}`,'',(K.km?naira((K.maintCost.planned+K.unplanned+K.tyreCost.total)/K.km,2)+' per km':'per-km needs fuel/odometer entries')+` · Tyres ${naira(K.tyreCost.total)} · Recovery ${naira(K.recov)} · Approved requests ${naira(K.reqCost)}`)}
+    ${wsKpiTile('Tyre cost per km',T.perKm===null?'—':naira(T.perKm,2),`${T.n} tyre(s) with a known distance`,'','Purchase + repair + retread + disposal ÷ distance achieved (Tyre Register)')}
+    ${wsKpiTile('Safety indicators',K.crit+' critical defects',`${K.overdue} overdue safety defect(s)`,K.crit||K.overdue?'red':'green',`Wheel-off ${K.wheelOff} · Tyre failures ${K.tyreFail} · Workshop incidents ${K.shop} · Road incidents ${K.road}`)}
+  </div>
+  <div class="dim small" style="margin:6px 0 14px;">Parts stock accuracy is not tracked here — the app has no stores module. Use your stock-count sheet for that KPI.</div>
+  ${wsInsightsCard()}`;
+}
+function wsInsights(){
+  const out=[], D=STATE.data;
+  const open=(D.defects||[]).filter(d=>d.status!=='Closed');
+  const oosList=open.filter(d=>d.vehStatus==='OUT OF SERVICE'); if(oosList.length) out.push(['red',`${oosList.length} truck(s) are tagged OUT OF SERVICE: ${[...new Set(oosList.map(d=>vehicleLabel(d.vehicleId)))].join(', ')}. Do not dispatch until QC release.`]);
+  const byComp={}; open.forEach(d=>{ const c=wsSys2comp(d.system); byComp[c]=(byComp[c]||0)+1; });
+  Object.entries(byComp).sort((a,b)=>b[1]-a[1]).slice(0,3).forEach(([c,n])=>{ const g=oemInsight(c); out.push([n>1?'amber':'blue',`${n} open ${c.toLowerCase()} defect(s). OEM guidance: ${g.fix}`]); });
+  wsRcaAlerts().filter(a=>!a.rca).slice(0,3).forEach(a=>out.push(['red',a.text+' — RCA required.']));
+  const over=open.filter(d=>d.severity!=='Minor'&&daysAgo(d.date)>(d.severity==='Critical'?1:5)); if(over.length) out.push(['amber',`${over.length} defect report(s) are overdue — check the Job Cards tab.`]);
+  if(!out.length) out.push(['green','No open defects or repeat-failure alerts. Keep to the routine OEM schedule (see OEM Guide).']);
+  return out;
+}
+function wsInsightsCard(){ return `<div class="section-title"><span>AI insights &amp; OEM recommendations</span><div class="line"></div></div><div class="card">${wsInsights().map(([c,t])=>`<div class="ws-ins ${c}">${esc(t)}</div>`).join('')}</div>`; }
+
+/* ---------- fault log ---------- */
+function wsFaultLog(){
+  const D=STATE.data, all=[...D.defects].sort((a,b)=>(a.date+(a.time||''))<(b.date+(b.time||''))?1:-1);
+  const cnt=s=>all.filter(d=>d.status===s).length;
+  const oos=all.filter(d=>d.status!=='Closed'&&d.vehStatus==='OUT OF SERVICE');
+  return `<div class="grid cols-4" style="margin-bottom:14px;">${kc('Open',cnt('Open'),'Reported, not started')}${kc('In workshop',cnt('In workshop'),'Work under way')}${kc('QC pending',cnt('QC pending'),'Waiting for QC release')}${kc('Closed',cnt('Closed'),'Released to service')}</div>
+  ${oos.length?`<div class="note warn" style="margin-bottom:14px;"><b>STATUS-TAG RULE:</b> attach an OUT OF SERVICE / DO NOT OPERATE tag to the steering wheel or key point on: <b>${[...new Set(oos.map(d=>vehicleLabel(d.vehicleId)))].map(esc).join(', ')}</b>. Only the Workshop Manager or delegate may remove it after QC release.</div>`:''}
+  ${wsForm('defects','Report a defect (Appendix B)',[['date','Date','date',0,1],['time','Time','time'],['vehicleId','Truck / fleet no.','truck',0,1],['trailer','Trailer no.','text'],['location','Location','text',0,0,'Where the truck is'],['reportedBy','Reported by','text',0,1],['phone','Phone','tel'],['system','System affected','select',WS_SYSTEMS,1],['severity','Severity','select',[['Critical','Critical (red)'],['Major','Major (amber)'],['Minor','Minor (blue)']],1],['vehStatus','Vehicle status','select',['OUT OF SERVICE','Restricted (authorized)','Awaiting inspection'],1],['desc','Defect description / warning lamps / symptoms','textarea',0,1,'',1],['immediate','Immediate action taken','text',0,0,'',1],['notifiedName','Dispatcher / supervisor notified','text'],['notifiedTime','Time notified','time']],'defect','Submit defect report')}
+  <div class="section-sub">Defects from pre-trip / post-trip inspections and maintenance inspections land here automatically, each with a job card.</div>
+  <div class="table-wrap"><table><thead><tr><th>Fault no.</th><th>Date</th><th>Truck</th><th>System</th><th>Defect</th><th>Severity</th><th>Truck status</th><th>Source</th><th>Stage</th><th></th></tr></thead><tbody>
+  ${all.length?all.map(d=>{ const jc=D.jobcards.find(j=>j.id===d.jobId); return `<tr><td><b>${esc(d.ref)}</b></td><td>${wsDt(d)}</td><td>${wsVeh(d.vehicleId)}</td><td>${esc(d.system)}</td><td style="white-space:normal;min-width:200px;">${esc(d.desc)}${d.location?'<div class="dim small">'+esc(d.location)+'</div>':''}</td><td>${wsTag(d.severity,d.severity==='Critical'?'red':d.severity==='Major'?'amber':'blue')}</td><td>${d.vehStatus==='OUT OF SERVICE'?wsTag('OUT OF SERVICE','red'):wsTag(d.vehStatus||'—',d.vehStatus&&d.vehStatus.indexOf('Restricted')===0?'amber':'grey')}${d.apprReq&&!(d.appr&&d.appr.status)?'<div class="dim small">awaiting approval</div>':''}</td><td>${esc(d.source)}</td><td>${wsTag(d.status,WS_STATUS_TAG[d.status])}</td><td><div class="row-actions">${jc?`<button class="btn small" data-ws-open-jc="${jc.id}">Job card ${esc(jc.ref)}</button>`:''}<button class="btn ghost small" data-delete="defects:${d.id}">Delete</button></div></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="10">No defects reported yet.</td></tr>'}</tbody></table></div>`;
+}
+/* ---------- job cards & QC ---------- */
+function wsJobList(){
+  const D=STATE.data, all=[...D.jobcards].sort((a,b)=>a.date<b.date?1:-1);
+  return `<div class="section-sub">Open a job card to record the diagnosis, work done and parts, then complete the QC release. Releasing closes the defect and completes the maintenance job.</div>
+  <div class="table-wrap"><table><thead><tr><th>Job card</th><th>Date</th><th>Truck</th><th>Complaint</th><th>Technician</th><th>Status</th><th>JSA</th><th></th></tr></thead><tbody>
+  ${all.length?all.map(j=>{ const d=D.defects.find(x=>x.id===j.defectId); const jsa=D.jsas.some(s=>s.jobCardId===j.id); return `<tr><td><b>${esc(j.ref)}</b></td><td>${esc(fmtDate(j.date))}</td><td>${wsVeh(j.vehicleId)}</td><td style="white-space:normal;min-width:200px;">${esc(j.complaint||'—')}</td><td>${esc(j.technician||'—')}</td><td>${wsTag(j.status,{Open:'amber','Work done':'blue','QC pending':'blue',Released:'green',Rework:'red'}[j.status])}</td><td>${jsa?wsTag('Done','green'):wsTag('None','amber')}</td><td><div class="row-actions"><button class="btn small primary" data-ws-open-jc="${j.id}">${j.status==='Released'?'View':'Open'}</button><button class="btn ghost small" data-delete="jobcards:${j.id}">Delete</button></div></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="8">No job cards yet — they are created with each defect report.</td></tr>'}</tbody></table></div>`;
+}
+const QC_ITEMS=[['q1','Job card complete; correct parts / fluids and OEM instructions verified'],['q2','No loose fasteners, leaks, tools, damage or missing guards / covers'],['q3','Safety-critical torque / settings independently checked where required'],['q4','Required function / road test completed and satisfactory'],['q5','Driver briefed; status updated; vehicle safe for intended service']];
+function wsJcModal(){
+  const j=STATE.wsJc?STATE.data.jobcards.find(x=>x.id===STATE.wsJc):null; if(!j) return '';
+  const d=STATE.data.defects.find(x=>x.id===j.defectId)||{}; const v=findVehicle(j.vehicleId)||{}; const ro=j.status==='Released';
+  const comp=(STATE.data.maintenance.find(m=>m.id===d.mId)||{}).component||wsSys2comp(d.system);
+  const inp=(n,l,ph,t)=>`<div><label>${l}</label><input type="${t||'text'}" name="${n}" value="${esc(j[n]||'')}" placeholder="${esc(ph||'')}"${ro?' disabled':''}${t==='number'?' step="any" min="0"':''}></div>`;
+  const ta=(n,l,ph)=>`<div style="grid-column:1/-1"><label>${l}</label><textarea name="${n}" rows="2" placeholder="${esc(ph||'')}"${ro?' disabled':''}>${esc(j[n]||'')}</textarea></div>`;
+  const jsa=STATE.data.jsas.some(s=>s.jobCardId===j.id);
+  return `<div class="modal-bg" data-ws-close="1"><div class="modal" style="max-width:760px;max-height:90vh;overflow:auto;" onclick="event.stopPropagation()">
+   <div class="flex" style="justify-content:space-between;align-items:center;"><h3 style="margin:0;">Job card ${esc(j.ref)} <span class="dim small">· ${esc(d.ref||'')}</span></h3><button class="btn small ghost" data-ws-close="1">✕</button></div>
+   <div class="dim small" style="margin:6px 0 10px;">${wsVeh(j.vehicleId)} ${v.model?'· '+esc(v.model):''} · ${esc(fmtDate(j.date))} · ${wsTag(j.status,'grey')} ${d.vehStatus==='OUT OF SERVICE'&&d.status!=='Closed'?wsTag('OUT OF SERVICE','red'):''}</div>
+   ${jsa?'':`<div class="note warn" style="margin-bottom:10px;">No Job Safety Analysis logged for this job yet. <button class="btn small" data-ws-goto-jsa="${j.id}">Do the JSA (Safety tab) →</button></div>`}
+   <form data-ws-jc="${j.id}">
+    <div class="ws-sec">Job card</div>
+    <div class="form-grid">${inp('odometer','Odometer km / engine hours','',  'number')}${inp('complaint','Driver / VIO complaint')}
+     ${ta('findings','Inspection / diagnostic findings')}${ta('rootCause','Root cause')}${ta('work','Work performed')}${ta('parts','Parts / fluids used (part no., qty, batch)')}${ta('torque','Torque / calibration / settings recorded')}${ta('testResult','Functional / diagnostic / road test result')}
+     ${inp('technician','Technician name / signature')}${inp('partsCost','Parts cost (₦)','','number')}${inp('labourCost','Workmanship / labour (₦)','','number')}</div>
+    <div class="ws-sec">QC release check</div>
+    <div class="chk-grid">${QC_ITEMS.map(([k,l])=>`<label class="chk-row" style="cursor:pointer;"><span class="chk-lab">${esc(l)}</span><input type="checkbox" name="${k}" value="1"${j[k]?' checked':''}${ro?' disabled':''}></label>`).join('')}</div>
+    <div class="form-grid" style="margin-top:8px;">
+     <div><label>Release decision</label><select name="decision"${ro?' disabled':''}>${['','Released to service','Released with documented restriction','Rework / hold'].map(o=>`<option${j.decision===o?' selected':''}>${o}</option>`).join('')}</select></div>
+     ${inp('qcInspector','QC inspector name / signature')}${inp('handover','Driver / key handover acknowledged by')}</div>
+    ${ro?`<div class="note ok" style="margin-top:10px;">Released ${esc(j.qcDate||'')} by ${esc(j.qcInspector||'—')} — ${esc(j.decision||'')}.</div>`:`<div class="form-actions" style="margin-top:12px;"><button class="btn" type="submit" name="act" value="save">Save job card</button><button class="btn primary" type="submit" name="act" value="qc">Submit QC decision</button></div>`}
+   </form>
+   <div style="margin-top:14px;">${oemCard(comp,true)}</div></div></div>`;
+}
+async function wsSaveJc(form){
+  const id=form.getAttribute('data-ws-jc'); const j=STATE.data.jobcards.find(x=>x.id===id); if(!j) return;
+  const act=arguments[1]||'save'; const fd=new FormData(form); const g=n=>String(fd.get(n)||'').trim();
+  ['odometer','complaint','findings','rootCause','work','parts','torque','testResult','technician','partsCost','labourCost','decision','qcInspector','handover'].forEach(n=>{ j[n]=g(n); });
+  QC_ITEMS.forEach(([k])=>{ j[k]=fd.get(k)?'1':''; });
+  const d=STATE.data.defects.find(x=>x.id===j.defectId), m=d&&STATE.data.maintenance.find(x=>x.id===d.mId);
+  if(act==='qc'){
+    if(!j.decision){ showToast('Choose a release decision.'); return; }
+    if(j.decision==='Rework / hold'){ j.status='Rework'; if(d) d.status='In workshop'; showToast('Sent back for rework.'); }
+    else{
+      if(!j.work||!j.technician){ showToast('Fill in the work performed and technician before release.'); return; }
+      if(QC_ITEMS.some(([k])=>!j[k])){ showToast('Tick every QC check before releasing.'); return; }
+      if(!j.qcInspector){ showToast('Enter the QC inspector name.'); return; }
+      j.status='Released'; j.qcDate=todayStr()+' '+nowTime(); j.closedDate=todayStr();
+      if(d){ d.status='Closed'; d.closedDate=todayStr(); d.qcRef=j.ref; if(j.decision!=='Released to service') d.vehStatus='Restricted (authorized)'; else if(d.vehStatus==='OUT OF SERVICE') d.vehStatus='Roadworthy'; }
+      if(m){ m.status='Completed'; m.completedDate=todayStr(); const c=num(j.partsCost)+num(j.labourCost); if(c) m.cost=String(c); wsDirty.add('maintenance'); }
+      wsNotify('Truck released',`${vehicleLabel(j.vehicleId)} released to service — ${j.ref}`,3);
+      showToast('Released to service. Defect closed and maintenance job completed.');
+    }
+  } else {
+    j.status=(j.work&&j.technician)?'QC pending':(j.technician||j.findings||j.work)?'Open':j.status; if(d&&d.status==='Open'&&(j.technician||j.work)) d.status=(j.work?'QC pending':'In workshop');
+    if(j.work&&j.technician&&j.status!=='Released') j.status='QC pending';
+    showToast('Job card saved.');
+  }
+  wsDirty.add('jobcards'); wsDirty.add('defects'); STATE.wsJc=null; await wsFlush();
+}
+/* ---------- roadside breakdown report (feeds the roadside breakdown KPI) ---------- */
+function wsRoadPage(){
+  const D=STATE.data, all=[...D.breakdowns].sort((a,b)=>(a.date+(a.time||''))<(b.date+(b.time||''))?1:-1), K=wsKpis();
+  return `<div class="grid cols-4" style="margin-bottom:14px;">${kc('Breakdowns (30 days)',K.bd,'Target: 0',K.bd===0?'green':'red',K.bd===0?'On target':'Above target')}${kc('Rate per 100,000 km',K.rate===null?'—':fmt(K.rate,1),K.km?fmt(K.km)+' km logged':'needs fuel/odometer entries')}${kc('By system',wsBreak(K.bySys),'last 30 days')}${kc('By truck',wsBreak(K.byVeh),'last 30 days')}</div>
+  ${wsForm('breakdowns','Report a roadside breakdown',[['date','Date','date',0,1],['time','Time of breakdown','time',0,1],['vehicleId','Truck','truck',0,1],['driverName','Driver','text',0,1],['location','Location','text',0,1,'Road / landmark'],['route','Route','select',[''].concat(Object.keys(ROUTES).map(k=>[k,ROUTES[k].label])).map(x=>Array.isArray(x)?x:[x,'— Route —'])],['system','System affected','select',WS_SYSTEMS,1],['severity','Severity','select',['Critical','Major','Minor']],['desc','What happened','textarea',0,1,'Symptoms, warning lamps, noises',1],['wheelOff','Wheel-off / wheel loss?','select',['No','Yes']],['incident','Road incident / collision?','select',['No','Yes']],['recovery','Recovery provider / supplier','text',0,0,'Tow / roadside service'],['recoveryCost','Recovery cost (₦)','number'],['action','Action taken','text',0,0,'',1],['restoredDate','Back on road — date','date'],['restoredTime','Back on road — time','time']],'breakdown','Submit breakdown report')}
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Location</th><th>System</th><th>What happened</th><th>Recovery</th><th>Downtime</th><th></th></tr></thead><tbody>
+  ${all.length?all.map(b=>{ const dh=b.downHrs?fmt(num(b.downHrs),1)+' h':'<span class="dim">open</span>'; return `<tr><td>${wsDt(b)}</td><td>${wsVeh(b.vehicleId)}</td><td>${esc(b.driverName||'—')}</td><td style="white-space:normal;">${esc(b.location||'—')}</td><td>${esc(b.system)} ${b.wheelOff==='Yes'?wsTag('wheel-off','red'):''}${b.incident==='Yes'?wsTag('incident','red'):''}</td><td style="white-space:normal;min-width:180px;">${esc(b.desc||'')}</td><td style="white-space:normal;">${esc(b.recovery||'—')}${b.recoveryCost?'<div class="dim small">'+naira(num(b.recoveryCost))+'</div>':''}</td><td>${dh}</td><td><button class="btn ghost small" data-delete="breakdowns:${b.id}">Delete</button></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="9">No roadside breakdowns reported.</td></tr>'}</tbody></table></div>`;
+}
+/* ---------- OEM guide ---------- */
+function wsOemPage(){
+  return `<div class="note" style="margin-bottom:14px;">${esc(OEM_NOTE)}</div>
+  <div class="section-title"><span>Routine maintenance — HOWO NX430 CNG side tipper</span><div class="line"></div></div>
+  <div class="table-wrap"><table><thead><tr><th>When</th><th>What to do</th><th>Note</th></tr></thead><tbody>${OEM_ROUTINE.map(r=>`<tr><td><b>${esc(r[0])}</b></td><td style="white-space:normal;min-width:300px;">${esc(r[1])}</td><td style="white-space:normal;">${esc(r[2])}</td></tr>`).join('')}</tbody></table></div>
+  <div class="section-title"><span>Corrective maintenance by system</span><div class="line"></div></div>
+  <div class="grid cols-2">${Object.keys(OEM_GUIDE).filter(k=>k!=='Other').map(k=>oemCard(k,true)).join('')}</div>`;
+}
+function renderWorkshopPage(){
+  const v=STATE.wsView||'kpi';
+  const body=v==='kpi'?wsKpiBoard():v==='faults'?wsFaultLog():v==='jobs'?wsJobList():v==='road'?wsRoadPage():wsOemPage();
+  return wsHead('Workshop','Fault log, job cards & QC, roadside breakdowns and OEM maintenance guidance.')+wsTabs('ws-view',v,[['kpi','KPIs'],['faults','Fault Log'],['jobs','Job Cards &amp; QC'],['road','Roadside Breakdowns'],['oem','OEM Guide']])+body;
+}
+
+/* ============================================================ ws_c.js ============================================================ */
+/* ===== RCA · Tyre register · JSA · Journey plan ===== */
+/* ---------- RCA alerts ---------- */
+function wsRcaAlerts(){
+  const D=STATE.data, out=[]; const rcas=D.rcas||[];
+  const fnd=key=>rcas.find(r=>r.key===key);
+  const rep=(D.maintenance||[]).filter(m=>m.type!=='Scheduled'&&m.vehicleId&&m.date>=wsDays(90)).sort((a,b)=>a.date<b.date?-1:1);
+  const byTC={}, byT={}, byC={};
+  rep.forEach(m=>{ const c=m.component||'Other'; (byTC[m.vehicleId+'|'+c]=byTC[m.vehicleId+'|'+c]||[]).push(m); (byT[m.vehicleId]=byT[m.vehicleId]||[]).push(m); (byC[c]=byC[c]||[]).push(m); });
+  Object.keys(byTC).forEach(k=>{ const L=byTC[k]; for(let i=1;i<L.length;i++){ if((Date.parse(L[i].date)-Date.parse(L[i-1].date))/864e5<=60){ const [v,c]=k.split('|'); const key='rep|'+k+'|'+L[i].date; out.push({key,kind:'Repeat repair',vehicleId:v,component:c,date:L[i].date,text:`${vehicleLabel(v)} — repeat ${c.toLowerCase()} repair (${L.length} in 90 days)`,rca:fnd(key)}); break; } } });
+  Object.keys(byT).forEach(v=>{ const L=byT[v].filter(m=>m.date>=wsDays(30)); if(L.length>=3){ const key='freq|'+v+'|'+wsMonthKey(L[L.length-1].date); out.push({key,kind:'Frequent repairs',vehicleId:v,date:L[L.length-1].date,text:`${vehicleLabel(v)} — ${L.length} repair jobs in 30 days`,rca:fnd(key)}); } });
+  Object.keys(byC).forEach(c=>{ const L=byC[c].filter(m=>m.date>=wsDays(30)); const trucks=new Set(L.map(m=>m.vehicleId)); if(trucks.size>=3){ const key='fleet|'+c+'|'+wsMonthKey(L[L.length-1].date); out.push({key,kind:'Fleetwide repeat',component:c,date:L[L.length-1].date,text:`Fleetwide — ${c.toLowerCase()} failures on ${trucks.size} trucks in 30 days`,rca:fnd(key)}); } });
+  (D.breakdowns||[]).filter(b=>(b.wheelOff==='Yes'||b.incident==='Yes')&&b.date>=wsDays(90)).forEach(b=>{ const key='inc|'+b.id; out.push({key,kind:'Incident',vehicleId:b.vehicleId,date:b.date,text:`${vehicleLabel(b.vehicleId)} — ${b.wheelOff==='Yes'?'wheel-off':'road incident'} at ${b.location||'roadside'}`,rca:fnd(key)}); });
+  (D.defects||[]).filter(d=>d.severity==='Critical'&&d.system==='Brake'&&d.date>=wsDays(30)).forEach(d=>{ const key='crit|'+d.id; out.push({key,kind:'Critical brake defect',vehicleId:d.vehicleId,date:d.date,text:`${vehicleLabel(d.vehicleId)} — critical brake defect ${d.ref}`,rca:fnd(key)}); });
+  (D.safety||[]).filter(s=>num(s.incidents)>0&&s.date>=wsDays(30)).forEach(s=>{ const key='sinc|'+s.id; out.push({key,kind:'Incident',date:s.date,text:`${num(s.incidents)} safety incident(s) logged on ${fmtDate(s.date)}`,rca:fnd(key)}); });
+  return out.sort((a,b)=>(a.rca?1:0)-(b.rca?1:0)||(a.date<b.date?1:-1));
+}
+function wsMonthKey(d){ return String(d).slice(0,7); }
+async function wsSweep(){
+  if(!GAS_CONFIGURED||STATE.loading) return;
+  const cfg=STATE.data.apprCfg||{}; const sent=Object.assign({},cfg.sent||{}); let ch=false;
+  wsRcaAlerts().filter(a=>!a.rca&&!sent[a.key]).forEach(a=>{ wsNotify('RCA required',a.text,4); sent[a.key]=todayStr(); ch=true; });
+  (STATE.data.rcas||[]).filter(r=>r.status!=='Verified'&&r.due&&r.due<todayStr()&&!sent['od|'+r.id]).forEach(r=>{ wsNotify('RCA action overdue',`${r.ref} — ${r.problem||''}`.slice(0,120),4); sent['od|'+r.id]=todayStr(); ch=true; });
+  if(ch){ STATE.data.apprCfg=Object.assign({},cfg,{sent}); await persist('apprCfg'); }
+}
+function renderRcaPage(){
+  const A=wsRcaAlerts(), D=STATE.data, rc=[...D.rcas].sort((a,b)=>a.date<b.date?1:-1);
+  const need=A.filter(a=>!a.rca);
+  return wsHead('RCA — Root Cause Analysis','Alerts fire on repeated repairs (truck or fleetwide) and incidents. Each needs an investigation with corrective actions.')+wsRoleBar()+
+  `<div class="grid cols-4" style="margin-bottom:14px;">${kc('RCA required',need.length,'Alerts with no RCA yet',need.length?'red':'green',need.length?'Act now':'All covered')}${kc('Open RCAs',rc.filter(r=>r.status!=='Verified').length,'Investigation or actions in progress')}${kc('Overdue actions',rc.filter(r=>r.status!=='Verified'&&r.due&&r.due<todayStr()).length,'Past their due date')}${kc('Verified',rc.filter(r=>r.status==='Verified').length,'Effectiveness confirmed')}</div>
+  <div class="section-title"><span>Alerts</span><div class="line"></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Alert</th><th>RCA</th><th></th></tr></thead><tbody>${A.length?A.map(a=>`<tr><td>${esc(fmtDate(a.date))}</td><td>${wsTag(a.kind,a.rca?'grey':'red')}</td><td style="white-space:normal;min-width:240px;">${esc(a.text)}</td><td>${a.rca?wsTag(a.rca.ref+' · '+a.rca.status,a.rca.status==='Verified'?'green':'amber'):wsTag('RCA required','red')}</td><td>${a.rca?`<button class="btn small" data-rca-open="${a.rca.id}">Open</button>`:`<button class="btn small primary" data-rca-start="${esc(a.key)}">Start RCA</button>`}</td></tr>`).join(''):'<tr class="empty-row"><td colspan="5">No repeat-failure or incident alerts. 👍</td></tr>'}</tbody></table></div>
+  <div class="section-title"><span>RCA register</span><div class="line"></div><button class="btn small" data-rca-start="manual">+ New RCA</button></div>
+  <div class="table-wrap"><table><thead><tr><th>RCA no.</th><th>Date</th><th>Truck</th><th>Problem</th><th>Owner</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>${rc.length?rc.map(r=>`<tr><td><b>${esc(r.ref)}</b></td><td>${esc(fmtDate(r.date))}</td><td>${r.vehicleId?wsVeh(r.vehicleId):'Fleet'}</td><td style="white-space:normal;min-width:200px;">${esc(r.problem||'—')}</td><td>${esc(r.owner||'—')}</td><td>${r.due?esc(fmtDate(r.due)):'—'}${r.status!=='Verified'&&r.due&&r.due<todayStr()?' '+wsTag('overdue','red'):''}</td><td>${wsTag(r.status,r.status==='Verified'?'green':r.status==='Actions done'?'blue':'amber')}${r.apprReq&&!r.appr?'<div class="dim small">awaiting GM sign-off</div>':''}</td><td><div class="row-actions"><button class="btn small" data-rca-open="${r.id}">Open</button><button class="btn ghost small" data-delete="rcas:${r.id}">Delete</button></div></td></tr>`).join(''):'<tr class="empty-row"><td colspan="8">No RCAs yet.</td></tr>'}</tbody></table></div>`;
+}
+function wsRcaModal(){
+  const id=STATE.wsRca; if(!id) return ''; const r=id==='new'?(STATE.wsRcaDraft||{}):STATE.data.rcas.find(x=>x.id===id); if(!r) return '';
+  const ta=(n,l,ph)=>`<div style="grid-column:1/-1"><label>${l}</label><textarea name="${n}" rows="2" placeholder="${esc(ph||'')}">${esc(r[n]||'')}</textarea></div>`;
+  const comp=r.component||'Other';
+  return `<div class="modal-bg" data-ws-close="1"><div class="modal" style="max-width:720px;max-height:90vh;overflow:auto;" onclick="event.stopPropagation()">
+  <div class="flex" style="justify-content:space-between;align-items:center;"><h3 style="margin:0;">${r.ref?'RCA '+esc(r.ref):'New RCA'}</h3><button class="btn small ghost" data-ws-close="1">✕</button></div>
+  <div class="dim small" style="margin:6px 0 10px;">${esc(r.trigger||'Manual')}${r.vehicleId?' · '+wsVeh(r.vehicleId):''}</div>
+  <form data-rca-form="${id}"><div class="form-grid">
+   <div><label>Truck</label><select name="vehicleId"><option value="">Fleetwide / n.a.</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}"${r.vehicleId===v.id?' selected':''}>${esc(v.regNo)}</option>`).join('')}</select></div>
+   <div><label>Trigger</label><select name="trigger">${['Repeat repair','Frequent repairs','Fleetwide repeat','Incident','Critical brake defect','Workshop incident','QC escape','Other'].map(o=>`<option${(r.trigger||'Other')===o?' selected':''}>${o}</option>`).join('')}</select></div>
+   ${ta('problem','Problem / what happened')}${ta('immediateCause','Immediate cause')}${ta('underlying','Underlying factors (ask “why?” five times)')}${ta('barriers','Failed barriers (what should have stopped it?)')}${ta('corrective','Corrective actions')}
+   <div><label>Action owner</label><input type="text" name="owner" value="${esc(r.owner||'')}"></div><div><label>Due date</label><input type="date" name="due" value="${esc(r.due||'')}"></div>
+   ${ta('verification','Verification of effectiveness')}${ta('lessons','Lessons communicated to drivers / technicians / suppliers')}
+   <div><label>Status</label><select name="status">${['Open','Actions done','Verified'].map(o=>`<option${(r.status||'Open')===o?' selected':''}>${o}</option>`).join('')}</select></div></div>
+   <div class="dim small" style="margin-top:6px;">“Verified” sends the RCA to the General Manager for sign-off in Approvals.</div>
+   <div class="form-actions" style="margin-top:12px;"><button class="btn primary" type="submit">Save RCA</button></div></form>
+  <div style="margin-top:12px;">${oemCard(comp,true)}</div></div></div>`;
+}
+async function wsSaveRca(form){
+  const id=form.getAttribute('data-rca-form'); const fd=new FormData(form); const g=n=>String(fd.get(n)||'').trim();
+  let r=id==='new'?Object.assign({id:uid(),ref:wsRef('rcas','RCA'),date:todayStr()},STATE.wsRcaDraft||{}):STATE.data.rcas.find(x=>x.id===id); if(!r) return;
+  ['vehicleId','trigger','problem','immediateCause','underlying','barriers','corrective','owner','due','verification','lessons','status'].forEach(n=>{ r[n]=g(n); });
+  if(r.status==='Verified'&&!r.appr&&!r.apprReq){ r.apprReq='1'; wsNotify('RCA awaiting sign-off',`${r.ref} verified — General Manager sign-off needed`,3); }
+  if(id==='new') STATE.data.rcas=[...STATE.data.rcas,r];
+  STATE.wsRca=null; STATE.wsRcaDraft=null; showToast('RCA saved.'); await persist('rcas');
+}
+
+/* ---------- Tyre register + inspection ---------- */
+const TYRE_POS=['Front left','Front right','Drive 1 L outer','Drive 1 L inner','Drive 1 R inner','Drive 1 R outer','Drive 2 L outer','Drive 2 L inner','Drive 2 R inner','Drive 2 R outer','Spare'];
+function wsTyreKm(t){ return t.removeOdo&&t.fitOdo&&num(t.removeOdo)>num(t.fitOdo)?num(t.removeOdo)-num(t.fitOdo):0; }
+function wsTyreTotal(t){ return num(t.cost)+num(t.repairCost)+num(t.retreadCost)+num(t.disposalCost); }
+function wsTyreCosts(from){
+  const T=(STATE.data.tyres||[]).filter(t=>t.status==='Removed'||t.status==='Scrapped'); const withKm=T.filter(t=>wsTyreKm(t)>0);
+  const km=withKm.reduce((a,t)=>a+wsTyreKm(t),0), cost=withKm.reduce((a,t)=>a+wsTyreTotal(t),0);
+  const total=(STATE.data.tyres||[]).filter(t=>(t.fitDate||'')>=from).reduce((a,t)=>a+num(t.cost),0)+T.filter(t=>(t.removeDate||'')>=from).reduce((a,t)=>a+num(t.repairCost)+num(t.retreadCost)+num(t.disposalCost),0);
+  return {perKm:km>0?cost/km:null,n:withKm.length,total};
+}
+function renderTyresPage(){
+  const v=STATE.tyreView||'register', D=STATE.data, C=wsTyreCosts('0000'), fitted=D.tyres.filter(t=>t.status==='Fitted');
+  const low=D.tyreInsp.filter(i=>num(i.tread)>0&&num(i.tread)<3).length;
+  let body;
+  if(v==='register'){
+    body=wsForm('tyres','Fit a tyre (add to register)',[['serial','Tyre serial no.','text',0,1],['brand','Brand','text'],['size','Size','text',0,0,'e.g. 12.00R20'],['vehicleId','Truck','truck',0,1],['position','Wheel position','select',TYRE_POS,1],['fitDate','Date fitted','date',0,1],['fitOdo','Odometer at fitting (km)','number'],['cost','Purchase cost (₦)','number'],['status','Status','select',['Fitted','Spare']]],'tyre','Add tyre')+
+    `<div class="table-wrap"><table><thead><tr><th>Serial</th><th>Brand / size</th><th>Truck · position</th><th>Fitted</th><th>Distance</th><th>Cost</th><th>Cost / km</th><th>Status</th><th></th></tr></thead><tbody>${D.tyres.length?[...D.tyres].sort((a,b)=>(a.fitDate||'')<(b.fitDate||'')?1:-1).map(t=>{ const km=wsTyreKm(t), tot=wsTyreTotal(t); return `<tr><td><b>${esc(t.serial)}</b></td><td>${esc((t.brand||'')+' '+(t.size||''))}</td><td>${wsVeh(t.vehicleId)} · ${esc(t.position||'')}</td><td>${esc(fmtDate(t.fitDate))}${t.fitOdo?'<div class="dim small">'+fmt(num(t.fitOdo))+' km</div>':''}</td><td>${km?fmt(km)+' km':'—'}</td><td>${naira(tot)}</td><td>${km?naira(tot/km,2):'—'}</td><td>${wsTag(t.status,t.status==='Fitted'?'green':t.status==='Scrapped'?'red':'grey')}${t.removeReason?'<div class="dim small">'+esc(t.removeReason)+'</div>':''}</td><td><div class="row-actions">${t.status==='Fitted'||t.status==='Spare'?`<button class="btn small" data-tyre-remove="${t.id}">Remove / scrap</button>`:''}<button class="btn ghost small" data-delete="tyres:${t.id}">Delete</button></div></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="9">No tyres registered yet.</td></tr>'}</tbody></table></div>`;
+  } else {
+    body=wsForm('tyreInsp','Tyre inspection',[['date','Date','date',0,1],['vehicleId','Truck','truck',0,1],['position','Wheel position','select',TYRE_POS,1],['tread','Tread depth (mm)','number',0,1],['pressure','Pressure (psi, cold)','number'],['condition','Condition','select',['OK','Low tread','Uneven wear','Cut / damage','Bulge','Puncture','Failed'],1],['odometer','Odometer (km)','number'],['inspector','Inspector','text',0,1],['action','Action taken / recommended','text',0,0,'',1]],'tyreInsp','Save inspection')+
+    `<div class="section-sub">A tread under 3 mm or any condition other than OK raises a Tyre/wheel defect automatically (Critical for a bulge or failure).</div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck · position</th><th>Tread</th><th>Pressure</th><th>Condition</th><th>Action</th><th>Inspector</th><th></th></tr></thead><tbody>${D.tyreInsp.length?[...D.tyreInsp].sort((a,b)=>a.date<b.date?1:-1).map(i=>`<tr><td>${esc(fmtDate(i.date))}</td><td>${wsVeh(i.vehicleId)} · ${esc(i.position)}</td><td>${i.tread?esc(i.tread)+' mm':'—'} ${num(i.tread)>0&&num(i.tread)<3?wsTag('low','red'):''}</td><td>${i.pressure?esc(i.pressure)+' psi':'—'}</td><td>${wsTag(i.condition,i.condition==='OK'?'green':/Bulge|Failed/.test(i.condition)?'red':'amber')}</td><td style="white-space:normal;">${esc(i.action||'—')}</td><td>${esc(i.inspector||'—')}</td><td><button class="btn ghost small" data-delete="tyreInsp:${i.id}">Delete</button></td></tr>`).join(''):'<tr class="empty-row"><td colspan="8">No tyre inspections logged yet.</td></tr>'}</tbody></table></div>`;
+  }
+  return wsHead('Tyre Register','Every tyre by serial, truck and position — fitting, inspections, removal and cost per km.')+
+  `<div class="grid cols-4" style="margin-bottom:14px;">${kc('Tyres fitted',fitted.length,'In service now')}${kc('Cost per km',C.perKm===null?'—':naira(C.perKm,2),C.n+' removed tyre(s) with distance')}${kc('Low tread',low,'Inspections under 3 mm',low?'red':'green')}${kc('Failures (30 days)',wsKpis().tyreFail,'Bulge / puncture / failed / tyre breakdowns')}</div>`+
+  wsTabs('tyre-view',v,[['register','Register'],['inspect','Inspections']])+body;
+}
+function wsTyreModal(){
+  const t=STATE.wsTyre?STATE.data.tyres.find(x=>x.id===STATE.wsTyre):null; if(!t) return '';
+  return `<div class="modal-bg" data-ws-close="1"><div class="modal" style="max-width:520px;" onclick="event.stopPropagation()"><h3 style="margin-top:0;">Remove / scrap tyre ${esc(t.serial)}</h3>
+  <form data-tyre-rm="${t.id}"><div class="form-grid"><div><label>Date removed</label><input type="date" name="removeDate" value="${todayStr()}" required></div><div><label>Odometer at removal (km)</label><input type="number" name="removeOdo" step="any" min="0" required></div>
+  <div><label>Reason</label><select name="removeReason">${['Worn out','Burst / blowout','Cut / damage','Uneven wear','Sent for retread','Rotation / other'].map(o=>`<option>${o}</option>`).join('')}</select></div>
+  <div><label>Outcome</label><select name="outcome"><option>Scrapped</option><option>Removed</option></select></div>
+  <div><label>Repair cost (₦)</label><input type="number" name="repairCost" step="any" min="0"></div><div><label>Retread cost (₦)</label><input type="number" name="retreadCost" step="any" min="0"></div><div><label>Disposal cost (₦)</label><input type="number" name="disposalCost" step="any" min="0"></div></div>
+  <div class="form-actions" style="margin-top:12px;"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-ws-close="1">Cancel</button></div></form></div></div>`;
+}
+
+/* ---------- JSA (Appendix C) — shown in the Safety tab ---------- */
+const JSA_HAZ=[['move','Vehicle movement / rolling','Park brake, keys controlled, chocks, barriers, banksman / exclusion zone.'],['elec','Electrical / battery','Isolate, lock / tag where required, verify de-energized, protect against arc / short.'],['stored','Pneumatic / hydraulic / stored energy','Depressurize, isolate, lock / tag, block / support and verify zero energy.'],['lift','Lift / work under vehicle','Rated lift / stands, inspection status, stable ground, secondary supports, exclusion zone.'],['tyre','Tyre / compressed air','Approved equipment, cage / restraint where required, remote inflation, trained person, exclusion zone.'],['fire','Hot work / fire / gas','Permit, extinguishers, CNG system isolated and vented, fire watch, combustibles removed, post-work check.'],['chem','Chemicals / spill','SDS, PPE, ventilation, spill kit, waste container and eyewash available.']];
+function renderJsaView(){
+  const D=STATE.data, open=D.jobcards.filter(j=>j.status!=='Released'); const pre=STATE.jsaJob||'';
+  const form=`<details class="form-card" ${pre?'open':''}><summary>New Job Safety Analysis (Appendix C)</summary><form data-ws-form="jsas" data-ws-hook="jsa"><div class="form-grid">
+   <div><label>Job card</label><select name="jobCardId"><option value="">— none —</option>${open.map(j=>`<option value="${j.id}"${pre===j.id?' selected':''}>${esc(j.ref)} · ${esc(vehicleLabel(j.vehicleId))}</option>`).join('')}</select></div>
+   <div><label>Truck</label><select name="vehicleId">${vehicleOptions()}</select></div>
+   <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div><div><label>Start time</label><input type="time" name="time" value="${nowTime()}"></div>
+   <div style="grid-column:1/-1"><label>Task description</label><input type="text" name="task" required></div>
+   <div><label>Technician(s)</label><input type="text" name="technician" required></div><div><label>Supervisor</label><input type="text" name="supervisor" required></div>
+   <div style="grid-column:1/-1"><label>OEM procedure / reference</label><input type="text" name="oemRef" placeholder="Manual section or procedure no."></div></div>
+   <div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Hazard / energy source</th><th>Risk controls required</th><th>Responsible</th><th>Verified</th></tr></thead><tbody>${JSA_HAZ.map(h=>`<tr><td><b>${esc(h[1])}</b></td><td style="white-space:normal;min-width:220px;">${esc(h[2])}</td><td><input type="text" name="r_${h[0]}" placeholder="Name"></td><td><select name="v_${h[0]}"><option>Verified</option><option>N/A</option></select></td></tr>`).join('')}</tbody></table></div>
+   <div class="form-grid" style="margin-top:10px;"><div style="grid-column:1/-1;"><label class="chk-opt" style="display:inline-flex;gap:8px;align-items:center;"><input type="checkbox" name="techAck" value="Yes" required> Technician acknowledgement — I understand the hazards and controls</label></div>
+   <div><label>Supervisor authorization (name)</label><input type="text" name="supAuth" required></div><div><label>Change in conditions?</label><select name="changed"><option value="No">No</option><option value="Yes">Yes — stop, reassess, add controls</option></select></div></div>
+   <div class="form-actions" style="margin-top:12px;"><button class="btn primary" type="submit">Save JSA</button></div></form></details>`;
+  const K=wsKpis();
+  return `<div class="grid cols-4" style="margin-bottom:14px;">${kc('Critical defects (30d)',K.crit,'',K.crit?'red':'green')}${kc('Wheel-off events',K.wheelOff,'',K.wheelOff?'red':'green')}${kc('Tyre failures',K.tyreFail,'',K.tyreFail?'amber':'green')}${kc('Overdue safety work',K.overdue,'Open Critical/Major defects past due',K.overdue?'red':'green')}</div>
+  <div class="dim small" style="margin-bottom:12px;">Workshop incidents ${K.shop} · Road incidents ${K.road} (last 30 days)</div>
+  ${form}<div class="table-wrap"><table><thead><tr><th>Date</th><th>Job card</th><th>Truck</th><th>Task</th><th>Technician</th><th>Supervisor</th><th>Conditions</th><th></th></tr></thead><tbody>${D.jsas.length?[...D.jsas].sort((a,b)=>a.date<b.date?1:-1).map(s=>{ const j=D.jobcards.find(x=>x.id===s.jobCardId); return `<tr><td>${wsDt(s)}</td><td>${j?esc(j.ref):'—'}</td><td>${s.vehicleId?wsVeh(s.vehicleId):'—'}</td><td style="white-space:normal;min-width:180px;">${esc(s.task)}</td><td>${esc(s.technician)}</td><td>${esc(s.supAuth||s.supervisor)}</td><td>${s.changed==='Yes'?wsTag('changed','red'):wsTag('as planned','green')}</td><td><button class="btn ghost small" data-delete="jsas:${s.id}">Delete</button></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="8">No JSAs logged yet.</td></tr>'}</tbody></table></div>`;
+}
+
+/* ---------- Journey plan (Appendix E) — shown in Journey Mgmt ---------- */
+function jplanSection(){
+  const D=STATE.data, routes=Object.keys(ROUTES).map(k=>ROUTES[k].label);
+  const plans=(D.routePlans||[]).map(p=>p.name).filter(Boolean);
+  return materialDatalist()+`<div class="section-title"><span>Journey plans</span><div class="line"></div></div>
+  <div class="section-sub">Complete a plan before each dispatch. It goes to the Approvals tab for the Logistics Manager or General Manager and can be sent to the driver on WhatsApp.</div>
+  <details class="form-card"><summary>New journey plan (Appendix E)</summary><form data-ws-form="jplans" data-ws-hook="jplan"><div class="form-grid">
+   <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
+   <div><label>Driver</label><input type="text" name="driverName" required></div><div><label>Driver phone</label><input type="tel" name="phone" placeholder="0803…"></div>
+   <div><label>Licence confirmed?</label><select name="licence"><option>Yes</option><option>No</option></select></div>
+   <div><label>Truck</label><select name="vehicleId" required>${vehicleOptions()}</select></div><div><label>Trailer</label><input type="text" name="trailer"></div>
+   <div><label>Load</label><input type="text" name="load" list="dl-materials" placeholder="e.g. Gypsum"></div><div><label>Weight (tonnes)</label><input type="number" name="weight" step="any" min="0"></div>
+   <div><label>Origin</label><input type="text" name="origin" required></div><div><label>Destination</label><input type="text" name="dest" required></div>
+   <div style="grid-column:1/-1"><label>Approved route</label><input type="text" name="route" list="dl-jp-routes" placeholder="e.g. Adunbu – Itori – Wasinmi – … – Lafarge Sagamu" required><datalist id="dl-jp-routes">${plans.concat(routes).map(r=>`<option value="${esc(r)}">`).join('')}</datalist></div>
+   <div><label>Departure window</label><input type="text" name="depart" placeholder="e.g. 05:00–06:00"></div><div><label>Arrival window</label><input type="text" name="arrive" placeholder="e.g. 11:00–12:00"></div>
+   <div style="grid-column:1/-1"><label>Rest stops / fuel / safe parks</label><input type="text" name="rest"></div>
+   <div style="grid-column:1/-1"><label>Weather / route / security risks</label><input type="text" name="risks"></div>
+   <div style="grid-column:1/-1"><label>Check-in schedule / monitoring method</label><input type="text" name="checkin" placeholder="e.g. every 2 hrs by phone + Live Map"></div>
+   <div><label>No-go criteria</label><input type="text" name="nogo" placeholder="e.g. failed alcohol test, critical defect, flooding"></div><div><label>Emergency contact</label><input type="text" name="emergency"></div></div>
+   <div class="form-actions" style="margin-top:12px;"><button class="btn primary" type="submit">Save journey plan</button></div></form></details>
+  <div class="table-wrap"><table><thead><tr><th>Plan</th><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Approval</th><th></th></tr></thead><tbody>${D.jplans.length?[...D.jplans].sort((a,b)=>a.date<b.date?1:-1).slice(0,40).map(p=>`<tr><td><b>${esc(p.ref)}</b></td><td>${esc(fmtDate(p.date))}</td><td>${wsVeh(p.vehicleId)}</td><td>${esc(p.driverName)}</td><td style="white-space:normal;min-width:200px;">${esc(p.origin)} → ${esc(p.dest)}<div class="dim small">${esc(p.route)}</div></td><td>${apprTag(p)}</td><td><div class="row-actions"><button class="btn small" data-jp-send="${p.id}">Send to driver</button><button class="btn ghost small" data-delete="jplans:${p.id}">Delete</button></div></td></tr>`).join(''):'<tr class="empty-row"><td colspan="7">No journey plans yet.</td></tr>'}</tbody></table></div>`;
+}
+function jplanText(p){ return `JOURNEY PLAN ${p.ref} — ${fmtDate(p.date)}\nTruck: ${vehicleLabel(p.vehicleId)}${p.trailer?' / '+p.trailer:''}\nDriver: ${p.driverName}\nLoad: ${p.load||'—'} ${p.weight?p.weight+' t':''}\nFrom ${p.origin} to ${p.dest}\nApproved route: ${p.route}\nDepart: ${p.depart||'—'}  Arrive: ${p.arrive||'—'}\nRest/fuel/safe parks: ${p.rest||'—'}\nRisks: ${p.risks||'—'}\nCheck-in: ${p.checkin||'—'}\nNO-GO: ${p.nogo||'—'}\nEmergency: ${p.emergency||'—'}\nStay on the approved route. Report any deviation or defect immediately.`; }
+
+/* ============================================================ ws_d.js ============================================================ */
+/* ===== Approvals · Repair requests · settings · events · navigation ===== */
+const LOGI=['Logistics Manager','General Manager'];
+function apprTag(r){ if(!r.apprReq&&!r.appr) return '<span class="dim">—</span>'; const s=r.appr?r.appr.status:'Pending'; return wsTag(s,s==='Approved'?'green':s==='Rejected'?'red':'amber')+(r.appr?`<div class="dim small">${esc(r.appr.by||'')}</div>`:''); }
+function wsRoleBar(){ return `<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;"><span class="dim small">You are</span><select data-ws-role="1" style="width:auto;">${WS_ROLES.map(r=>`<option${myRole()===r?' selected':''}>${r}</option>`).join('')}</select><span class="dim small">This device only. Approvals check your role${Object.keys((STATE.data.apprCfg||{}).pins||{}).length?' and PIN':''}.</span></div>`; }
+const RQ_STAGE={RCA:['Awaiting RCA','amber','Maintenance Manager'],GM:['Awaiting authorization','amber','General Manager'],MD:['Awaiting approval','blue','MD'],Approved:['Approved','green',''],Rejected:['Rejected','red','']};
+function apprItems(){
+  const D=STATE.data, out=[];
+  const add=(kind,coll,r,roles,title,sub)=>out.push({kind,coll,rec:r,roles,title,sub,status:r.appr?r.appr.status:'Pending',at:r.appr?r.appr.at:''});
+  D.journey.filter(r=>r.apprReq).forEach(r=>add('Trip','journey',r,LOGI,`${vehicleLabel(r.vehicleId)} · ${ROUTES[r.route]?ROUTES[r.route].label:(r.route||'')}`,`${fmtDate(r.date)} · driver ${r.driverName||'—'} · transit ${r.durationActual||'—'} h · delay ${r.delayHrs||0} h · deviations ${r.deviations||0}`));
+  D.jplans.forEach(p=>{ if(!p.apprReq) return; add('Journey plan','jplans',p,LOGI,`${p.ref} · ${vehicleLabel(p.vehicleId)} · ${p.origin} → ${p.dest}`,`${fmtDate(p.date)} · driver ${p.driverName} · ${p.route}`); });
+  D.pretrip.filter(r=>r.apprReq).forEach(r=>add('Failed alcohol test','pretrip',r,LOGI,`${r.driverName||'Driver'} · ${vehicleLabel(r.vehicleId)}`,`${fmtDate(r.date)} ${r.time||''} — confirm the driver was stood down and not allowed to drive`));
+  D.defects.filter(d=>d.apprReq).forEach(d=>add('Restricted use','defects',d,LOGI,`${d.ref} · ${vehicleLabel(d.vehicleId)} · ${d.system}`,`${d.desc} — authorise restricted operation`));
+  D.rcas.filter(r=>r.apprReq).forEach(r=>add('RCA sign-off','rcas',r,['General Manager'],`${r.ref} · ${r.problem||''}`.slice(0,110),`Owner ${r.owner||'—'} · verification: ${r.verification||'—'}`));
+  D.repairReqs.forEach(q=>{ if(q.stage!=='GM'&&q.stage!=='MD'&&q.stage!=='Approved'&&q.stage!=='Rejected') return; const pend=q.stage==='GM'||q.stage==='MD';
+    out.push({kind:'Repair request',coll:'repairReqs',rec:q,roles:[q.stage==='MD'?'MD':'General Manager'],title:`${q.ref} · ${vehicleLabel(q.vehicleId)} · ${q.work||''}`.slice(0,120),sub:`${naira(num(q.total))} · RCA: ${q.rca||'—'}`,status:pend?'Pending':q.stage,at:q.mdAt||q.gmAt||'',stageLabel:q.stage==='GM'?'Authorize (GM)':q.stage==='MD'?'Approve (MD)':''}); });
+  return out;
+}
+function apprPendingCount(){ return apprItems().filter(i=>i.status==='Pending').length; }
+function renderApprovalsPage(){
+  const v=STATE.apprView||'pending', all=apprItems(), pend=all.filter(i=>i.status==='Pending'), hist=all.filter(i=>i.status!=='Pending').sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,60);
+  const rows=(v==='pending'?pend:hist);
+  const mine=pend.filter(i=>i.roles.indexOf(myRole())>-1).length;
+  return wsHead('Approvals','Trips, journey plans, repair requests and safety sign-offs wait here for the right manager.')+wsRoleBar()+
+  `<div class="grid cols-4" style="margin-bottom:14px;">${kc('Waiting for approval',pend.length,'All items',pend.length?'amber':'green')}${kc('Waiting for you',mine,'As '+myRole(),mine?'amber':'green')}${kc('Trips pending',pend.filter(i=>i.kind==='Trip').length,'Logistics Mgr or GM')}${kc('Repair requests',pend.filter(i=>i.kind==='Repair request').length,'GM → MD')}</div>`+
+  wsTabs('appr-view',v,[['pending','Pending ('+pend.length+')'],['history','History']])+
+  `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Item</th><th>Details</th><th>Needs</th><th>${v==='pending'?'Action':'Result'}</th></tr></thead><tbody>${rows.length?rows.map(i=>{ const key=i.coll+':'+i.rec.id; const can=i.roles.indexOf(myRole())>-1;
+    return `<tr><td>${wsTag(i.kind,'grey')}</td><td style="white-space:normal;min-width:200px;"><b>${esc(i.title)}</b></td><td style="white-space:normal;min-width:240px;">${esc(i.sub)}</td><td>${esc(i.roles.join(' / '))}</td><td>${v==='pending'?`<div class="row-actions">${i.coll==='repairReqs'?`<button class="btn small" data-rq-open="${i.rec.id}">Open</button>`:''}<button class="btn small primary" data-appr="${key}:approve"${can?'':' title="Switch role above to approve"'}>${i.stageLabel||'Approve'}</button><button class="btn small danger" data-appr="${key}:reject">Reject</button></div>`:`${wsTag(i.status,i.status==='Approved'?'green':'red')}<div class="dim small">${i.rec.appr?esc(i.rec.appr.by||''):''} ${i.rec.appr&&i.rec.appr.note?'· '+esc(i.rec.appr.note):''}</div>`}</td></tr>`; }).join(''):`<tr class="empty-row"><td colspan="5">${v==='pending'?'Nothing waiting — all clear.':'No decisions yet.'}</td></tr>`}</tbody></table></div>`+wsSettingsCard();
+}
+function wsSettingsCard(){
+  const c=STATE.data.apprCfg||{}; const n=c.names||{};
+  return `<details class="form-card" style="margin-top:18px;"><summary>Phone notifications &amp; role PINs</summary>
+  <div class="dim small" style="margin-bottom:10px;line-height:1.6;"><b>Phone alerts:</b> install the free <b>ntfy</b> app (Android / iPhone), tap “+”, subscribe to the topic below, then press “Send test”. Anyone who knows the topic can read alerts, so keep it private. Alerts are short and generic (truck, route, reference no.).</div>
+  <div class="form-grid"><div style="grid-column:1/-1"><label>Notification topic</label><div class="flex gap8"><input type="text" id="cfg-topic" value="${esc(c.topic||'')}" placeholder="click Generate"><button class="btn small" type="button" data-cfg-gen="1">Generate</button><button class="btn small primary" type="button" data-cfg-save="1">Save</button><button class="btn small" type="button" data-cfg-test="1">Send test</button></div></div></div>
+  <div class="dim small" style="margin:12px 0 6px;"><b>Names &amp; PINs</b> (optional). A PIN is asked each time that role approves. Names appear on approvals.</div>
+  <div class="table-wrap"><table><thead><tr><th>Role</th><th>Name</th><th>PIN</th></tr></thead><tbody>${WS_ROLES.filter(r=>r!=='Viewer').map(r=>`<tr><td>${r}</td><td><input type="text" data-cfg-name="${r}" value="${esc(n[r]||'')}" placeholder="Name"></td><td><input type="password" data-cfg-pin="${r}" placeholder="${(c.pins||{})[r]?'●●●● (set — type to change)':'4+ digits'}" autocomplete="new-password"></td></tr>`).join('')}</tbody></table></div>
+  <div class="form-actions"><button class="btn primary small" type="button" data-cfg-save-roles="1">Save names &amp; PINs</button></div></details>`;
+}
+async function wsDecide(coll,id,act){
+  const r=STATE.data[coll].find(x=>x.id===id); if(!r) return;
+  if(coll==='repairReqs') return wsReqDecide(r,act);
+  const roles=(coll==='rcas')?['General Manager']:LOGI;
+  if(!wsAuth(roles,act==='approve'?'approve this':'reject this')) return;
+  let note=''; if(act==='reject'){ note=prompt('Reason for rejecting (shown in history):')||''; if(!note) return; }
+  r.appr={status:act==='approve'?'Approved':'Rejected',by:wsWho(),at:new Date().toISOString(),note};
+  if(coll==='rcas'&&act==='reject'){ r.status='Actions done'; r.apprReq=''; }
+  if(coll==='defects'&&act==='approve'){ r.vehStatus='Restricted (authorized)'; }
+  showToast(act==='approve'?'Approved.':'Rejected.'); await persist(coll);
+}
+/* ---------- Repair requests ---------- */
+function renderRequestsPage(){
+  const D=STATE.data, all=[...D.repairReqs].sort((a,b)=>a.date<b.date?1:-1), openDefects=D.defects.filter(d=>d.status!=='Closed');
+  const comps=Object.keys(OEM_GUIDE).filter(k=>k!=='Other').concat(['Other']);
+  const rows=Array.from({length:6},(_,i)=>`<tr><td><input type="text" name="pn_${i}" placeholder="Part ${i+1}"></td><td><input type="number" name="pq_${i}" min="0" step="any" value="${i?'':1}" style="width:70px;"></td><td><input type="number" name="pp_${i}" min="0" step="any" placeholder="₦ each"></td></tr>`).join('');
+  const cnt=s=>all.filter(q=>q.stage===s).length;
+  return wsHead('Repair Requests','Yard Admin raises → Maintenance Manager adds the RCA → General Manager authorizes → MD approves.')+wsRoleBar()+
+  `<div class="grid cols-4" style="margin-bottom:14px;">${kc('Awaiting RCA',cnt('RCA'),'Maintenance Manager')}${kc('Awaiting GM',cnt('GM'),'Authorization')}${kc('Awaiting MD',cnt('MD'),'Final approval')}${kc('Approved',cnt('Approved'),'Cleared to spend','green')}</div>
+  <details class="form-card"><summary>New repair request</summary><form data-rq-form="1"><div class="form-grid">
+   <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div><div><label>Truck no.</label><select name="vehicleId" required>${vehicleOptions()}</select></div>
+   <div><label>Driver name</label><input type="text" name="driverName" required></div><div><label>Technician</label><input type="text" name="technician" required></div>
+   <div><label>System / component</label><select name="component" data-rq-comp="1">${comps.map(c=>`<option>${c}</option>`).join('')}</select></div>
+   <div><label>Linked defect report (optional)</label><select name="defectId"><option value="">— none —</option>${openDefects.map(d=>`<option value="${d.id}">${esc(d.ref)} · ${esc(vehicleLabel(d.vehicleId))} · ${esc(d.desc.slice(0,40))}</option>`).join('')}</select></div>
+   <div style="grid-column:1/-1"><label>Nature of work to be done</label><textarea name="work" rows="2" required></textarea></div></div>
+   <div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Part</th><th>Qty</th><th>Price each (₦)</th></tr></thead><tbody>${rows}</tbody></table></div>
+   <div class="form-grid" style="margin-top:8px;"><div><label>Workmanship / labour (₦)</label><input type="number" name="labour" min="0" step="any"></div><div><label>Estimated total</label><div id="rq-total" style="font-weight:700;font-size:18px;padding-top:6px;">₦0</div></div></div>
+   <div id="rq-oem" style="margin-top:10px;">${oemCard(comps[0],true)}</div>
+   <div class="form-actions" style="margin-top:12px;"><button class="btn primary" type="submit">Submit request</button><span class="dim small">Only the Yard Admin role can raise a request.</span></div></form></details>
+  <div class="table-wrap"><table><thead><tr><th>Request</th><th>Date</th><th>Truck</th><th>Work</th><th>Total</th><th>Stage</th><th></th></tr></thead><tbody>${all.length?all.map(q=>{ const s=RQ_STAGE[q.stage]||['',''] ; return `<tr><td><b>${esc(q.ref)}</b></td><td>${esc(fmtDate(q.date))}</td><td>${wsVeh(q.vehicleId)}<div class="dim small">${esc(q.driverName||'')}</div></td><td style="white-space:normal;min-width:200px;">${esc(q.work||'')}</td><td>${naira(num(q.total))}</td><td>${wsTag(s[0],s[1])}${s[2]?`<div class="dim small">${s[2]}</div>`:''}</td><td><div class="row-actions"><button class="btn small primary" data-rq-open="${q.id}">Open</button><button class="btn ghost small" data-delete="repairReqs:${q.id}">Delete</button></div></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="7">No repair requests yet.</td></tr>'}</tbody></table></div>`;
+}
+function wsRqModal(){
+  const q=STATE.wsReq?STATE.data.repairReqs.find(x=>x.id===STATE.wsReq):null; if(!q) return '';
+  const s=RQ_STAGE[q.stage]||['','']; const me=myRole();
+  const act=q.stage==='RCA'?`<div style="margin-top:12px;"><label>Short RCA — why did this fail? (Maintenance Manager)</label><textarea id="rq-rca" rows="3" placeholder="Root cause and why this repair is the right fix">${esc(q.rca||'')}</textarea><div class="form-actions"><button class="btn primary" data-rq-act="rca">Submit RCA → General Manager</button></div></div>`
+    :(q.stage==='GM'||q.stage==='MD')?`<div class="form-actions" style="margin-top:12px;"><button class="btn primary" data-rq-act="approve">${q.stage==='GM'?'Authorize (GM)':'Approve (MD)'}</button><button class="btn danger" data-rq-act="reject">Reject</button></div>`:'';
+  return `<div class="modal-bg" data-ws-close="1"><div class="modal" style="max-width:720px;max-height:90vh;overflow:auto;" onclick="event.stopPropagation()">
+  <div class="flex" style="justify-content:space-between;align-items:center;"><h3 style="margin:0;">Request ${esc(q.ref)}</h3><button class="btn small ghost" data-ws-close="1">✕</button></div>
+  <div style="margin:8px 0;">${wsTag(s[0],s[1])} <span class="dim small">${s[2]?'Waiting for: '+s[2]+' · you are '+esc(me):''}</span></div>
+  <div class="grid cols-2" style="gap:8px;"><div><span class="dim small">Truck</span><div><b>${wsVeh(q.vehicleId)}</b></div></div><div><span class="dim small">Driver</span><div>${esc(q.driverName||'—')}</div></div><div><span class="dim small">Technician</span><div>${esc(q.technician||'—')}</div></div><div><span class="dim small">System</span><div>${esc(q.component||'—')}</div></div></div>
+  <div style="margin:8px 0;"><span class="dim small">Nature of work</span><div>${esc(q.work||'')}</div></div>
+  <div class="table-wrap"><table><thead><tr><th>Part</th><th>Qty</th><th>Each</th><th>Amount</th></tr></thead><tbody>${(q.parts||[]).map(p=>`<tr><td>${esc(p.n)}</td><td>${esc(p.q)}</td><td>${naira(num(p.p))}</td><td>${naira(num(p.q)*num(p.p))}</td></tr>`).join('')||'<tr class="empty-row"><td colspan="4">No parts listed</td></tr>'}<tr><td colspan="3">Workmanship</td><td>${naira(num(q.labour))}</td></tr><tr><td colspan="3"><b>Total</b></td><td><b>${naira(num(q.total))}</b></td></tr></tbody></table></div>
+  ${q.rca?`<div class="note" style="margin-top:8px;"><b>RCA${q.rcaBy?' ('+esc(q.rcaBy)+')':''}:</b> ${esc(q.rca)}</div>`:''}
+  <div style="margin-top:10px;">${oemCard(q.component,true)}</div>
+  <div class="dim small" style="margin-top:10px;"><b>History</b><br>${(q.log||[]).map(l=>`${esc(l.at.slice(0,16).replace('T',' '))} — ${esc(l.what)} · ${esc(l.by)}${l.note?' — '+esc(l.note):''}`).join('<br>')}</div>
+  ${act}</div></div>`;
+}
+async function wsReqDecide(q,act,rcaText){
+  const log=(what,note)=>{ q.log=(q.log||[]).concat([{at:new Date().toISOString(),what,by:wsWho(),note:note||''}]); };
+  if(act==='rca'){ if(!wsAuth(['Maintenance Manager'],'submit the RCA')) return; if(!rcaText){ showToast('Write the RCA first.'); return; } q.rca=rcaText; q.rcaBy=wsWho(); q.stage='GM'; log('RCA submitted'); wsNotify('Repair request awaiting GM',`${q.ref} · ${vehicleLabel(q.vehicleId)} · ${naira(num(q.total))}`,3); }
+  else if(act==='approve'){
+    if(q.stage==='GM'){ if(!wsAuth(['General Manager'],'authorize this request')) return; q.stage='MD'; q.gmAt=new Date().toISOString(); log('Authorized'); wsNotify('Repair request awaiting MD',`${q.ref} · ${vehicleLabel(q.vehicleId)} · ${naira(num(q.total))}`,4); }
+    else if(q.stage==='MD'){ if(!wsAuth(['MD'],'approve this request')) return; q.stage='Approved'; q.mdAt=new Date().toISOString().slice(0,10); log('Approved'); wsNotify('Repair request approved',`${q.ref} · ${vehicleLabel(q.vehicleId)} · ${naira(num(q.total))}`,3); }
+  } else if(act==='reject'){
+    const role=q.stage==='MD'?'MD':'General Manager'; if(!wsAuth([role],'reject this request')) return; const n=prompt('Reason for rejecting:')||''; if(!n) return; q.stage='Rejected'; log('Rejected',n);
+  }
+  STATE.wsReq=(act==='rca'||act==='approve'||act==='reject')?null:STATE.wsReq; showToast('Request updated.'); await persist('repairReqs');
+}
+
+/* ---------- form hooks ---------- */
+const WS_HOOKS={
+  defect(rec){ const d=raiseDefect(rec); STATE.wsView='faults'; return 'handled'; },
+  breakdown(rec){
+    if(rec.restoredDate&&rec.restoredTime&&rec.date&&rec.time){ const h=(Date.parse(rec.restoredDate+'T'+rec.restoredTime)-Date.parse(rec.date+'T'+rec.time))/36e5; if(h>=0) rec.downHrs=String(Math.round(h*10)/10); }
+    const m={id:uid(),date:rec.date,vehicleId:rec.vehicleId,type:'Breakdown',kind:'road',component:wsSys2comp(rec.system),status:rec.restoredDate?'Open':'Open',bdId:rec.id,notes:`Roadside breakdown: ${rec.desc||''} (${rec.location||''})`};
+    STATE.data.maintenance=[...STATE.data.maintenance,m]; wsDirty.add('maintenance');
+    const d=raiseDefect({vehicleId:rec.vehicleId,date:rec.date,time:rec.time,location:rec.location,reportedBy:rec.driverName,system:rec.system,desc:rec.desc||'Roadside breakdown',severity:rec.severity||'Major',vehStatus:'OUT OF SERVICE',source:'Roadside breakdown',mId:m.id,component:m.component,immediate:rec.action});
+    rec.defectId=d.id; rec.ref=wsRef('breakdowns','RB'); return null;
+  },
+  tyre(rec){ return null; },
+  tyreInsp(rec){
+    const t=num(rec.tread), bad=rec.condition!=='OK', low=t>0&&t<3;
+    if(bad||low){ const crit=/Bulge|Failed/.test(rec.condition); raiseDefect({vehicleId:rec.vehicleId,date:rec.date,system:'Tyre/wheel',desc:`Tyre ${rec.position}: ${rec.condition}${t?`, tread ${t} mm`:''}${rec.action?' — '+rec.action:''}`,severity:crit?'Critical':'Major',source:'Tyre inspection',reportedBy:rec.inspector,component:'Tyres / Wheels'}); showToast('Tyre defect raised in the Fault Log.'); }
+    return null;
+  },
+  jsa(rec){ rec.ref=wsRef('jsas','JSA'); if(rec.jobCardId&&!rec.vehicleId){ const j=STATE.data.jobcards.find(x=>x.id===rec.jobCardId); if(j) rec.vehicleId=j.vehicleId; } STATE.jsaJob=''; return null; },
+  jplan(rec){ rec.ref=wsRef('jplans','JP'); rec.apprReq='1'; wsNotify('Journey plan awaiting approval',`${rec.ref} · ${vehicleLabel(rec.vehicleId)} · ${rec.origin} → ${rec.dest}`,3); return null; },
+};
+/* ---------- events ---------- */
+function wsAttach(){
+  const app=document.getElementById('app'); if(!app) return; const $$=(s,f)=>app.querySelectorAll(s).forEach(f);
+  $$('[data-ws-view]',e=>e.addEventListener('click',()=>{ STATE.wsView=e.getAttribute('data-ws-view'); render(); }));
+  $$('[data-tyre-view]',e=>e.addEventListener('click',()=>{ STATE.tyreView=e.getAttribute('data-tyre-view'); render(); }));
+  $$('[data-appr-view]',e=>e.addEventListener('click',()=>{ STATE.apprView=e.getAttribute('data-appr-view'); render(); }));
+  $$('[data-ws-role]',e=>e.addEventListener('change',()=>{ setRole(e.value); render(); }));
+  $$('[data-ws-close]',e=>e.addEventListener('click',ev=>{ if(ev.target!==e) return; STATE.wsJc=STATE.wsRca=STATE.wsTyre=STATE.wsReq=null; render(); }));
+  $$('[data-ws-open-jc]',e=>e.addEventListener('click',()=>{ STATE.wsJc=e.getAttribute('data-ws-open-jc'); render(); }));
+  $$('[data-ws-goto-jsa]',e=>e.addEventListener('click',()=>{ STATE.jsaJob=e.getAttribute('data-ws-goto-jsa'); STATE.wsJc=null; STATE.tab='safety'; STATE.safetyView='jsa'; render(); }));
+  $$('form[data-ws-jc]',f=>f.addEventListener('submit',ev=>{ ev.preventDefault(); wsSaveJc(f,ev.submitter&&ev.submitter.value); }));
+  $$('form[data-rca-form]',f=>f.addEventListener('submit',ev=>{ ev.preventDefault(); wsSaveRca(f); }));
+  $$('[data-rca-open]',e=>e.addEventListener('click',()=>{ STATE.wsRca=e.getAttribute('data-rca-open'); render(); }));
+  $$('[data-rca-start]',e=>e.addEventListener('click',()=>{ const k=e.getAttribute('data-rca-start'); const a=wsRcaAlerts().find(x=>x.key===k); STATE.wsRcaDraft=a?{key:a.key,vehicleId:a.vehicleId||'',trigger:a.kind,component:a.component||'',problem:a.text,status:'Open'}:{status:'Open'}; STATE.wsRca='new'; render(); }));
+  $$('[data-tyre-remove]',e=>e.addEventListener('click',()=>{ STATE.wsTyre=e.getAttribute('data-tyre-remove'); render(); }));
+  $$('form[data-tyre-rm]',f=>f.addEventListener('submit',async ev=>{ ev.preventDefault(); const t=STATE.data.tyres.find(x=>x.id===f.getAttribute('data-tyre-rm')); if(!t) return; const fd=new FormData(f); ['removeDate','removeOdo','removeReason','repairCost','retreadCost','disposalCost'].forEach(n=>{ t[n]=String(fd.get(n)||''); }); t.status=fd.get('outcome')==='Scrapped'?'Scrapped':'Removed'; STATE.wsTyre=null; showToast('Tyre updated.'); await persist('tyres'); }));
+  $$('[data-appr]',e=>e.addEventListener('click',()=>{ const [c,i,a]=e.getAttribute('data-appr').split(':'); wsDecide(c,i,a); }));
+  $$('[data-rq-open]',e=>e.addEventListener('click',()=>{ STATE.wsReq=e.getAttribute('data-rq-open'); render(); }));
+  $$('[data-rq-act]',e=>e.addEventListener('click',()=>{ const q=STATE.data.repairReqs.find(x=>x.id===STATE.wsReq); if(!q) return; const t=document.getElementById('rq-rca'); wsReqDecide(q,e.getAttribute('data-rq-act'),t?t.value.trim():''); }));
+  $$('[data-jp-send]',e=>e.addEventListener('click',()=>{ const p=STATE.data.jplans.find(x=>x.id===e.getAttribute('data-jp-send')); if(!p) return; let ph=String(p.phone||'').replace(/\D/g,''); if(ph.length===11&&ph[0]==='0') ph='234'+ph.slice(1); window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(jplanText(p)),'_blank'); }));
+  const rq=app.querySelector('form[data-rq-form]');
+  if(rq){
+    const upd=()=>{ let t=0; for(let i=0;i<6;i++) t+=num(rq.elements['pq_'+i].value)*num(rq.elements['pp_'+i].value); t+=num(rq.elements['labour'].value); const el=document.getElementById('rq-total'); if(el) el.textContent=naira(t); };
+    rq.addEventListener('input',upd);
+    rq.addEventListener('change',e=>{ if(e.target.name==='component'){ const el=document.getElementById('rq-oem'); if(el) el.innerHTML=oemCard(e.target.value,true); } });
+    rq.addEventListener('submit',async ev=>{ ev.preventDefault(); if(!wsAuth(['Yard Admin'],'raise a repair request')) return;
+      const fd=new FormData(rq), g=n=>String(fd.get(n)||'').trim(); const parts=[]; for(let i=0;i<6;i++){ if(g('pn_'+i)) parts.push({n:g('pn_'+i),q:g('pq_'+i)||'1',p:g('pp_'+i)||'0'}); }
+      const total=parts.reduce((a,p)=>a+num(p.q)*num(p.p),0)+num(g('labour'));
+      const q={id:uid(),ref:wsRef('repairReqs','RQ'),date:g('date'),vehicleId:g('vehicleId'),driverName:g('driverName'),technician:g('technician'),component:g('component'),defectId:g('defectId'),work:g('work'),parts,labour:g('labour'),total:String(total),stage:'RCA',log:[{at:new Date().toISOString(),what:'Request raised',by:wsWho(),note:''}]};
+      STATE.data.repairReqs=[...STATE.data.repairReqs,q]; wsNotify('New repair request',`${q.ref} · ${vehicleLabel(q.vehicleId)} · ${naira(total)} — Maintenance Manager to add RCA`,3); showToast('Request raised — waiting for the Maintenance Manager’s RCA.'); await persist('repairReqs'); });
+  }
+  $$('form[data-ws-form]',form=>form.addEventListener('submit',async ev=>{
+    ev.preventDefault(); const coll=form.getAttribute('data-ws-form'), hook=form.getAttribute('data-ws-hook');
+    const rec={id:uid()}; new FormData(form).forEach((v,k)=>{ rec[k]=String(v).trim(); }); const clean=compactRec;
+    let res=null; if(WS_HOOKS[hook]) res=WS_HOOKS[hook](rec); if(res==='handled'){ form.reset(); showToast('Defect report saved — job card created.'); await wsFlush(); return; }
+    clean(rec); STATE.data[coll]=[...STATE.data[coll],rec]; form.reset(); wsDirty.add(coll);
+    showToast('Saved.'); await wsFlush();
+  }));
+  const val=n=>{ const e=document.getElementById(n); return e?e.value.trim():''; };
+  $$('[data-cfg-gen]',e=>e.addEventListener('click',()=>{ const t='fleetdesk-'+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,8); document.getElementById('cfg-topic').value=t; }));
+  $$('[data-cfg-save]',e=>e.addEventListener('click',async()=>{ const t=val('cfg-topic').replace(/[^A-Za-z0-9_-]/g,''); STATE.data.apprCfg=Object.assign({},STATE.data.apprCfg,{topic:t}); showToast(t?'Notification topic saved for everyone.':'Notifications turned off.'); await persist('apprCfg'); }));
+  $$('[data-cfg-test]',e=>e.addEventListener('click',()=>{ if(!(STATE.data.apprCfg||{}).topic){ showToast('Save a topic first.'); return; } wsNotify('FleetDesk test','If you can read this, phone alerts work.',3); showToast('Test sent — check the ntfy app.'); }));
+  $$('[data-cfg-save-roles]',e=>e.addEventListener('click',async()=>{
+    const c=Object.assign({},STATE.data.apprCfg), names=Object.assign({},c.names), pins=Object.assign({},c.pins);
+    let bad=false; app.querySelectorAll('[data-cfg-name]').forEach(i=>{ names[i.getAttribute('data-cfg-name')]=i.value.trim(); });
+    app.querySelectorAll('[data-cfg-pin]').forEach(i=>{ const r=i.getAttribute('data-cfg-pin'); if(!i.value) return; if(i.value.length<4){ bad=true; return; } if(pins[r]){ const old=prompt('Enter the current '+r+' PIN to change it'); if(old===null||wsHash(old)!==pins[r]){ showToast('Current PIN is wrong.'); bad=true; return; } } pins[r]=wsHash(i.value); });
+    if(bad){ if(!STATE.toast) showToast('PIN must be at least 4 characters.'); return; }
+    STATE.data.apprCfg=Object.assign(c,{names,pins}); showToast('Saved.'); await persist('apprCfg'); }));
+}
+function wsModals(){ return wsJcModal()+wsRcaModal()+wsTyreModal()+wsRqModal(); }
+
+/* ---------- navigation + page routing + safety JSA tab ---------- */
+(function(){
+  const at=NAV.findIndex(n=>n[0]==='maintenance')+1;
+  const add=[['approvals','Approvals'],['requests','Repair Requests'],['workshop','Workshop'],['rca','RCA'],['tyres','Tyre Register']];
+  NAV.splice(at,0,...add);
+  Object.assign(NAV_ICON,{approvals:'✅',requests:'🧾',workshop:'🛠️',rca:'🔎',tyres:'🛞'});
+  Object.assign(NAV_LABEL,{approvals:'Approvals',requests:'Repair Requests',workshop:'Workshop',rca:'RCA',tyres:'Tyre Register'});
+  ['approvals','requests','workshop','rca','tyres'].forEach(k=>{ NAV_GROUP[k]='Workshop & Approvals'; });
+})();
+const WS_TABS={approvals:renderApprovalsPage,requests:renderRequestsPage,workshop:renderWorkshopPage,rca:renderRcaPage,tyres:renderTyresPage};
+const _crit=criticalBadgeFor;
+criticalBadgeFor=function(k){ if(k==='approvals'){ const n=apprPendingCount(); return n||null; } if(k==='rca'){ const n=wsRcaAlerts().filter(a=>!a.rca).length; return n||null; } if(k==='workshop'){ const n=(STATE.data.defects||[]).filter(d=>d.status!=='Closed'&&d.vehStatus==='OUT OF SERVICE').length; return n||null; } return _crit(k); };
+const _attach0=attachEvents; attachEvents=function(){ _attach0(); try{ wsAttach(); }catch(e){ console.error('wsAttach',e); } };
+const _safTabs=safetyViewTabs;
+safetyViewTabs=function(){ return _safTabs().replace('</div>',`<button data-safety-view="jsa" class="${STATE.safetyView==='jsa'?'active':''}">Job Safety Analysis</button></div>`); };
+const _rdp=renderDeptPage;
+renderDeptPage=function(k){ if(k==='safety'&&STATE.safetyView==='jsa') return wsHead('Safety (HSE)','Workshop Job Safety Analysis, and safety indicators from defects, tyres and incidents.')+safetyViewTabs()+renderJsaView(); return _rdp(k); };
+const _rjp=renderJourneyPage;
+renderJourneyPage=function(){ let h=_rjp(); const mark='<div class="section-title"><span>Trips by Route — Target vs Actual</span>'; return h.indexOf(mark)>-1?h.replace(mark,jplanSection()+mark):h+jplanSection(); };
+const _fj=finalizeJourney;
+finalizeJourney=function(rec){ const ok=_fj(rec); if(ok){ rec.apprReq='1'; wsNotify('Trip awaiting approval',`${vehicleLabel(rec.vehicleId)} · ${ROUTES[rec.route]?ROUTES[rec.route].label:rec.route||''} · ${rec.driverName||''}`,3); } return ok; };
+setInterval(()=>{ try{ wsSweep(); }catch(e){} },120000); setTimeout(()=>{ try{ wsSeed(); wsSweep(); }catch(e){} },9000);
 
 loadAll();
 </script>
