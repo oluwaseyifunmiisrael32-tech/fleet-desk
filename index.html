@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.3 · 30 Oct 2026';
+const APP_VERSION='v12.4 · 30 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -7590,7 +7590,6 @@ function wsAttach(){
   $$('[data-rq-open]',e=>e.addEventListener('click',()=>{ STATE.wsReq=e.getAttribute('data-rq-open'); render(); }));
   $$('[data-rq-act]',e=>e.addEventListener('click',()=>{ const q=STATE.data.repairReqs.find(x=>x.id===STATE.wsReq); if(!q) return; const t=document.getElementById('rq-rca'); wsReqDecide(q,e.getAttribute('data-rq-act'),t?t.value.trim():''); }));
   const jpf=app.querySelector('form[data-ws-hook="jplan"]'); if(jpf&&jpf.elements.planId) jpf.elements.planId.addEventListener('change',e=>{ const pl=(STATE.data.routePlans||[]).find(x=>x.id===e.target.value); if(!pl) return; const st=pl.stops||[]; jpf.elements.route.value=st.map(x=>x.name).join(' → '); if(st.length){ if(!jpf.elements.origin.value) jpf.elements.origin.value=st[0].name; if(!jpf.elements.dest.value) jpf.elements.dest.value=st[st.length-1].name; } });
-  $$('[data-jp-send]',e=>e.addEventListener('click',()=>{ const p=STATE.data.jplans.find(x=>x.id===e.getAttribute('data-jp-send')); if(!p) return; let ph=String(p.phone||'').replace(/\D/g,''); if(ph.length===11&&ph[0]==='0') ph='234'+ph.slice(1); window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(jplanText(p)),'_blank'); }));
   const rq=app.querySelector('form[data-rq-form]');
   if(rq){
     const upd=()=>{ let t=0; for(let i=0;i<6;i++) t+=num(rq.elements['pq_'+i].value)*num(rq.elements['pp_'+i].value); t+=num(rq.elements['labour'].value); const el=document.getElementById('rq-total'); if(el) el.textContent=naira(t); };
@@ -7882,6 +7881,7 @@ async function jpPutOnMap(id,quiet){
   const stops=[], miss=[];
   try{ for(const n of names){ let g=null; try{ g=await jGeocode(n+', Nigeria'); }catch(e){} stops.push({name:n,lat:g?g.lat:null,lon:g?g.lon:null}); if(!g) miss.push(n); await new Promise(r=>setTimeout(r,1100)); } }catch(e){}
   STATE.jpBusy=false;
+  const same=jPlans().find(x=>jPlanPts(x).length>=2&&(x.stops||[]).map(z=>String(z.name).toLowerCase()).join('|')===names.map(z=>z.toLowerCase()).join('|')); if(same){ p.planId=same.id; p.routeKey=same.routeKey; await persist('jplans'); showToast('Linked to the existing approved route — already on the Live Map.'); return; }
   const plan={id:uid(),name:`${names[0]} → ${names[names.length-1]} (${p.ref})`,routeKey:p.routeKey||'other',km:5,idleMin:20,stops,approved:true,at:new Date().toISOString(),fromPlan:p.ref};
   STATE.data.routePlans=[...jPlans(),plan]; p.planId=plan.id; p.routeKey=plan.routeKey;
   await persist('routePlans'); await persist('jplans');
@@ -7909,6 +7909,40 @@ function wsgAttach(){
   if(STATE.jpAuto){ const id=STATE.jpAuto; STATE.jpAuto=''; setTimeout(()=>jpPutOnMap(id,true),600); }
 }
 const _attach3=attachEvents; attachEvents=function(){ _attach3(); try{ wsgAttach(); }catch(e){ console.error('wsgAttach',e); } };
+
+
+/* ============================================================ ws_h.js ============================================================ */
+/* ===== v12.4: Put all on map · Send to driver opens only when pressed ===== */
+async function jpPutAllOnMap(){
+  const todo=(STATE.data.jplans||[]).filter(p=>!jpOnMap(p)&&jpStops(p).length>=2);
+  if(!todo.length){ showToast('Every journey plan with a route is already on the Live Map.'); return; }
+  if(STATE.jpBusy) return; let done=0;
+  for(const p of todo){ showToast(`Putting plans on the map… ${done+1} of ${todo.length}`); await jpPutOnMap(p.id,true); done++; }
+  showToast(`${done} journey plan${done===1?'':'s'} processed — check the Live Map.`);
+}
+const _jplanSec2=jplanSection;
+jplanSection=function(){
+  let h=_jplanSec2(); const n=(STATE.data.jplans||[]).filter(p=>!jpOnMap(p)&&jpStops(p).length>=2).length;
+  return h.replace('<div class="table-wrap">',`<div style="margin:0 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><button class="btn primary small" data-jp-mapall="1"${n?'':' disabled'}>📍 Put all on map${n?' ('+n+')':''}</button><span class="dim small">${n?'Finds every unmapped route and adds it to the Live Map.':'All journey plans are on the Live Map.'}</span></div><div class="table-wrap">`);
+};
+/* send to driver: nothing opens until the button is pressed, and then WhatsApp only when you choose it */
+function jpSendModal(){
+  const p=STATE.jpSend?STATE.data.jplans.find(x=>x.id===STATE.jpSend):null; if(!p) return '';
+  return `<div class="modal-bg" data-jps-close="1"><div class="modal" style="max-width:600px;" onclick="event.stopPropagation()"><h3 style="margin-top:0;">Send plan ${esc(p.ref)} to the driver</h3>
+  <div class="form-grid"><div><label>Driver</label><input type="text" value="${esc(p.driverName)}" disabled></div><div><label>Phone (WhatsApp)</label><input type="tel" id="jps-phone" value="${esc(p.phone||'')}" placeholder="0803…"></div></div>
+  <pre style="white-space:pre-wrap;background:var(--panel-2);padding:12px;border-radius:8px;margin-top:12px;font-size:12.5px;line-height:1.55;max-height:260px;overflow:auto;">${esc(jplanText(p))}</pre>
+  <div class="form-actions" style="flex-wrap:wrap;"><button class="btn primary" data-jps-wa="1">Send on WhatsApp</button><button class="btn" data-jps-copy="1">Copy text</button><button class="btn ghost" data-jps-close="1">Close</button></div></div></div>`;
+}
+const _wm0=wsModals; wsModals=function(){ return _wm0()+jpSendModal(); };
+function wshAttach(){
+  const app=document.getElementById('app'); if(!app) return; const $$=(s,f)=>app.querySelectorAll(s).forEach(f);
+  $$('[data-jp-mapall]',e=>e.addEventListener('click',jpPutAllOnMap));
+  $$('[data-jp-send]',e=>{ const c=e.cloneNode(true); e.parentNode.replaceChild(c,e); c.addEventListener('click',()=>{ STATE.jpSend=c.getAttribute('data-jp-send'); render(); }); });
+  $$('[data-jps-close]',e=>e.addEventListener('click',ev=>{ if(ev.target===e||e.tagName==='BUTTON'){ STATE.jpSend=null; render(); } }));
+  $$('[data-jps-copy]',e=>e.addEventListener('click',()=>{ const p=STATE.data.jplans.find(x=>x.id===STATE.jpSend); if(!p) return; try{ navigator.clipboard.writeText(jplanText(p)); showToast('Copied.'); }catch(x){ showToast('Could not copy.'); } }));
+  $$('[data-jps-wa]',e=>e.addEventListener('click',()=>{ const p=STATE.data.jplans.find(x=>x.id===STATE.jpSend); if(!p) return; const el=document.getElementById('jps-phone'); let ph=String(el?el.value:p.phone||'').replace(/\D/g,''); if(ph.length===11&&ph[0]==='0') ph='234'+ph.slice(1); window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(jplanText(p)),'_blank'); }));
+}
+const _attach4=attachEvents; attachEvents=function(){ _attach4(); try{ wshAttach(); }catch(e){ console.error('wshAttach',e); } };
 
 loadAll();
 </script>
