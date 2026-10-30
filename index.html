@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.2 · 29 Oct 2026';
+const APP_VERSION='v12.3 · 30 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6281,6 +6281,7 @@ async function drawLiveMap(){
     if(r.pos) { L.circleMarker([r.pos.lat,r.pos.lon],{radius:9,color:'#0b0e13',weight:1.5,fillColor:col[r.st.k],fillOpacity:.95}).addTo(map).bindTooltip(r.label+' — '+liveAgo(r.pos.ts)); b.push([r.pos.lat,r.pos.lon]); }
     if(b.length) map.fitBounds(b,{padding:[30,30],maxZoom:12}); else map.setView([6.9,3.4],9); return;
   }
+  jPlans().forEach(p=>{ const q=jPlanPts(p); if(q.length>1) L.polyline(q,{color:'#3fb950',weight:3,opacity:.5,dashArray:'8 8'}).addTo(map).bindTooltip('Approved route: '+p.name); });
   pts.forEach(r=>{ const bad=(AN.A[r.key]||[]).some(f=>f.sev==='high'); const live=r.src==='live';
     const m=L.circleMarker([r.pos.lat,r.pos.lon],{radius:live?8:7,color:bad?'#e1543f':'#0b0e13',weight:bad?3:1.5,fillColor:col[r.st.k],fillOpacity:live?.95:.35}).addTo(map);
     m.bindPopup(`<b>${esc(r.label)}</b><br>${esc(r.st.t)}${r.cur&&r.cur.speed!=null?' · '+fmt(num(r.cur.speed))+' km/h':''}<br>${live?'':'Last known: '}${esc(liveAgo(r.pos.ts))}${r.pos.addr?'<br>'+esc(r.pos.addr):''}${r.driver?'<br>Driver: '+esc(r.driver):''}${(AN.A[r.key]||[]).map(f=>'<br><span style="color:#c0392b">⚠ '+esc(f.title)+'</span>').join('')}`); m.bindTooltip(r.label,{direction:'top'}); b.push([r.pos.lat,r.pos.lon]); });
@@ -7844,6 +7845,70 @@ const _attach2=attachEvents; attachEvents=function(){ _attach2(); try{ mcAttach(
 /* the banner also shows on the Summary page */
 const _rs=renderSummary; renderSummary=function(){ return mcBanner()+_rs(); };
 setTimeout(()=>{ try{ mcClose(false); }catch(e){} },14000); setInterval(()=>{ try{ mcClose(false); }catch(e){} },3600000);
+
+
+/* ============================================================ ws_g.js ============================================================ */
+/* ===== v12.3: Approve all · journey-plan routes put on the Live Map ===== */
+async function wsApproveAll(){
+  const me=myRole(), items=apprItems().filter(i=>i.status==='Pending'&&i.roles.indexOf(me)>-1);
+  if(!items.length){ showToast('Nothing is waiting for '+me+'.'); return; }
+  const kinds={}; items.forEach(i=>{ kinds[i.kind]=(kinds[i.kind]||0)+1; });
+  const money=items.filter(i=>i.coll==='repairReqs').reduce((a,i)=>a+num(i.rec.total),0);
+  if(!confirm(`Approve all ${items.length} item(s) waiting for ${me}?\n\n`+Object.keys(kinds).map(k=>kinds[k]+' × '+k).join('\n')+(money?`\n\nRepair requests included: ${naira(money)} in total.`:''))) return;
+  if(!wsAuth([me],'approve everything waiting for you')) return;
+  const at=new Date().toISOString(), by=wsWho(), touched=new Set(); let toMd=0;
+  items.forEach(i=>{ const r=i.rec;
+    if(i.coll==='repairReqs'){ r.log=(r.log||[]).concat([{at,what:r.stage==='GM'?'Authorized (approve all)':'Approved (approve all)',by,note:''}]); if(r.stage==='GM'){ r.stage='MD'; r.gmAt=at; toMd++; } else { r.stage='Approved'; r.mdAt=at.slice(0,10); } }
+    else { r.appr={status:'Approved',by,at,note:'approve all'}; if(i.coll==='defects') r.vehStatus='Restricted (authorized)'; }
+    touched.add(i.coll); });
+  if(toMd) wsNotify('Repair requests awaiting MD',`${toMd} request(s) authorized by the General Manager`,4);
+  for(const c of touched) await persist(c);
+  showToast(`${items.length} item(s) approved.`);
+}
+
+/* ---------- journey plan → approved route on the Live Map ---------- */
+function jpStops(p){
+  const raw=String(p.route||''); let names=raw.split(/→|->|>|\n|;|–|—|\s-\s/).map(x=>x.trim()).filter(Boolean);
+  if(names.length<2&&raw.indexOf(',')>-1) names=raw.split(',').map(x=>x.trim()).filter(Boolean);
+  const has=(n)=>names.some(x=>x.toLowerCase().indexOf(n.toLowerCase())>-1||n.toLowerCase().indexOf(x.toLowerCase())>-1);
+  if(p.origin&&!has(p.origin)) names.unshift(p.origin.trim()); if(p.dest&&!has(p.dest)) names.push(p.dest.trim());
+  return names.filter((n,i)=>names.findIndex(m=>m.toLowerCase()===n.toLowerCase())===i);
+}
+function jpOnMap(p){ const pl=p.planId&&jPlans().find(x=>x.id===p.planId); return !!(pl&&jPlanPts(pl).length>=2); }
+async function jpPutOnMap(id,quiet){
+  const p=STATE.data.jplans.find(x=>x.id===id); if(!p) return; if(jpOnMap(p)){ if(!quiet) showToast('This route is already on the Live Map.'); return; }
+  if(STATE.jpBusy) return; const names=jpStops(p); if(names.length<2){ showToast('Give the journey plan a start, an end and the places in between.'); return; }
+  STATE.jpBusy=true; showToast('Finding '+names.length+' places on the map… this takes a few seconds.');
+  const stops=[], miss=[];
+  try{ for(const n of names){ let g=null; try{ g=await jGeocode(n+', Nigeria'); }catch(e){} stops.push({name:n,lat:g?g.lat:null,lon:g?g.lon:null}); if(!g) miss.push(n); await new Promise(r=>setTimeout(r,1100)); } }catch(e){}
+  STATE.jpBusy=false;
+  const plan={id:uid(),name:`${names[0]} → ${names[names.length-1]} (${p.ref})`,routeKey:p.routeKey||'other',km:5,idleMin:20,stops,approved:true,at:new Date().toISOString(),fromPlan:p.ref};
+  STATE.data.routePlans=[...jPlans(),plan]; p.planId=plan.id; p.routeKey=plan.routeKey;
+  await persist('routePlans'); await persist('jplans');
+  showToast(stops.length-miss.length>=2?(miss.length?`On the Live Map. Could not find: ${miss.join(', ')} — fix it under Journey Mgmt → Approved routes.`:'Route is now on the Live Map — deviations and idling are watched.'):`Could not place enough stops on the map (${miss.join(', ')||'none found'}). Add town names, or place them under Journey Mgmt → Approved routes.`);
+}
+const _jplanSec=jplanSection;
+jplanSection=function(){
+  let h=_jplanSec();
+  h=h.replace('<th>Approval</th><th></th>','<th>Approval</th><th>Live Map</th><th></th>');
+  h=h.replace(/<td>(<div class="row-actions"><button class="btn small" data-jp-send="([^"]+)">)/g,(m,a,id)=>{ const p=(STATE.data.jplans||[]).find(x=>x.id===id); const on=p&&jpOnMap(p); return `<td>${on?'<span class="tag green">On map</span>':`<button class="btn small" data-jp-map="${id}">📍 Put on map</button>`}</td><td>${a}`; });
+  h=h.replace('<tr class="empty-row"><td colspan="7">No journey plans yet.</td></tr>','<tr class="empty-row"><td colspan="8">No journey plans yet.</td></tr>');
+  return h;
+};
+/* every saved journey plan with a route is put on the map automatically */
+const _jplanHook=WS_HOOKS.jplan; WS_HOOKS.jplan=function(rec){ const r=_jplanHook(rec); STATE.jpAuto=rec.id; return r; };
+const _renderAppr=renderApprovalsPage;
+renderApprovalsPage=function(){ let h=_renderAppr(); const n=apprItems().filter(i=>i.status==='Pending'&&i.roles.indexOf(myRole())>-1).length;
+  if(STATE.apprView!=='history'&&n>0) h=h.replace('<div class="table-wrap">',`<div style="margin:0 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><button class="btn primary" data-appr-all="1">✔ Approve all (${n})</button><span class="dim small">Approves everything waiting for ${esc(myRole())}.</span></div><div class="table-wrap">`);
+  return h; };
+WS_TABS.approvals=renderApprovalsPage;
+function wsgAttach(){
+  const app=document.getElementById('app'); if(!app) return;
+  app.querySelectorAll('[data-appr-all]').forEach(e=>e.addEventListener('click',wsApproveAll));
+  app.querySelectorAll('[data-jp-map]').forEach(e=>e.addEventListener('click',()=>jpPutOnMap(e.getAttribute('data-jp-map'))));
+  if(STATE.jpAuto){ const id=STATE.jpAuto; STATE.jpAuto=''; setTimeout(()=>jpPutOnMap(id,true),600); }
+}
+const _attach3=attachEvents; attachEvents=function(){ _attach3(); try{ wsgAttach(); }catch(e){ console.error('wsgAttach',e); } };
 
 loadAll();
 </script>
