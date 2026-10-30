@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.4 · 30 Oct 2026';
+const APP_VERSION='v12.5 · 30 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -7776,13 +7776,13 @@ async function mcClose(manual){
       const key='vms:arch:'+ym; let obj={ym,data:{},snap:{}};
       try{ const got=await gasGetAllChunked([key]); if(got[key]){ const j=JSON.parse(got[key]); if(j&&j.data) obj=j; } }catch(e){}
       Object.keys(byYm[ym]).forEach(c=>{ const have=new Set((obj.data[c]||[]).map(r=>r.id)); obj.data[c]=(obj.data[c]||[]).concat(byYm[ym][c].filter(r=>!have.has(r.id))); });
-      let top3=null; if(ym===prevYm){ try{ top3=overallTop('lastmonth',3).top.map(x=>({name:x.name,trips:x.trips,viol:x.viol,bd:x.bd||0,score:x.score,pctT:x.pctT})); }catch(e){} }
-      obj.snap={vehicles:D.vehicles,targets:STATE.targets,hsseScores:D.hsseScores,hsseLogs:D.hsseLogs,tyres:D.tyres,routePlans:D.routePlans}; obj.savedAt=new Date().toISOString(); if(top3) obj.top3=top3;
+      let top3=null, worst3=null; if(ym===prevYm){ try{ top3=overallTop('lastmonth',3).top.map(x=>({name:x.name,trips:x.trips,viol:x.viol,bd:x.bd||0,score:x.score,pctT:x.pctT})); worst3=overallWorst('lastmonth',3).worst.map(x=>({name:x.name,trips:x.trips,viol:x.viol,bd:x.bd||0,score:x.score,pctT:x.pctT,why:(x.why||[]).slice(0,3)})); }catch(e){} }
+      obj.snap={vehicles:D.vehicles,targets:STATE.targets,hsseScores:D.hsseScores,hsseLogs:D.hsseLogs,tyres:D.tyres,routePlans:D.routePlans}; obj.savedAt=new Date().toISOString(); if(top3) obj.top3=top3; if(worst3) obj.worst3=worst3;
       const str=JSON.stringify(obj); await gasSetChunked(key,str);
       const back=await gasGetAllChunked([key]); let ok=false; try{ const j=JSON.parse(back[key]); ok=j&&j.ym===ym&&Object.keys(obj.data).every(c=>(j.data[c]||[]).length===obj.data[c].length); }catch(e){}
       if(!ok) throw new Error('The saved copy of '+mcLabel(ym)+' could not be verified, so nothing was cleared.');
       const counts={}; let tot=0; Object.keys(obj.data).forEach(c=>{ counts[c]=obj.data[c].length; tot+=counts[c]; });
-      const e={ym,savedAt:obj.savedAt,counts,total:tot,top3:top3||((idx.find(x=>x.ym===ym)||{}).top3)||null}; const i=idx.findIndex(x=>x.ym===ym); if(i>-1) idx[i]=e; else idx.push(e);
+      const e={ym,savedAt:obj.savedAt,counts,total:tot,top3:top3||((idx.find(x=>x.ym===ym)||{}).top3)||null,worst3:worst3||((idx.find(x=>x.ym===ym)||{}).worst3)||null}; const i=idx.findIndex(x=>x.ym===ym); if(i>-1) idx[i]=e; else idx.push(e);
     }
     D.monthIndex=idx; await persist('monthIndex');
     // everything is saved and checked — now start the new month clean
@@ -7943,6 +7943,43 @@ function wshAttach(){
   $$('[data-jps-wa]',e=>e.addEventListener('click',()=>{ const p=STATE.data.jplans.find(x=>x.id===STATE.jpSend); if(!p) return; const el=document.getElementById('jps-phone'); let ph=String(el?el.value:p.phone||'').replace(/\D/g,''); if(ph.length===11&&ph[0]==='0') ph='234'+ph.slice(1); window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(jplanText(p)),'_blank'); }));
 }
 const _attach4=attachEvents; attachEvents=function(){ _attach4(); try{ wshAttach(); }catch(e){ console.error('wshAttach',e); } };
+
+
+/* ============================================================ ws_i.js ============================================================ */
+/* ===== v12.5: worst 3 drivers overall · approved-route cards hidden until opened ===== */
+const _overallTop0=overallTop;
+overallTop=function(P,n){ const r=_overallTop0(P,n); const B=bestDriversData(P), tgt=r.tgt; r.all=B.list.filter(x=>x.trips>0).map(x=>Object.assign({},x,{score:obScore(x,tgt),pctT:tgt?Math.round(x.trips/tgt*100):null})); return r; };
+function overallWorst(P,n){
+  const r=overallTop(P,3); const all=r.all.slice().sort((a,b)=>a.score-b.score||b.viol-a.viol||a.trips-b.trips);
+  const topNames=new Set(r.top.map(x=>x.name)); const pool=all.length>=6?all:all.filter(x=>!topNames.has(x.name));
+  return {R:r.R,worst:pool.slice(0,n||3),count:all.length};
+}
+function owList(w){
+  if(!w.length) return '<div class="dim small">Nobody to flag in this period.</div>';
+  return `<div style="display:grid;gap:8px;">${w.map((x,i)=>`<div style="display:flex;gap:10px;align-items:flex-start;"><span class="rank bad" style="min-width:22px;">${i+1}</span><div><b>${esc(x.name)}</b> <span class="tag ${x.score<40?'red':'amber'}">${x.score} pts</span><div class="dim small">${fmt(x.trips)} trips${x.pctT!=null?' ('+x.pctT+'% of target)':''} · ${x.viol?x.viol+' violation'+(x.viol>1?'s':''):'no violations'} · ${x.bd?fmt(x.bd,0)+' breakdown'+(x.bd>1?'s':''):'no breakdowns'}${x.why&&x.why.length?'<br>'+esc(x.why.slice(0,3).join(' · ')):''}</div></div></div>`).join('')}</div>`;
+}
+const _rob0=renderOverallBest;
+renderOverallBest=function(){
+  const W=overallWorst('lastweek'), M=overallWorst('month');
+  const last=(STATE.data.monthIndex||[]).filter(m=>m.worst3&&m.worst3.length).sort((a,b)=>a.ym<b.ym?1:-1)[0];
+  return _rob0()+`<div class="section-title" style="margin-top:4px;"><span>3 drivers needing attention</span><div class="line"></div><span class="dim small">lowest overall points</span></div>
+  <div class="grid cols-${last?3:2}" style="margin-bottom:6px;">
+   <div class="card"><div style="font-weight:600;margin-bottom:2px;">Last week</div><div class="dim small mono" style="margin-bottom:8px;">${esc(rangeText(W.R))}</div>${owList(W.worst)}</div>
+   <div class="card"><div style="font-weight:600;margin-bottom:2px;">This month so far</div><div class="dim small mono" style="margin-bottom:8px;">${esc(rangeText(M.R))}</div>${owList(M.worst)}</div>
+   ${last?`<div class="card"><div style="font-weight:600;margin-bottom:2px;">${esc(mcLabel(last.ym))} — final</div><div class="dim small mono" style="margin-bottom:8px;">saved in the month folder</div>${owList(last.worst3)}</div>`:''}
+  </div><div class="dim small" style="margin-bottom:14px;">Same points as the top 3. Use these for coaching conversations, not as a verdict — check the reasons shown first.</div>`;
+};
+/* hyphen-separated routes ("Apapa-Oworonshoki-Sagamu") are split into stops too */
+const _jpStops0=jpStops;
+jpStops=function(p){ let names=_jpStops0(p); if(names.length<=2&&/\w-\w/.test(String(p.route||''))&&!/→|->|>|;/.test(String(p.route||''))){ const q=Object.assign({},p,{route:String(p.route).replace(/\s*-\s*/g,'→')}); names=_jpStops0(q); } return names; };
+/* approved route cards stay closed until you open them */
+const _jps0=jPlanSection;
+jPlanSection=function(){
+  const n=(jPlans()||[]).length;
+  return `<div class="section-title"><span>Approved Routes</span><div class="line"></div><button class="btn small" data-jplan-new="1">＋ Add approved route</button></div>
+  <details class="form-card" ${STATE.jPlansOpen?'open':''} ontoggle="STATE.jPlansOpen=this.open"><summary>${n} approved route${n===1?'':'s'} — tap to show</summary>
+  <div class="section-sub">Full routes, stop by stop. They sync with the Live Map: a truck on a linked route is flagged if it leaves the road corridor or idles away from the approved stops. Each route can be sent to drivers when you choose.</div>${jPlanCards()}</details>`;
+};
 
 loadAll();
 </script>
