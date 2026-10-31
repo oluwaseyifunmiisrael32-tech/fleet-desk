@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.6 · 31 Oct 2026';
+const APP_VERSION='v12.7 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8047,12 +8047,27 @@ finalizeJourney=function(rec){ const c=jCalc(rec); if(c.total!==null&&!num(rec.d
 STATE.ttPeriod=STATE.ttPeriod||'week';
 function ttRange(p){ if(p==='yesterday'){ const y=addDays(todayStr(),-1); return {start:y,end:y}; } return periodRange(p); }
 function ttVerdict(r){
-  const c=jCalc(r), tgtT=jTarget(r.route), tgtA=num(STATE.targets.turnaroundTargetHrs)||null;
+  const c=jCalc(r), tgtT=ttTarget(r), tgtA=num(STATE.targets.turnaroundTargetHrs)||null;
   const turn=(r.tGateIn&&r.tLeftLoading)?jH0(r.tGateIn,r.tLeftLoading):null; const tr=c.total;
   const okT=tr===null||!tgtT?null:tr<=tgtT, okA=turn===null||!tgtA?null:turn<=tgtA;
   let v='Incomplete', cls='grey'; const have=[okT,okA].filter(x=>x!==null);
   if(have.length){ const bad=have.filter(x=>!x).length; if(!bad){ v='Favourable'; cls='green'; } else if(bad===have.length){ v='Unfavourable'; cls='red'; } else { v='Watch'; cls='amber'; } }
-  return {c,turn,tr,tgtT,tgtA,okT,okA,v,cls};
+  return {c,turn,tr,tgtT,tgtA,okT,okA,v,cls,lost:ttLost(r,c)};
+}
+function ttDiesel(r){ const v=(STATE.data.vehicles||[]).find(x=>x.id===r.vehicleId); return !!v&&/diesel/i.test(v.fuelType||''); }
+function ttTarget(r){ return ttDiesel(r)?null:jTarget(r.route); } /* the 8 h to-and-fro target is for the CNG tippers only */
+const TT_ALLOW={gate:[0.5,'Waiting at the gate'],load:[1.5,'Loading'],exit:[0.5,'Leaving the loading point'],off:[1.5,'Offloading']};
+const TT_PEER={};
+function ttPeers(route,seg,fuelDiesel){ const key=route+'|'+seg+'|'+(fuelDiesel?1:0); if(TT_PEER[key]&&Date.now()-TT_PEER[key].at<600000) return TT_PEER[key].v; const from=addDays(todayStr(),-35), a=[];
+  (STATE.data.journey||[]).forEach(r=>{ if(r.route!==route||r.date<from||ttDiesel(r)!==fuelDiesel) return; const c=jCalc(r); const v=seg==='out'?c.out:c.back; if(v!==null&&v>0) a.push(v); });
+  a.sort((x,y)=>x-y); const m=a.length>=3?a[Math.floor(a.length/2)]:null; TT_PEER[key]={at:Date.now(),v:m}; return m; }
+function ttLost(r,c){ /* hours lost per stage against its allowance (gate/loading/offloading fixed, driving legs against the typical time for that route) */
+  const exit=jH0(r.tLoadEnd,r.tLeftLoading), off=jH0(r.tArriveOff,r.tLeftOff), out=[], d=ttDiesel(r);
+  const chk=(k,label,h,al)=>{ if(h!==null&&al!==null&&h>al+0.25) out.push({k,label,h,al,over:h-al}); };
+  chk('gate','Waiting at the gate',c.wait,TT_ALLOW.gate[0]); chk('load','Loading',c.load,TT_ALLOW.load[0]); chk('exit','Leaving the loading point',exit,TT_ALLOW.exit[0]); chk('off','Offloading',off,TT_ALLOW.off[0]);
+  const po=ttPeers(r.route,'out',d), pb=ttPeers(r.route,'back',d);
+  if(po!==null) chk('out','Loaded drive',c.out,Math.max(po*1.2,po+0.5)); if(pb!==null) chk('back','Return drive',c.back,Math.max(pb*1.2,pb+0.5));
+  return out.sort((a,b)=>b.over-a.over);
 }
 function jH0(a,b){ const x=jMs(a),y=jMs(b); return (x!==null&&y!==null&&y>=x)?(y-x)/3600000:null; }
 const TT_SEG=[['tLeftYard','tGateIn','To loading','#4da3ff'],['tGateIn','tLoadStart','Gate wait','#e8a33d'],['tLoadStart','tLoadEnd','Loading','#f0c36d'],['tLoadEnd','tLeftLoading','Exit loading','#8b949e'],['tLeftLoading','tArriveOff','Loaded transit','#3fb950'],['tArriveOff','tLeftOff','Offloading','#a371f7'],['tLeftOff','tBack','Return','#2dd4bf']];
@@ -8060,6 +8075,12 @@ function ttBar(r){
   const back=r.tBackLoading||r.tBackYard; const get=k=>k==='tBack'?back:r[k];
   const segs=TT_SEG.map(([a,b,l,c])=>({l,c,h:jH0(get(a),get(b))})).filter(s=>s.h!==null&&s.h>0); const tot=segs.reduce((x,s)=>x+s.h,0); if(!tot) return '<span class="dim small">no times yet</span>';
   return `<div style="display:flex;height:12px;border-radius:6px;overflow:hidden;min-width:150px;background:var(--border);">${segs.map(s=>`<div title="${esc(s.l)} ${jH(s.h)}" style="width:${s.h/tot*100}%;background:${s.c};"></div>`).join('')}</div>`;
+}
+function ttLostSummary(V){
+  const agg={}; V.forEach(x=>x.lost.forEach(l=>{ const a=agg[l.k]||(agg[l.k]={label:l.label,n:0,h:0}); a.n++; a.h+=l.over; }));
+  const L=Object.values(agg).sort((a,b)=>b.h-a.h); if(!L.length) return '';
+  const max=L[0].h;
+  return `<div class="card" style="padding:12px 14px;margin-bottom:12px;"><div style="font-weight:600;margin-bottom:8px;">Where the time is being lost (hours beyond the allowance, all trips shown)</div>${L.map(a=>`<div style="display:flex;align-items:center;gap:10px;margin:5px 0;"><div style="width:210px;">${esc(a.label)}</div><div style="flex:1;background:var(--border);height:10px;border-radius:5px;overflow:hidden;"><div style="width:${a.h/max*100}%;height:100%;background:#e8a33d;"></div></div><div style="width:150px;text-align:right;"><b>${jH(a.h)}</b> <span class="dim small">on ${a.n} trip${a.n===1?'':'s'}</span></div></div>`).join('')}<div class="dim small" style="margin-top:6px;">Allowances: gate wait ${TT_ALLOW.gate[0]*60} min, loading ${TT_ALLOW.load[0]} h, leaving the loading point ${TT_ALLOW.exit[0]*60} min, offloading ${TT_ALLOW.off[0]} h; driving legs against that route's usual time over the last 5 weeks. Diesel trucks are judged on turnaround and stage delays only — the to-and-fro transit target applies to CNG trucks.</div></div>`;
 }
 function renderTripTimings(){
   const p=STATE.ttPeriod, R=ttRange(p), J=(STATE.data.journey||[]).filter(r=>r.date>=R.start&&r.date<=R.end).sort((a,b)=>(a.date<b.date?1:a.date>b.date?-1:String(b.tLeftYard||'').localeCompare(String(a.tLeftYard||''))));
@@ -8077,10 +8098,11 @@ function renderTripTimings(){
    ${kc('Avg loaded transit',aOut===null?'—':jH(aOut),'Left loading → arrived offloading')}
    ${kc('Avg total transit',aT===null?'—':jH(aT),aBack===null?'':'Return avg '+jH(aBack))}
   </div>
-  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Gate wait</th><th>Loading</th><th>Turnaround</th><th>Loaded</th><th>Return</th><th>Total transit</th><th>Timeline</th><th>Verdict</th><th></th></tr></thead><tbody>
+  ${ttLostSummary(V)}
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Gate wait</th><th>Loading</th><th>Turnaround</th><th>Loaded</th><th>Return</th><th>Total transit</th><th>Timeline</th><th>Verdict</th><th>Where time was lost</th><th></th></tr></thead><tbody>
   ${V.length?V.map(x=>{ const r=x.r, c=x.c, auto=splitKeys(r.tAuto).length, src=auto?(auto>=jtMissing(r)||auto>=4?'📡':'📡✋'):(jtMissing(r)<9?'✋':'');
     return `<tr><td>${esc(fmtDate(r.date))}</td><td>${wsVeh(r.vehicleId)}</td><td style="white-space:normal;">${esc(r.driverName||'—')}</td><td style="white-space:normal;">${esc((ROUTES[r.route]?ROUTES[r.route].label:r.route||'').replace(/ \(to & fro\)/,''))}</td>
-    <td>${jH(c.wait)}</td><td>${jH(c.load)}</td><td>${x.turn===null?'—':jH(x.turn)}${x.okA===false?' <span class="tag red">over</span>':''}</td><td>${jH(c.out)}</td><td>${jH(c.back)}</td><td>${x.tr===null?'—':jH(x.tr)}${x.tgtT?' <span class="dim small">/ '+x.tgtT+' h</span>':''}${x.okT===false?' <span class="tag red">over</span>':''}</td><td>${ttBar(r)}</td><td>${wsTag(x.v,x.cls)} <span title="${auto?'filled from the Live Map':'typed in'}">${src}</span>${r.tNote&&jtMissing(r)>0?`<div class="dim small" style="max-width:200px;white-space:normal;">${esc(r.tNote.slice(0,90))}</div>`:''}</td><td><button class="btn small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/9</button></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="13">No trips logged in this period.</td></tr>'}</tbody></table></div>
+    <td>${jH(c.wait)}</td><td>${jH(c.load)}</td><td>${x.turn===null?'—':jH(x.turn)}${x.okA===false?' <span class="tag red">over</span>':''}</td><td>${jH(c.out)}</td><td>${jH(c.back)}</td><td>${x.tr===null?'—':jH(x.tr)}${x.tgtT?' <span class="dim small">/ '+x.tgtT+' h</span>':''}${x.okT===false?' <span class="tag red">over</span>':''}</td><td>${ttBar(r)}</td><td>${wsTag(x.v,x.cls)} <span title="${auto?'filled from the Live Map':'typed in'}">${src}</span>${r.tNote&&jtMissing(r)>0?`<div class="dim small" style="max-width:200px;white-space:normal;">${esc(r.tNote.slice(0,90))}</div>`:''}</td><td style="white-space:normal;min-width:190px;">${x.lost.length?x.lost.slice(0,3).map(l=>`<div class="small"><b>${esc(l.label)}</b> ${jH(l.h)} <span class="dim">(+${jH(l.over)} over)</span></div>`).join(''):(x.v==='Incomplete'?'<span class="dim small">—</span>':'<span class="dim small">No stage ran long</span>')}</td><td><button class="btn small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/9</button></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="14">No trips logged in this period.</td></tr>'}</tbody></table></div>
   <div class="dim small" style="margin:8px 0 14px;display:flex;gap:12px;flex-wrap:wrap;">${TT_SEG.map(s=>`<span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s[3]};margin-right:4px;"></i>${s[2]}</span>`).join('')}</div>`;
 }
 const _rjp3=renderJourneyPage;
