@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.5 · 30 Oct 2026';
+const APP_VERSION='v12.6 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6625,8 +6625,8 @@ const MX_DEVICE_RE=/tamper|disconnect|power|jam|battery|antenna/i;
 function mxCat(name){ const n=String(name||''); if(MX_DEVICE_RE.test(n)&&!/speed|brak|accel/i.test(n)) return null; for(const c of MX_CATS){ if(c[3].test(n)) return c; } return ['other','Other safety event',1,null]; }
 async function mixEnsure(force){
   const M=STATE.mix; if(!GAS_CONFIGURED||M.busy) return; if(!force&&M.rows&&Date.now()-M.at<600000) return; if(!force&&M.status==='fail'&&Date.now()-M.at<600000) return;
-  M.busy=true; try{ const res=await fetch(`${GAS_URL}?action=driverscore&days=62&_=${Date.now()}`); const j=JSON.parse(await res.text());
-    if(j&&j.ok){ M.rows=j.rows||[]; M.drivers=j.drivers||{}; M.empty=!!j.empty; M.status='ok'; M.err=''; } else { M.status='fail'; M.err=(j&&j.error)||'The scorecard feed is not available yet.'; if(!M.rows) M.rows=null; }
+  M.busy=true; try{ const res=await fetch(`${GAS_URL}?action=driverscore&days=62${M.bf?'&backfill=1':''}&_=${Date.now()}`); const j=JSON.parse(await res.text());
+    if(j&&j.ok){ M.rows=j.rows||[]; M.drivers=j.drivers||{}; M.empty=!!j.empty; M.diag=j.diag||null; M.triggers=j.triggers||null; M.status='ok'; M.err=''; } else { M.status='fail'; M.err=(j&&j.error)||'The scorecard feed is not available yet.'; if(!M.rows) M.rows=null; }
   }catch(e){ M.status='fail'; M.err='The scorecard feed is not available yet (add the latest Watch script).'; }
   M.at=Date.now(); M.busy=false; if(STATE.tab==='safety'||STATE.tab==='summary') render();
 }
@@ -7980,6 +7980,145 @@ jPlanSection=function(){
   <details class="form-card" ${STATE.jPlansOpen?'open':''} ontoggle="STATE.jPlansOpen=this.open"><summary>${n} approved route${n===1?'':'s'} — tap to show</summary>
   <div class="section-sub">Full routes, stop by stop. They sync with the Live Map: a truck on a linked route is flagged if it leaves the road corridor or idles away from the approved stops. Each route can be sent to drivers when you choose.</div>${jPlanCards()}</details>`;
 };
+
+
+/* ============================================================ ws_j.js ============================================================ */
+/* ===== v12.6: trip timings auto-filled from the Live Map + turnaround/transit verdicts · unrecorded drivers resolved · honest MiX scorecard ===== */
+/* ---------- drivers: placeholders are not people ---------- */
+const DRV_BAD=/^(not recorded|unknown|n\/a|na|none|nil|no driver|-+|\?+)$/i;
+function drvBad(n){ n=String(n||'').trim(); return !n||DRV_BAD.test(n); }
+function drvNotPerson(n){ return drvBad(n)||/^(unidentified|mix driver)/i.test(String(n||'')); }
+const _mdi=makeDriverIndex; makeDriverIndex=function(){ const x=_mdi(); const e=x.ensure; x.ensure=nm=>drvBad(nm)?null:e(nm); return x; };
+const _lastDriverOf=lastDriverOf; lastDriverOf=function(k){ let best=null; (STATE.data.transport||[]).forEach(r=>{ if(trKey(r)===k&&!drvBad(r.driverName)&&(!best||r.date>best.date)) best=r; }); return best?best.driverName:''; };
+function drvCandidates(key){ // every record in the app that names a driver for this truck
+  const out=[]; const add=(r,src)=>{ if(!drvBad(r.driverName)&&r.date) out.push({name:r.driverName,date:r.date,src}); };
+  (STATE.data.pretrip||[]).forEach(r=>{ if(r.vehicleId===key) add(r,'pre-trip'); });
+  (STATE.data.journey||[]).forEach(r=>{ if(r.vehicleId===key) add(r,'journey'); });
+  (STATE.data.transport||[]).forEach(r=>{ if(trKey(r)===key) add(r,'transport'); });
+  (STATE.data.jplans||[]).forEach(r=>{ if(r.vehicleId===key) add(r,'journey plan'); });
+  return out;
+}
+function drvResolve(key,date,loose){
+  const c=drvCandidates(key); if(!c.length&&!loose) return null;
+  const same=c.filter(x=>x.date===date); if(same.length){ const f={}; same.forEach(x=>{ const k=canonDriver(x.name); f[k]=(f[k]||0)+1; }); const best=Object.keys(f).sort((a,b)=>f[b]-f[a])[0]; return {name:best,how:'same day · '+same[0].src}; }
+  if(!loose) return null;
+  const near=c.map(x=>Object.assign({d:Math.abs(daysBetween(x.date,date))},x)).filter(x=>x.d<=5).sort((a,b)=>a.d-b.d)[0];
+  if(near) return {name:canonDriver(near.name),how:near.d+' day'+(near.d===1?'':'s')+' away · '+near.src};
+  const row=(typeof fleetRows==='function')?fleetRows().find(r=>r.vid===key||r.key===key):null; if(row&&row.driver&&!drvBad(row.driver)&&daysAgo(date)<=2) return {name:canonDriver(row.driver),how:'MiX current driver'};
+  const last=lastDriverOf(key); if(last) return {name:canonDriver(last),how:'last known driver of this truck'};
+  return null;
+}
+function drvUnresolved(){ const from=addDays(todayStr(),-62), out=[]; ['transport','journey'].forEach(c=>(STATE.data[c]||[]).forEach(r=>{ if(r.date>=from&&drvBad(r.driverName)) out.push({c,r}); })); return out; }
+async function drvFixAll(loose){
+  const list=drvUnresolved(); let n=0; const touched=new Set(), left=[];
+  list.forEach(({c,r})=>{ const key=c==='transport'?trKey(r):r.vehicleId; const x=key&&drvResolve(key,r.date,loose); if(x&&x.name){ r.driverName=x.name; r.driverFix=x.how; touched.add(c); n++; } else left.push(r); });
+  for(const c of touched) await persist(c);
+  return {fixed:n,left:left.length,total:list.length};
+}
+/* the ranked lists only ever show real people */
+const _bdd=bestDriversData; bestDriversData=function(P){ const B=_bdd(P); B.list=B.list.filter(x=>!drvNotPerson(x.name)); B.unrec=drvUnresolved().filter(({r})=>inPeriod(r.date,P)).length; return B; };
+const _rbd=renderBestDrivers; renderBestDrivers=function(P){ let h=_rbd(P); const n=drvUnresolved().length; if(n) h=h.replace('<div class="grid cols-3" style="margin-bottom:12px;">',`<div class="note warn" style="margin-bottom:10px;">${n} recent trip${n===1?'':'s'} ha${n===1?'s':'ve'} no driver name, so ${n===1?'it is':'they are'} not counted for anyone. <button class="btn small primary" data-drv-fix="1">Find the drivers</button></div><div class="grid cols-3" style="margin-bottom:12px;">`); return h; };
+
+/* ---------- trip timings: auto-fill from the Live Map ---------- */
+STATE.jtTried=STATE.jtTried||{};
+function jtMissing(r){ return J_TIMES.filter(([k])=>!r[k]).length; }
+async function jtAutoOne(r){
+  if(!r||!r.vehicleId||!r.date) return 0; if(daysAgo(r.date)>6) return 0;
+  const others=(STATE.data.journey||[]).filter(x=>x.id!==r.id&&x.vehicleId===r.vehicleId&&x.date===r.date&&x.tGateIn).length;
+  let res; try{ res=await jtFromLive(r.vehicleId,r.date,r.route,others); }catch(e){ return 0; }
+  STATE.jtTried[r.id]=Date.now(); if(res.err||!res.times){ r.tNote=res.err||''; return 0; }
+  let n=0; const auto=splitKeys(r.tAuto); Object.keys(res.times).forEach(k=>{ if(!r[k]){ r[k]=res.times[k]; auto.push(k); n++; } });
+  if(n){ r.tAuto=[...new Set(auto)].join(','); r.tNote=''; const c=jCalc(r); if(c.total!==null){ if(num(r.durationActual)&&r.durMan===undefined) r.durMan=r.durationActual; r.durationActual=String(Math.round(c.total*10)/10); } }
+  return n;
+}
+async function jtSweep(manual){
+  if(STATE.jtBusy||!GAS_CONFIGURED) return; const L=STATE.live; if(L&&L.watchOff) return;
+  const todo=(STATE.data.journey||[]).filter(r=>r.date>=addDays(todayStr(),-6)&&jtMissing(r)>0&&(manual||!STATE.jtTried[r.id]||Date.now()-STATE.jtTried[r.id]>1800000)).sort((a,b)=>a.date<b.date?1:-1).slice(0,25);
+  if(!todo.length){ if(manual) showToast('Nothing to fill — every recent trip already has its times.'); return; }
+  STATE.jtBusy=true; STATE.jtMsg='Reading the Live Map trail for '+todo.length+' trip'+(todo.length===1?'':'s')+'…'; if(STATE.tab==='journey') render();
+  let filled=0, trips=0; for(const r of todo){ const n=await jtAutoOne(r); if(n){ filled+=n; trips++; } }
+  STATE.jtBusy=false; STATE.jtAt=Date.now(); STATE.jtMsg='';
+  if(filled){ await persist('journey'); showToast(`Filled ${filled} time${filled===1?'':'s'} on ${trips} trip${trips===1?'':'s'} from the Live Map.`); } else { if(manual) showToast('No new times could be read from the Live Map yet.'); if(STATE.tab==='journey') render(); }
+}
+/* every newly logged trip is filled in straight away */
+finalizeJourney=function(rec){ const c=jCalc(rec); if(c.total!==null&&!num(rec.durationActual)) rec.durationActual=String(Math.round(c.total*10)/10); if(jtMissing(rec)>0) STATE.jtNew=rec.id; return true; };
+
+/* ---------- trip timings view: turnaround & transit against target ---------- */
+STATE.ttPeriod=STATE.ttPeriod||'week';
+function ttRange(p){ if(p==='yesterday'){ const y=addDays(todayStr(),-1); return {start:y,end:y}; } return periodRange(p); }
+function ttVerdict(r){
+  const c=jCalc(r), tgtT=jTarget(r.route), tgtA=num(STATE.targets.turnaroundTargetHrs)||null;
+  const turn=(r.tGateIn&&r.tLeftLoading)?jH0(r.tGateIn,r.tLeftLoading):null; const tr=c.total;
+  const okT=tr===null||!tgtT?null:tr<=tgtT, okA=turn===null||!tgtA?null:turn<=tgtA;
+  let v='Incomplete', cls='grey'; const have=[okT,okA].filter(x=>x!==null);
+  if(have.length){ const bad=have.filter(x=>!x).length; if(!bad){ v='Favourable'; cls='green'; } else if(bad===have.length){ v='Unfavourable'; cls='red'; } else { v='Watch'; cls='amber'; } }
+  return {c,turn,tr,tgtT,tgtA,okT,okA,v,cls};
+}
+function jH0(a,b){ const x=jMs(a),y=jMs(b); return (x!==null&&y!==null&&y>=x)?(y-x)/3600000:null; }
+const TT_SEG=[['tLeftYard','tGateIn','To loading','#4da3ff'],['tGateIn','tLoadStart','Gate wait','#e8a33d'],['tLoadStart','tLoadEnd','Loading','#f0c36d'],['tLoadEnd','tLeftLoading','Exit loading','#8b949e'],['tLeftLoading','tArriveOff','Loaded transit','#3fb950'],['tArriveOff','tLeftOff','Offloading','#a371f7'],['tLeftOff','tBack','Return','#2dd4bf']];
+function ttBar(r){
+  const back=r.tBackLoading||r.tBackYard; const get=k=>k==='tBack'?back:r[k];
+  const segs=TT_SEG.map(([a,b,l,c])=>({l,c,h:jH0(get(a),get(b))})).filter(s=>s.h!==null&&s.h>0); const tot=segs.reduce((x,s)=>x+s.h,0); if(!tot) return '<span class="dim small">no times yet</span>';
+  return `<div style="display:flex;height:12px;border-radius:6px;overflow:hidden;min-width:150px;background:var(--border);">${segs.map(s=>`<div title="${esc(s.l)} ${jH(s.h)}" style="width:${s.h/tot*100}%;background:${s.c};"></div>`).join('')}</div>`;
+}
+function renderTripTimings(){
+  const p=STATE.ttPeriod, R=ttRange(p), J=(STATE.data.journey||[]).filter(r=>r.date>=R.start&&r.date<=R.end).sort((a,b)=>(a.date<b.date?1:a.date>b.date?-1:String(b.tLeftYard||'').localeCompare(String(a.tLeftYard||''))));
+  const V=J.map(r=>Object.assign({r},ttVerdict(r))), withT=V.filter(x=>x.v!=='Incomplete'), fav=withT.filter(x=>x.v==='Favourable').length;
+  const avg=a=>{ const l=a.filter(x=>x!==null&&x!==undefined); return l.length?l.reduce((s,x)=>s+x,0)/l.length:null; };
+  const tgtA=num(STATE.targets.turnaroundTargetHrs)||null;
+  const aT=avg(V.map(x=>x.tr)), aA=avg(V.map(x=>x.turn)), aOut=avg(V.map(x=>x.c.out)), aBack=avg(V.map(x=>x.c.back));
+  const tabs=[['day','Today'],['yesterday','Yesterday'],['week','This week'],['lastweek','Last week'],['month','This month']];
+  return `<div class="section-title"><span>Trip timings — turnaround &amp; transit</span><div class="line"></div><button class="btn small" data-jt-sweep="1"${STATE.jtBusy?' disabled':''}>📡 Fill from Live Map</button></div>
+  <div class="section-sub">Times are read from each truck’s Live Map trail as soon as a trip is logged, and topped up automatically while the app is open. 📡 = filled from the map, ✋ = typed in. Turnaround = gate-in → left the loading location (target ${tgtA||'—'} h, set under Targets). Transit = loaded trip + return, against the route’s target.${STATE.jtMsg?` <b>${esc(STATE.jtMsg)}</b>`:''}</div>
+  <div class="tabs" style="margin-bottom:12px;">${tabs.map(([k,l])=>`<button data-tt-period="${k}" class="${p===k?'active':''}">${l}</button>`).join('')}</div>
+  <div class="grid cols-4" style="margin-bottom:12px;">
+   ${kc('Favourable trips',withT.length?Math.round(fav/withT.length*100)+'%':'—',`${fav} of ${withT.length} trips with times`,withT.length?(fav/withT.length>=.8?'green':fav/withT.length>=.5?'amber':'red'):'')}
+   ${kc('Avg turnaround',aA===null?'—':jH(aA),tgtA?'Target '+tgtA+' h':'',aA===null||!tgtA?'':aA<=tgtA?'green':'red',aA===null||!tgtA?'':aA<=tgtA?'Favourable':'Over')}
+   ${kc('Avg loaded transit',aOut===null?'—':jH(aOut),'Left loading → arrived offloading')}
+   ${kc('Avg total transit',aT===null?'—':jH(aT),aBack===null?'':'Return avg '+jH(aBack))}
+  </div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Gate wait</th><th>Loading</th><th>Turnaround</th><th>Loaded</th><th>Return</th><th>Total transit</th><th>Timeline</th><th>Verdict</th><th></th></tr></thead><tbody>
+  ${V.length?V.map(x=>{ const r=x.r, c=x.c, auto=splitKeys(r.tAuto).length, src=auto?(auto>=jtMissing(r)||auto>=4?'📡':'📡✋'):(jtMissing(r)<9?'✋':'');
+    return `<tr><td>${esc(fmtDate(r.date))}</td><td>${wsVeh(r.vehicleId)}</td><td style="white-space:normal;">${esc(r.driverName||'—')}</td><td style="white-space:normal;">${esc((ROUTES[r.route]?ROUTES[r.route].label:r.route||'').replace(/ \(to & fro\)/,''))}</td>
+    <td>${jH(c.wait)}</td><td>${jH(c.load)}</td><td>${x.turn===null?'—':jH(x.turn)}${x.okA===false?' <span class="tag red">over</span>':''}</td><td>${jH(c.out)}</td><td>${jH(c.back)}</td><td>${x.tr===null?'—':jH(x.tr)}${x.tgtT?' <span class="dim small">/ '+x.tgtT+' h</span>':''}${x.okT===false?' <span class="tag red">over</span>':''}</td><td>${ttBar(r)}</td><td>${wsTag(x.v,x.cls)} <span title="${auto?'filled from the Live Map':'typed in'}">${src}</span>${r.tNote&&jtMissing(r)>0?`<div class="dim small" style="max-width:200px;white-space:normal;">${esc(r.tNote.slice(0,90))}</div>`:''}</td><td><button class="btn small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/9</button></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="13">No trips logged in this period.</td></tr>'}</tbody></table></div>
+  <div class="dim small" style="margin:8px 0 14px;display:flex;gap:12px;flex-wrap:wrap;">${TT_SEG.map(s=>`<span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s[3]};margin-right:4px;"></i>${s[2]}</span>`).join('')}</div>`;
+}
+const _rjp3=renderJourneyPage;
+renderJourneyPage=function(){ const h=_rjp3(); const sec=renderTripTimings(); const mk='<div class="section-title"><span>Journey plans</span>'; if(h.indexOf(mk)>-1) return h.replace(mk,sec+mk); const m2='<div class="section-title"><span>Trips by Route — Target vs Actual</span>'; return h.indexOf(m2)>-1?h.replace(m2,sec+m2):h+sec; };
+
+/* ---------- honest MiX scorecard when there are no events ---------- */
+const _mixEnsure0=mixEnsure;
+mixEnsure=async function(force){ const M=STATE.mix; const before=M.at; await _mixEnsure0(force); };
+function mixDiagCard(){
+  const M=STATE.mix, d=M.diag, tr=M.triggers||[]; const lines=[];
+  if(!d) lines.push('The Watch script on Google has no event diagnostics — it is still the older version. Paste the latest <b>FleetDesk_Watch.gs</b>, run <b>fdInstallLogger</b>, then deploy a new version.');
+  else { lines.push(`Last read from MiX: ${esc((d.at||'').slice(0,16).replace('T',' '))} UTC · trucks checked <b>${d.assets}</b> · safety event types matched <b>${d.types}</b> of ${d.libNames||0} in the MiX library · events returned <b>${d.raw||0}</b> · events saved <b>${d.saved||0}</b>.`); (d.errs||[]).forEach(e=>lines.push('⚠ '+esc(e))); }
+  if(M.triggers){ if(tr.indexOf('fdEventTick')<0) lines.push('⚠ The <b>hourly event trigger is not installed</b>. Run <b>fdInstallLogger</b> once in Apps Script.'); else lines.push('Hourly event trigger: installed ✓'); }
+  return `<div class="note warn" style="margin-bottom:12px;"><b>The scorecard has no MiX events to work with, so drivers are NOT shown as “Low risk”.</b><div style="margin-top:6px;line-height:1.6;">${lines.join('<br>')}</div>
+   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn small primary" data-mx-backfill="1"${M.busy?' disabled':''}>${M.busy?'Reading MiX…':'Load the last 7 days from MiX now'}</button><button class="btn small" data-mx-reload="1">Check again</button></div></div>`;
+}
+const _rms2=renderMixScorecard;
+renderMixScorecard=function(){
+  const M=STATE.mix; if(!(M.rows&&M.empty)) return _rms2();
+  const p=M.period||'lastweek', B=bestDriversData(p), L=B.list.filter(x=>x.trips>0||x.viol>0).sort((a,b)=>b.viol-a.viol||b.trips-a.trips);
+  const tabs=`<div class="tabs" style="margin-bottom:14px;">${MX_PERIODS.map(([k,l])=>`<button data-mx-period="${k}" class="${p===k?'active':''}">${l}</button>`).join('')}</div>`;
+  const band=x=>x.viol>=3?'<span class="tag red">High</span>':x.viol>=1?'<span class="tag amber">Medium</span>':'<span class="tag green">Clean</span>';
+  return tabs+mixDiagCard()+`<div class="section-title"><span>Meanwhile: safety record from FleetDesk entries</span><div class="line"></div></div>
+  <div class="dim small" style="margin-bottom:8px;">${esc(rangeText(B.R))} · route deviations, driving-hours violations, failed alcohol tests${B.hsseOn?', the uploaded HSSE scorecard':''}. This is <b>not</b> the MiX score — it only uses what the team has logged.</div>
+  <div class="table-wrap"><table><thead><tr><th>Driver</th><th>Record</th><th>Violations</th><th>Trips</th><th>Reasons</th></tr></thead><tbody>${L.length?L.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${band(x)}</td><td>${x.viol}</td><td>${fmt(x.trips)}</td><td style="white-space:normal;">${esc((x.why||[]).slice(0,4).join(' · ')||'—')}</td></tr>`).join(''):'<tr class="empty-row"><td colspan="5">No driver activity logged in this period.</td></tr>'}</tbody></table></div>`;
+};
+/* ---------- events ---------- */
+function wsjAttach(){
+  const app=document.getElementById('app'); if(!app) return; const $$=(s,f)=>app.querySelectorAll(s).forEach(f);
+  $$('[data-tt-period]',e=>e.addEventListener('click',()=>{ STATE.ttPeriod=e.getAttribute('data-tt-period'); render(); }));
+  $$('[data-jt-sweep]',e=>e.addEventListener('click',()=>jtSweep(true)));
+  $$('[data-drv-fix]',e=>e.addEventListener('click',async()=>{ const r=await drvFixAll(true); showToast(r.total?`Found ${r.fixed} of ${r.total} driver names${r.left?' — '+r.left+' still unknown (no driver logged for that truck nearby)':''}.`:'Every trip has a driver.'); }));
+  $$('[data-mx-backfill]',e=>e.addEventListener('click',async()=>{ const M=STATE.mix; M.bf=1; M.busy=false; showToast('Reading the last 7 days from MiX — this can take a minute…'); await mixEnsure(true); M.bf=0; }));
+  if(STATE.jtNew){ const id=STATE.jtNew; STATE.jtNew=''; setTimeout(async()=>{ const r=(STATE.data.journey||[]).find(x=>x.id===id); if(!r) return; const n=await jtAutoOne(r); if(n){ await persist('journey'); showToast(`Filled ${n} time${n===1?'':'s'} from the Live Map.`); } else if(r.tNote) showToast('Live Map: '+r.tNote.slice(0,110)); },1500); }
+  if(STATE.tab==='journey'&&!STATE.jtBusy&&(!STATE.jtAt||Date.now()-STATE.jtAt>1200000)){ STATE.jtAt=Date.now(); setTimeout(()=>jtSweep(false),2500); }
+}
+const _attach5=attachEvents; attachEvents=function(){ _attach5(); try{ wsjAttach(); }catch(e){ console.error('wsjAttach',e); } };
+setTimeout(()=>{ try{ if(drvUnresolved().length) drvFixAll(false); }catch(e){} },16000);
 
 loadAll();
 </script>
