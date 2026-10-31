@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.9 · 31 Oct 2026';
+const APP_VERSION='v12.10 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8114,7 +8114,7 @@ mixEnsure=async function(force){ const M=STATE.mix; const before=M.at; await _mi
 function mixDiagCard(){
   const M=STATE.mix, d=M.diag, tr=M.triggers||[]; const lines=[];
   if(!d) lines.push('The Watch script on Google has no event diagnostics — it is still the older version. Paste the latest <b>FleetDesk_Watch.gs</b>, run <b>fdInstallLogger</b>, then deploy a new version.');
-  else { lines.push(`Last read from MiX: ${esc((d.at||'').slice(0,16).replace('T',' '))} UTC · trucks checked <b>${d.assets}</b> · safety event types matched <b>${d.types}</b> of ${d.libNames||0} in the MiX library · events returned <b>${d.raw||0}</b> · events saved <b>${d.saved||0}</b>.`); (d.errs||[]).forEach(e=>lines.push('⚠ '+esc(e))); if(d.seen){ const t=Object.entries(d.seen).sort((a,b)=>b[1]-a[1]).slice(0,8).map(x=>'type '+x[0]+' ×'+x[1]).join(', '); lines.push('Event types MiX returned (no names available): '+esc(t)); } }
+  else { lines.push(`Last read from MiX: ${esc((d.at||'').slice(0,16).replace('T',' '))} UTC · trucks checked <b>${d.assets}</b> · safety event types matched <b>${d.types}</b> of ${d.libNames||0} in the MiX library · events returned <b>${d.raw||0}</b> · events saved <b>${d.saved||0}</b>.`); (d.errs||[]).forEach(e=>lines.push('⚠ '+esc(e))); if(d.seen){ const t=Object.entries(d.seen).sort((a,b)=>b[1]-a[1]).slice(0,8).map(x=>'type '+x[0]+' ×'+x[1]).join(', '); lines.push('Event types MiX returned (no names available): '+esc(t)); } if(d.sample) lines.push('<span class="mono small" style="word-break:break-all;">Sample event: '+esc(d.sample)+'</span>');  }
   if(M.triggers){ if(tr.indexOf('fdEventTick')<0) lines.push('⚠ The <b>hourly event trigger is not installed</b>. Run <b>fdInstallLogger</b> once in Apps Script.'); else lines.push('Hourly event trigger: installed ✓'); }
   return `<div class="note warn" style="margin-bottom:12px;"><b>The scorecard has no MiX events to work with, so drivers are NOT shown as “Low risk”.</b><div style="margin-top:6px;line-height:1.6;">${lines.join('<br>')}</div>
    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn small primary" data-mx-backfill="1"${M.busy?' disabled':''}>${M.busy?'Reading MiX…':'Load the last 7 days from MiX now'}</button><button class="btn small" data-mx-reload="1">Check again</button></div></div>`;
