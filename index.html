@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.15 · 31 Oct 2026';
+const APP_VERSION='v13.0 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8212,6 +8212,229 @@ const _pkh=portKpiHTML; portKpiHTML=function(){
   <div class="dim small" style="margin-bottom:10px;">${D.stale?`${D.stale} open file${D.stale===1?' has':'s have'} had duty paid for over 45 days — likely delivered already but not marked; update them to keep this KPI honest. `:''}Measured from the “Duty paid” date to the day the file is marked delivered in a daily update.${D.noDate||D.noDuty?` ${D.noDuty+D.noDate} delivered file${D.noDuty+D.noDate===1?'':'s'} can't be measured (${D.noDuty} without a duty date, ${D.noDate} without a recorded delivery date).`:''}</div>`;
   const mk='<div class="section-title"><span>Where open files currently sit</span>'; return h.indexOf(mk)>-1?h.replace(mk,card+mk):card+h;
 };
+
+
+/* ============================================================ ws_l.js ============================================================ */
+/* ===== v13.0: Performance tab — KPI board with owners, truck & driver scorecards, actions, cost per trip/km, recognition, early warnings, data quality ===== */
+['actions','kpiCfg'].forEach(k=>{ if(WS_COLLS.indexOf(k)<0) WS_COLLS.push(k); STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
+const PF_OWNERS=['Yard Admin','Maintenance Manager','Logistics Manager','General Manager','MD'];
+const PF_OWNER_DEF={transport:'Logistics Manager',journey:'Logistics Manager',inspections:'Maintenance Manager',prepost:'Yard Admin',safety:'Yard Admin',maintenance:'Maintenance Manager',clearing:'Logistics Manager',dq:'Yard Admin'};
+const PF_DEPT={transport:'Transport',journey:'Journey',inspections:'Inspections',prepost:'Pre/Post-trip',safety:'Safety',maintenance:'Maintenance',clearing:'Clearing',dq:'Data quality'};
+const PF_PERIODS=[['lastweek','Last week'],['week','This week'],['lastmonth','Last month'],['month','This month']];
+STATE.pfView=STATE.pfView||'board'; STATE.pfPeriod=STATE.pfPeriod||'lastweek'; STATE.pfWho=STATE.pfWho||'truck'; STATE.pfSel=STATE.pfSel||'';
+const pfPrev=P=>P==='lastweek'?'prevweek':(P==='lastmonth'?'prevmonth':null);
+function pfCfg(key){ return (STATE.data.kpiCfg||[]).find(x=>x.key===key)||null; }
+async function pfSetCfg(key,patch){ const L=STATE.data.kpiCfg||(STATE.data.kpiCfg=[]); let o=L.find(x=>x.key===key); if(!o){ o={id:uid(),key}; L.push(o); } Object.assign(o,patch); await persist('kpiCfg'); }
+const pfOwner=(id,dept)=>((pfCfg(id)||{}).owner)||PF_OWNER_DEF[dept]||'General Manager';
+
+/* ---------- 7. data quality ---------- */
+function pfDq(){
+  const D=STATE.data, from=addDays(todayStr(),-30), items=[], vs=D.vehicles||[];
+  const tr=(D.transport||[]).filter(r=>r.date>=from), jr=(D.journey||[]).filter(r=>r.date>=from&&!ttSkip(r));
+  const chk=(label,total,bad,fix,hint)=>items.push({label,total,bad,pct:total?Math.max(0,1-bad/total):1,fix,hint});
+  chk('Transport entries with a driver name',tr.length,tr.filter(r=>drvBad(r.driverName)).length,'drv','Use “Find the drivers”.');
+  chk('Journey entries with a driver name',jr.length,jr.filter(r=>drvBad(r.driverName)).length,'drv','Use “Find the drivers”.');
+  chk('Journey entries with a route',jr.length,jr.filter(r=>!r.route).length,'','Pick the route when logging the trip.');
+  chk('Trips with at least 5 of 9 times',jr.length,jr.filter(r=>jStampCount(r)<5).length,'times','Press “Fill from Live Map” on the Journey page, or enter times with ⏱.');
+  chk('Trips with no impossible time (a stage over 24 h)',jr.length,jr.filter(r=>ttLost(r,jCalc(r)).odd).length,'','Correct the times with ⏱ on the Journey page.');
+  let pc={done:[],noDate:0,noDuty:0}; try{ pc=pcData(); }catch(e){}
+  chk('Delivered port files with duty and delivery dates',pc.done.length+pc.noDate+pc.noDuty,pc.noDate+pc.noDuty,'','Enter the duty-paid date and mark delivery in a daily update.');
+  chk('Trucks with a fuel type set',vs.length,vs.filter(v=>!v.fuelType).length,'','Set Fuel Type in the vehicle register (needed for diesel/CNG targets).');
+  const live=items.filter(x=>x.total>0); const p=live.length?live.reduce((s,x)=>s+x.pct,0)/live.length:1;
+  return {items,pct:p};
+}
+
+/* ---------- 2. KPI board ---------- */
+function pfKpis(P){
+  const D=STATE.data, f=c=>filterPeriod(D[c]||[],P), out=[]; const add=(dept,arr)=>(arr||[]).forEach(k=>out.push(Object.assign({dept,id:dept+'.'+k.key},k)));
+  try{ add('transport',kpisTransport(f('transport'))); }catch(e){} try{ add('journey',kpisJourneyOverall(f('journey'),P)); }catch(e){}
+  try{ add('inspections',kpisInspections(f('inspections'))); }catch(e){} try{ add('prepost',kpisPrePost(f('pretrip'))); }catch(e){}
+  try{ add('safety',kpisSafety(f('safety'),P)); }catch(e){} try{ add('maintenance',kpisMaintenance(f('maintenance'),D.vehicles,f('maintenanceDaily'),P)); }catch(e){}
+  try{ const pc=pcData(), ok=pc.done.filter(x=>x.ok).length; if(pc.done.length) out.push({dept:'clearing',id:'clearing.within',key:'within',label:'Delivered within '+pc.T+' days of duty paid',actual:ok/pc.done.length,target:0.9,fmt:'pct',unit:'',good:'higher'}); }catch(e){}
+  const dq=pfDq(); out.push({dept:'dq',id:'dq.score',key:'score',label:'Data quality (last 30 days)',actual:dq.pct,target:0.9,fmt:'pct',unit:'',good:'higher'});
+  return out.map(k=>{ const c=pfCfg(k.id); let t=k.target; if(c&&c.target!==undefined&&c.target!==''&&c.target!==null){ t=num(c.target); if(k.fmt==='pct'&&t>1) t=t/100; } const ratio=(t===null||t===undefined||t===0)?null:attainment(k.actual,t,k.good||'higher'); return Object.assign({},k,{target:t,ratio,st:statusOf(ratio),owner:pfOwner(k.id,k.dept)}); });
+}
+const pfVal=(k,v)=>k.fmt==='pct'?pct(v):fmt(v,k.fmt===undefined?0:k.fmt)+(k.unit?' '+k.unit:'');
+function pfOpenActions(){ return (STATE.data.actions||[]).filter(a=>a.status!=='Done'); }
+function pfBoard(){
+  const P=STATE.pfPeriod, K=pfKpis(P), cnt={red:0,amber:0,green:0}; K.forEach(k=>{ if(cnt[k.st]!==undefined) cnt[k.st]++; });
+  const ord={red:0,amber:1,green:2,grey:3}; K.sort((a,b)=>ord[a.st]-ord[b.st]||a.dept.localeCompare(b.dept));
+  const al=pfAlerts().slice(0,5), openA=pfOpenActions(), late=openA.filter(a=>a.due&&a.due<todayStr()).length, dq=pfDq();
+  return `<div class="grid cols-4" style="margin-bottom:12px;">
+    ${kc('Needs action',cnt.red,'KPIs in red this period',cnt.red?'red':'green')}${kc('On watch',cnt.amber,'KPIs in amber',cnt.amber?'amber':'green')}
+    ${kc('Open actions',openA.length,late?late+' overdue':'None overdue',late?'red':'green')}${kc('Data quality',pct(dq.pct),'Last 30 days',dq.pct>=.9?'green':dq.pct>=.7?'amber':'red')}</div>
+  ${al.length?`<div class="card" style="padding:12px 14px;margin-bottom:12px;"><div style="font-weight:600;margin-bottom:6px;">Early warnings <span class="dim small">— before they become next week's red</span></div>${al.map(a=>`<div style="display:flex;gap:8px;margin:4px 0;align-items:baseline;">${wsTag(a.sev==='high'?'Act now':'Watch',a.sev==='high'?'red':'amber')}<span><b>${esc(a.title)}</b> <span class="dim">${esc(a.detail)}</span></span></div>`).join('')}${pfAlerts().length>5?`<button class="btn small" data-pf-view="data" style="margin-top:6px;">See all ${pfAlerts().length}</button>`:''}</div>`:''}
+  <div class="table-wrap"><table><thead><tr><th>Area</th><th>KPI</th><th>Actual</th><th>Target</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>
+  ${K.map(k=>{ const has=(STATE.data.actions||[]).some(a=>a.status!=='Done'&&a.key&&a.key.indexOf('kpi|'+k.id+'|')===0);
+    return `<tr><td>${esc(PF_DEPT[k.dept]||k.dept)}</td><td style="white-space:normal;min-width:180px;"><b>${esc(k.label)}</b></td><td>${esc(pfVal(k,k.actual))}</td>
+    <td><input type="number" step="any" value="${k.target===null||k.target===undefined?'':(k.fmt==='pct'?Math.round(k.target*1000)/10:k.target)}" data-pf-target="${esc(k.id)}" style="width:84px;" placeholder="none">${k.fmt==='pct'?'%':(k.unit?' '+esc(k.unit):'')}</td>
+    <td>${wsTag(statusLabel(k.st),k.st)}</td>
+    <td><select data-pf-owner="${esc(k.id)}|${esc(k.dept)}">${PF_OWNERS.map(o=>`<option${o===k.owner?' selected':''}>${esc(o)}</option>`).join('')}</select></td>
+    <td>${k.st==='red'||k.st==='amber'?(has?'<span class="dim small">action open</span>':`<button class="btn small" data-pf-kact="${esc(k.id)}">+ Action</button>`):''}</td></tr>`; }).join('')}</tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">Targets here override the app targets for this board only; leave blank for “no target”. Owners are who answers for the KPI at the Monday review.</div>`;
+}
+async function pfKpiAction(id){
+  const P=STATE.pfPeriod, k=pfKpis(P).find(x=>x.id===id); if(!k) return; const R=periodRange(P), key='kpi|'+id+'|'+R.start;
+  const L=STATE.data.actions; if(L.some(a=>a.key===key)){ showToast('This action already exists.'); return; }
+  L.push({id:uid(),date:todayStr(),title:`${k.label}: ${pfVal(k,k.actual)} against ${k.target===null?'no target':pfVal(k,k.target)} — find the cause and fix it`,owner:k.owner,due:addDays(todayStr(),7),status:'Open',source:'kpi',key,note:''});
+  await persist('actions'); showToast('Action added for '+k.owner+', due '+fmtDate(addDays(todayStr(),7))+'.'); STATE.pfView='actions'; render();
+}
+
+/* ---------- 3. actions ---------- */
+function pfActions(){
+  const A=(STATE.data.actions||[]).slice().sort((a,b)=>(a.status==='Done')-(b.status==='Done')||String(a.due||'9').localeCompare(String(b.due||'9')));
+  const open=A.filter(a=>a.status!=='Done'), done=A.filter(a=>a.status==='Done').slice(0,15);
+  const row=a=>{ const od=a.status!=='Done'&&a.due&&a.due<todayStr(); return `<tr><td style="white-space:normal;min-width:240px;"><b>${esc(a.title)}</b>${a.note?`<div class="dim small">${esc(a.note)}</div>`:''}<div class="dim small">${a.source==='alert'?'Raised by an early warning':a.source==='kpi'?'From the KPI board':'Added by hand'} · ${esc(fmtDate(a.date))}</div></td>
+    <td><select data-pf-aowner="${a.id}">${PF_OWNERS.map(o=>`<option${o===a.owner?' selected':''}>${esc(o)}</option>`).join('')}</select></td>
+    <td><input type="date" value="${esc(a.due||'')}" data-pf-adue="${a.id}"></td><td>${a.status==='Done'?wsTag('Done','green'):(od?wsTag('Overdue','red'):wsTag('Open','amber'))}</td>
+    <td>${a.status==='Done'?`<button class="btn small" data-pf-areopen="${a.id}">Reopen</button>`:`<button class="btn small primary" data-pf-adone="${a.id}">Mark done</button>`}</td></tr>`; };
+  return `<form id="pf-aform" class="form-card" style="margin-bottom:12px;"><div class="form-grid">
+    <div style="grid-column:span 2;"><label>What must be done</label><input type="text" name="title" required placeholder="e.g. Replace worn brake pads on all trucks over 80,000 km"></div>
+    <div><label>Owner</label><select name="owner">${PF_OWNERS.map(o=>`<option>${esc(o)}</option>`).join('')}</select></div>
+    <div><label>Due</label><input type="date" name="due" value="${addDays(todayStr(),7)}" required></div></div>
+    <div class="form-actions"><button class="btn primary" type="submit">Add action</button></div></form>
+  <div class="table-wrap"><table><thead><tr><th>Action</th><th>Owner</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>${open.length?open.map(row).join(''):'<tr class="empty-row"><td colspan="5">No open actions. 🎉</td></tr>'}</tbody></table></div>
+  ${done.length?`<div class="section-title"><span>Recently closed</span><div class="line"></div></div><div class="table-wrap"><table><tbody>${done.map(row).join('')}</tbody></table></div>`:''}`;
+}
+
+/* ---------- 1. scorecards ---------- */
+function pfTruckStats(P){
+  const D=STATE.data, f=c=>filterPeriod(D[c]||[],P), out={};
+  const get=v=>out[v]||(out[v]={vid:v,trips:0,jn:0,ontime:0,late:0,delay:0,bd:0,defects:0,lm:0,turn:[],costs:{}});
+  f('transport').forEach(r=>{ if(!r.vehicleId) return; const o=get(r.vehicleId); o.trips+=num(r.tripsActual); const t=num(r.turnaroundActual); if(t>0) o.turn.push(t); });
+  f('journey').forEach(r=>{ if(!r.vehicleId) return; const o=get(r.vehicleId); o.jn++; if(r.onTime==='Yes') o.ontime++; else if(r.onTime==='No') o.late++; o.delay+=num(r.delayHrs); });
+  f('maintenance').filter(isBd).forEach(r=>{ if(r.vehicleId) get(r.vehicleId).bd++; });
+  f('defects').forEach(r=>{ if(r.vehicleId) get(r.vehicleId).defects++; });
+  f('lmFindings').forEach(r=>{ if(r.vehicleId) get(r.vehicleId).lm++; });
+  Object.values(out).forEach(o=>{ o.name=vehicleLabel(o.vid); o.turnAvg=o.turn.length?o.turn.reduce((a,b)=>a+b,0)/o.turn.length:null; o.ontimePct=(o.ontime+o.late)?o.ontime/(o.ontime+o.late):null;
+    o.score=Math.max(0,Math.min(100,100-8*o.bd-4*o.lm-3*o.late-2*o.defects)); });
+  return out;
+}
+function pfDriverStats(P){
+  const B=bestDriversData(P), idx=makeDriverIndex(), out={};
+  B.list.forEach(x=>{ out[x.name]={name:x.name,trips:x.trips,viol:x.viol,why:x.why,bd:x.bd||0,late:0,jn:0,lm:x.why.filter(w=>/^Live Map/.test(w)).length}; });
+  filterPeriod(STATE.data.journey||[],P).forEach(r=>{ const c=r.driverName?idx.ensure(r.driverName):null; if(!c) return; const o=out[c.name]||(out[c.name]={name:c.name,trips:0,viol:0,why:[],bd:0,late:0,jn:0,lm:0}); o.jn++; if(r.onTime==='No') o.late++; });
+  Object.values(out).forEach(o=>{ o.score=Math.max(0,Math.min(100,100-10*o.viol-3*o.late-5*o.bd)); });
+  return out;
+}
+const pfDelta=(a,b,good,unit,dec)=>{ if(a===null||a===undefined||b===null||b===undefined||isNaN(a)||isNaN(b)) return '<span class="dim">—</span>'; const d=a-b; if(Math.abs(d)<0.05) return '<span class="dim">no change</span>'; const better=good==='lower'?d<0:d>0; return `<span class="${better?'up-good':'up-bad'}">${d>0?'▲':'▼'} ${fmt(Math.abs(d),dec||0)}${unit||''}</span>`; };
+function pfCards(){
+  const P=STATE.pfPeriod, PV=pfPrev(P), who=STATE.pfWho, R=periodRange(P);
+  const cur=who==='truck'?pfTruckStats(P):pfDriverStats(P), prev=PV?(who==='truck'?pfTruckStats(PV):pfDriverStats(PV)):null;
+  const key=o=>who==='truck'?o.vid:o.name, L=Object.values(cur).filter(o=>(o.trips||0)>0||(o.jn||0)>0||(o.viol||0)>0||(o.bd||0)>0).sort((a,b)=>b.score-a.score||(b.trips||0)-(a.trips||0));
+  const sel=L.find(o=>key(o)===STATE.pfSel)||null;
+  const tabs=`<div class="tabs" style="margin-bottom:10px;"><button data-pf-who="truck" class="${who==='truck'?'active':''}">Trucks</button><button data-pf-who="driver" class="${who==='driver'?'active':''}">Drivers</button></div>`;
+  const table=who==='truck'?`<thead><tr><th>Truck</th><th>Score</th><th>Trips</th><th>On-time</th><th>Avg delay</th><th>Breakdowns</th><th>Defects</th><th>Live Map flags</th></tr></thead><tbody>${L.map(o=>`<tr data-pf-sel="${esc(key(o))}" style="cursor:pointer;${sel&&key(sel)===key(o)?'background:var(--panel2,rgba(255,255,255,.04));':''}"><td><b>${esc(o.name)}</b></td><td>${pfScoreTag(o.score)}</td><td>${fmt(o.trips,0)}</td><td>${o.ontimePct===null?'—':pct(o.ontimePct)}</td><td>${o.jn?fmt(o.delay/o.jn,1)+' h':'—'}</td><td>${o.bd}</td><td>${o.defects}</td><td>${o.lm}</td></tr>`).join('')||'<tr class="empty-row"><td colspan="8">No truck activity in this period.</td></tr>'}</tbody>`
+    :`<thead><tr><th>Driver</th><th>Score</th><th>Trips</th><th>Violations</th><th>Late arrivals</th><th>Breakdowns</th><th>Live Map flags</th></tr></thead><tbody>${L.map(o=>`<tr data-pf-sel="${esc(key(o))}" style="cursor:pointer;"><td><b>${esc(o.name)}</b></td><td>${pfScoreTag(o.score)}</td><td>${fmt(o.trips,0)}</td><td>${o.viol}</td><td>${o.late}</td><td>${o.bd}</td><td>${o.lm}</td></tr>`).join('')||'<tr class="empty-row"><td colspan="7">No driver activity in this period.</td></tr>'}</tbody>`;
+  let detail='';
+  if(sel){ const p=prev?(prev[key(sel)]||{}):null, row=(l,a,b,good,u,dec,fm)=>`<tr><td>${l}</td><td><b>${fm?fm(a):fmt(a,dec||0)+(u||'')}</b></td><td>${p?(fm?fm(b):(b===null||b===undefined?'—':fmt(b,dec||0)+(u||''))):'—'}</td><td>${p?pfDelta(a,b,good,u,dec):'—'}</td></tr>`;
+    const rows=who==='truck'?[row('Performance score',sel.score,p&&p.score,'higher'),row('Trips',sel.trips,p&&p.trips,'higher'),row('On-time arrival',sel.ontimePct,p&&p.ontimePct,'higher','',0,v=>v===null||v===undefined?'—':pct(v)),row('Average turnaround',sel.turnAvg,p&&p.turnAvg,'lower',' h',1,v=>v===null||v===undefined?'—':fmt(v,1)+' h'),row('Breakdowns / repairs',sel.bd,p&&p.bd,'lower'),row('Defects raised',sel.defects,p&&p.defects,'lower'),row('Live Map flags',sel.lm,p&&p.lm,'lower')]
+      :[row('Performance score',sel.score,p&&p.score,'higher'),row('Trips',sel.trips,p&&p.trips,'higher'),row('Violations',sel.viol,p&&p.viol,'lower'),row('Late arrivals',sel.late,p&&p.late,'lower'),row('Breakdowns on their trucks',sel.bd,p&&p.bd,'lower'),row('Live Map flags',sel.lm,p&&p.lm,'lower')];
+    const why=who==='driver'&&sel.why&&sel.why.length?`<div style="margin-top:8px;"><b>What counted against them:</b> <span class="dim">${esc(sel.why.join(' · '))}</span></div>`:'';
+    const cost=who==='truck'?pfCostFor(sel.vid,P):null, costLine=cost?`<div style="margin-top:8px;"><b>Cost this period:</b> ${naira(cost.total)}${cost.trips?` · ${naira(cost.total/cost.trips)} per trip`:''}${cost.km?` · ${naira(cost.total/cost.km,2)} per km`:''}</div>`:'';
+    detail=`<div class="card" style="padding:14px;margin:12px 0;"><div class="flex between" style="gap:8px;flex-wrap:wrap;"><div style="font-size:16px;font-weight:700;">${esc(sel.name)} <span class="dim small">${esc(rangeText(R))}</span></div><button class="btn small" data-pf-printcard="1">🖨 Print this page</button></div>
+    <div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Measure</th><th>This period</th><th>${PV?esc(periodWord(PV)):'Before'}</th><th>Change</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>${why}${costLine}</div>`; }
+  return tabs+detail+`<div class="table-wrap"><table>${table}</table></div><div class="dim small" style="margin-top:6px;">Tap a row for the full page. Score starts at 100 and loses: ${who==='truck'?'8 per breakdown, 4 per Live Map flag, 3 per late arrival, 2 per defect':'10 per violation (including Live Map, HSSE and alcohol), 3 per late arrival, 5 per breakdown on their truck'}.</div>`;
+}
+const pfScoreTag=s=>wsTag(Math.round(s),s>=85?'green':s>=65?'amber':'red');
+
+/* ---------- 4. cost per trip & per km ---------- */
+function pfCostFor(vid,P){
+  const D=STATE.data, f=c=>filterPeriod(D[c]||[],P).filter(r=>r.vehicleId===vid);
+  let fuel=0,km=0; f('fuel').forEach(r=>{ const c=fuelCalc(r); fuel+=c.total; km+=c.dist; });
+  if(!fuel){ fuel=f('cngFills').reduce((s,r)=>s+num(r.cost),0)+f('dieselTrips').reduce((s,r)=>s+num(r.costReceived)+num(r.costAdditional),0); }
+  const maint=f('maintenance').reduce((s,r)=>s+num(r.cost),0), req=f('repairReqs').filter(r=>r.stage==='Approved').reduce((s,r)=>s+num(r.total),0), rec=f('breakdowns').reduce((s,r)=>s+num(r.recoveryCost),0);
+  const tyre=(D.tyres||[]).filter(r=>r.vehicleId===vid&&inPeriod(r.removeDate||r.date,P)).reduce((s,r)=>s+num(r.repairCost)+num(r.retreadCost)+num(r.disposalCost),0);
+  const trips=f('transport').reduce((s,r)=>s+num(r.tripsActual),0);
+  return {fuel,maint,req,rec,tyre,total:fuel+maint+req+rec+tyre,km,trips};
+}
+function pfCosts(){
+  const P=STATE.pfPeriod, rows=(STATE.data.vehicles||[]).map(v=>Object.assign({vid:v.id,name:v.regNo,diesel:/diesel/i.test(v.fuelType||'')},pfCostFor(v.id,P))).filter(r=>r.total>0||r.trips>0);
+  rows.forEach(r=>{ r.cpt=r.trips?r.total/r.trips:null; r.cpk=r.km?r.total/r.km:null; });
+  rows.sort((a,b)=>(b.cpt||0)-(a.cpt||0)||b.total-a.total);
+  const T=rows.reduce((a,r)=>{ a.total+=r.total; a.trips+=r.trips; a.km+=r.km; a.fuel+=r.fuel; a.maint+=r.maint+r.req+r.rec+r.tyre; return a; },{total:0,trips:0,km:0,fuel:0,maint:0});
+  return `<div class="grid cols-4" style="margin-bottom:12px;">${kc('Total cost',naira(T.total),'Fuel '+naira(T.fuel)+' · repairs, tyres & recovery '+naira(T.maint))}${kc('Cost per trip',T.trips?naira(T.total/T.trips):'—',T.trips+' trips')}${kc('Cost per km',T.km?naira(T.total/T.km,2):'—',fmt(T.km,0)+' km logged')}${kc('Highest cost per trip',rows[0]&&rows[0].cpt?esc(rows[0].name):'—',rows[0]&&rows[0].cpt?naira(rows[0].cpt)+' per trip':'')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Trips</th><th>Fuel</th><th>Maintenance</th><th>Repair requests</th><th>Tyres</th><th>Recovery</th><th>Total</th><th>Per trip</th><th>Per km</th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.name)}</b>${r.diesel?' <span class="dim small">diesel</span>':''}</td><td>${fmt(r.trips,0)}</td><td>${naira(r.fuel)}</td><td>${naira(r.maint)}</td><td>${naira(r.req)}</td><td>${naira(r.tyre)}</td><td>${naira(r.rec)}</td><td><b>${naira(r.total)}</b></td><td>${r.cpt===null?'—':naira(r.cpt)}</td><td>${r.cpk===null?'—':naira(r.cpk,2)}</td></tr>`).join('')||'<tr class="empty-row"><td colspan="10">No costs recorded in this period.</td></tr>'}</tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">Sorted by cost per trip, highest first. Fuel and km come from the Cost per KM log (or CNG / diesel entries when a truck has none); per km needs fuel-log entries. Maintenance cost is what is typed into maintenance records; repair requests count only once the MD has approved them.</div>`;
+}
+
+/* ---------- 5. recognition ---------- */
+function pfRank(P){ const minTrips=num(((pfCfg('awards')||{}).min))||(/month/.test(P)?12:3); const L=Object.values(pfDriverStats(P)).filter(o=>o.trips>=minTrips).sort((a,b)=>b.score-a.score||b.trips-a.trips||a.viol-b.viol); return {L,minTrips}; }
+function pfPeople(){
+  const P=STATE.pfPeriod, {L,minTrips}=pfRank(P), top=L.slice(0,3), bot=L.slice(-3).reverse().filter(x=>top.indexOf(x)<0), aw=pfCfg('awards')||{}, R=periodRange(P);
+  const card=(o,i,good)=>`<div style="display:flex;gap:8px;align-items:baseline;margin:6px 0;"><span class="rank ${good?'good':''}">${i+1}</span><b>${esc(o.name)}</b>${pfScoreTag(o.score)}<span class="dim small">${fmt(o.trips,0)} trips · ${o.viol} violation${o.viol===1?'':'s'}${o.late?' · '+o.late+' late':''}${good&&aw['a'+(i+1)]?' · award '+naira(num(aw['a'+(i+1)])):''}</span></div>${!good&&o.why.length?`<div class="dim small" style="margin:-2px 0 6px 30px;">${esc(o.why.slice(0,3).join(' · '))}</div>`:''}`;
+  return `<div class="grid cols-2" style="margin-bottom:12px;"><div class="card"><div style="font-weight:600;margin-bottom:6px;">Top 3 — recognition</div>${top.map((o,i)=>card(o,i,true)).join('')||'<div class="dim">No driver has enough trips yet.</div>'}</div>
+  <div class="card"><div style="font-weight:600;margin-bottom:6px;">Bottom 3 — coaching list</div>${bot.map((o,i)=>card(o,i,false)).join('')||'<div class="dim">Nobody to list.</div>'}</div></div>
+  <div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">Award settings</div><div class="form-grid" style="margin-top:0;">
+    <div><label>1st place (₦)</label><input type="number" min="0" data-pf-award="a1" value="${esc(aw.a1||'')}"></div><div><label>2nd place (₦)</label><input type="number" min="0" data-pf-award="a2" value="${esc(aw.a2||'')}"></div><div><label>3rd place (₦)</label><input type="number" min="0" data-pf-award="a3" value="${esc(aw.a3||'')}"></div>
+    <div><label>Minimum trips to qualify</label><input type="number" min="1" data-pf-award="min" value="${esc(aw.min||'')}" placeholder="${/month/.test(P)?12:3}"></div></div>
+    <div class="form-actions"><button class="btn primary" data-pf-printsheet="1">🖨 Print the recognition sheet</button><span class="dim small">${esc(rangeText(R))} · ranked by performance score; needs ${minTrips}+ trips to qualify.</span></div></div>`;
+}
+function pfPrintSheet(){
+  const P=STATE.pfPeriod, {L,minTrips}=pfRank(P), top=L.slice(0,3), bot=L.slice(-3).reverse().filter(x=>top.indexOf(x)<0), aw=pfCfg('awards')||{}, R=periodRange(P);
+  const li=(o,i,g)=>`<tr><td>${i+1}</td><td><b>${esc(o.name)}</b></td><td>${Math.round(o.score)}</td><td>${fmt(o.trips,0)}</td><td>${o.viol}</td><td>${g&&aw['a'+(i+1)]?naira(num(aw['a'+(i+1)])):esc(o.why.slice(0,3).join(' · '))}</td></tr>`;
+  pfPrint(`<h1>SKB Logistics — Driver Performance</h1><div>${esc(rangeText(R))} · drivers with ${minTrips}+ trips · ranked by performance score</div><h2>Top 3</h2><table><tr><th>#</th><th>Driver</th><th>Score</th><th>Trips</th><th>Violations</th><th>Award</th></tr>${top.map((o,i)=>li(o,i,true)).join('')}</table><h2>Coaching list (bottom 3)</h2><table><tr><th>#</th><th>Driver</th><th>Score</th><th>Trips</th><th>Violations</th><th>Reasons</th></tr>${bot.map((o,i)=>li(o,i,false)).join('')}</table><p style="margin-top:40px;">Approved: ____________________ &nbsp;&nbsp; General Manager &nbsp;&nbsp; Date: ____________</p>`);
+}
+function pfPrint(body){ const w=window.open('','_blank'); if(!w){ showToast('Allow pop-ups to print.'); return; } w.document.write(`<!doctype html><title>SKB Logistics</title><style>body{font:14px Arial,sans-serif;margin:32px;color:#111}table{border-collapse:collapse;width:100%;margin:8px 0}td,th{border:1px solid #999;padding:6px 8px;text-align:left}h1{font-size:20px}h2{font-size:16px;margin-top:22px}</style>${body}`); w.document.close(); w.focus(); setTimeout(()=>w.print(),300); }
+
+/* ---------- 6. early warnings ---------- */
+function pfAlerts(){
+  const out=[], D=STATE.data, push=(key,sev,title,detail,owner)=>out.push({key,sev,title,detail,owner});
+  try{ predictServicing().forEach(p=>{ if(p.dueIn!==null&&p.dueIn<=7&&!p.stale) push('svc|'+p.vehicleId+'|'+(p.dueDate||''),p.dueIn<=2?'high':'med',p.regNo+' service '+(p.dueIn<=0?'is due now':'due in '+p.dueIn+' day'+(p.dueIn===1?'':'s')),(p.binding==='km'?fmt(p.kmRemaining,0)+' km left on the interval':'date-based service')+'. Book the workshop slot.','Maintenance Manager'); }); }catch(e){}
+  try{ wsRcaAlerts().filter(a=>!a.rca).forEach(a=>push('rca|'+a.key,/Incident|Critical/.test(a.kind)?'high':'med',a.kind,String(a.text||'').replace(/<[^>]+>/g,'').slice(0,140),'Maintenance Manager')); }catch(e){}
+  const wk=addDays(todayStr(),-7), byT={}; (D.lmFindings||[]).filter(x=>x.date>=wk).forEach(x=>{ byT[x.vehicleId]=(byT[x.vehicleId]||0)+1; });
+  Object.keys(byT).forEach(v=>{ if(byT[v]>=2) push('lm|'+v+'|'+wk,'med',vehicleLabel(v)+': '+byT[v]+' Live Map flags in 7 days','Speeding or off-route repeatedly — speak to the driver.','Logistics Manager'); });
+  try{ bestDriversData('week').list.forEach(x=>{ if(x.viol>=3) push('drv|'+x.name+'|'+wk,'high',x.name+': '+x.viol+' violations this week',x.why.slice(0,3).join(' · '),'Logistics Manager'); }); }catch(e){}
+  try{ const pc=pcData(); pc.open.forEach(x=>{ if(x.late) push('clr|'+x.ref,'high',x.ref+' ('+x.client+'): '+x.days+' days since duty, not delivered','Past the '+pc.T+'-day clearing target.','Logistics Manager'); else if(x.days>=pc.T-1) push('clr|'+x.ref,'med',x.ref+' ('+x.client+'): duty paid '+x.days+' days ago','Deliver today to stay within '+pc.T+' days.','Logistics Manager'); }); }catch(e){}
+  try{ const dq=pfDq(); if(dq.pct<.8) push('dq|'+todayStr().slice(0,7),'med','Data quality is '+pct(dq.pct),'Missing drivers, times or dates are distorting the scores. See the Data quality tab.','Yard Admin'); }catch(e){}
+  return out.sort((a,b)=>(a.sev==='high'?0:1)-(b.sev==='high'?0:1));
+}
+async function pfAlertSweep(){
+  try{ if(!GAS_CONFIGURED||STATE.pfSweeping) return; if(!(STATE.data.vehicles||[]).length) return; STATE.pfSweeping=true;
+    const L=STATE.data.actions, made=[]; pfAlerts().filter(a=>a.sev==='high').forEach(a=>{ const key='al|'+a.key; if(L.some(x=>x.key===key)) return; L.push({id:uid(),date:todayStr(),title:a.title+(a.detail?' — '+a.detail:''),owner:a.owner,due:addDays(todayStr(),2),status:'Open',source:'alert',key,note:''}); made.push(a); });
+    if(made.length){ await persist('actions'); made.slice(0,4).forEach(a=>wsNotify('Act now: '+a.title,a.detail||'',4)); if(made.length>4) wsNotify('Performance alerts',made.length-4+' more early warnings need action.',3); }
+  }catch(e){ console.error('pfAlertSweep',e); }
+  STATE.pfSweeping=false;
+}
+setTimeout(pfAlertSweep,30000); setInterval(pfAlertSweep,600000);
+function pfData(){
+  const dq=pfDq(), A=pfAlerts();
+  return `<div class="grid cols-2" style="margin-bottom:12px;"><div class="card"><div style="font-weight:600;margin-bottom:6px;">Data quality — ${pct(dq.pct)}</div>${dq.items.map(i=>`<div style="margin:7px 0;"><div class="flex between small"><span>${esc(i.label)}</span><b>${pct(i.pct)} ${i.bad?`<span class="dim">(${i.bad} of ${i.total} need fixing)</span>`:''}</b></div><div style="height:6px;background:var(--border);border-radius:3px;margin-top:3px;"><div style="height:100%;width:${Math.round(i.pct*100)}%;background:${i.pct>=.9?'var(--green)':i.pct>=.7?'var(--amber)':'var(--red)'};border-radius:3px;"></div></div>${i.bad?`<div class="dim small" style="margin-top:2px;">${esc(i.hint||'')} ${i.fix==='drv'?'<button class="btn small" data-drv-fix="1">Find the drivers</button>':i.fix==='times'?'<button class="btn small" data-jt-sweep="1">Fill from Live Map</button>':''}</div>`:''}</div>`).join('')}</div>
+  <div class="card"><div style="font-weight:600;margin-bottom:6px;">Early warnings (${A.length})</div>${A.map(a=>`<div style="display:flex;gap:8px;margin:5px 0;align-items:baseline;">${wsTag(a.sev==='high'?'Act now':'Watch',a.sev==='high'?'red':'amber')}<span><b>${esc(a.title)}</b><div class="dim small">${esc(a.detail)} · ${esc(a.owner)}</div></span></div>`).join('')||'<div class="dim">Nothing needs attention right now.</div>'}<div class="dim small" style="margin-top:8px;">“Act now” warnings create an action for the owner and send an alert to your phone automatically (if the phone topic is set under Approvals).</div></div></div>`;
+}
+
+/* ---------- page + nav ---------- */
+function renderPerfPage(){
+  const V=STATE.pfView, views=[['board','KPI board'],['cards','Scorecards'],['actions','Actions'+(pfOpenActions().length?' ('+pfOpenActions().length+')':'')],['costs','Cost per trip & km'],['people','Recognition'],['data','Warnings & data quality']];
+  const body=V==='cards'?pfCards():V==='actions'?pfActions():V==='costs'?pfCosts():V==='people'?pfPeople():V==='data'?pfData():pfBoard();
+  const showP=V!=='actions'&&V!=='data';
+  return wsHead('Performance','One place to see how trucks, drivers and departments are doing — and who must fix what.')+
+  `<div class="tabs" style="margin-bottom:10px;">${views.map(([k,l])=>`<button data-pf-view="${k}" class="${V===k?'active':''}">${l}</button>`).join('')}</div>`+
+  (showP?`<div class="tabs" style="margin-bottom:14px;">${PF_PERIODS.map(([k,l])=>`<button data-pf-period="${k}" class="${STATE.pfPeriod===k?'active':''}">${l}</button>`).join('')}</div>`:'')+body;
+}
+(function(){ const at=NAV.findIndex(n=>n[0]==='summary')+1; NAV.splice(at,0,['performance','Performance']); NAV_ICON.performance='📈'; NAV_LABEL.performance='Performance'; NAV_GROUP.performance='Overview'; })();
+WS_TABS.performance=renderPerfPage;
+const _crit2=criticalBadgeFor; criticalBadgeFor=function(k){ if(k==='performance'){ const n=pfOpenActions().filter(a=>a.due&&a.due<todayStr()).length; return n||null; } return _crit2(k); };
+function pfAttach(){
+  const app=document.getElementById('app'); if(!app) return; const on=(s,ev,f)=>app.querySelectorAll(s).forEach(e=>e.addEventListener(ev,f));
+  on('[data-pf-view]','click',e=>{ STATE.pfView=e.currentTarget.getAttribute('data-pf-view'); render(); });
+  on('[data-pf-period]','click',e=>{ STATE.pfPeriod=e.currentTarget.getAttribute('data-pf-period'); render(); });
+  on('[data-pf-who]','click',e=>{ STATE.pfWho=e.currentTarget.getAttribute('data-pf-who'); STATE.pfSel=''; render(); });
+  on('[data-pf-sel]','click',e=>{ STATE.pfSel=e.currentTarget.getAttribute('data-pf-sel'); render(); });
+  on('[data-pf-printcard]','click',()=>{ const d=app.querySelector('[data-pf-printcard]').closest('.card'); if(d) pfPrint(d.innerHTML.replace(/<button[^>]*>.*?<\/button>/g,'')); });
+  on('[data-pf-printsheet]','click',pfPrintSheet);
+  on('[data-pf-target]','change',async e=>{ const id=e.currentTarget.getAttribute('data-pf-target'); await pfSetCfg(id,{target:e.currentTarget.value}); render(); });
+  on('[data-pf-owner]','change',async e=>{ const [id]=e.currentTarget.getAttribute('data-pf-owner').split('|'); await pfSetCfg(id,{owner:e.currentTarget.value}); showToast('Owner saved.'); });
+  on('[data-pf-kact]','click',e=>pfKpiAction(e.currentTarget.getAttribute('data-pf-kact')));
+  on('[data-pf-award]','change',async e=>{ await pfSetCfg('awards',{[e.currentTarget.getAttribute('data-pf-award')]:e.currentTarget.value}); showToast('Saved.'); });
+  const f=app.querySelector('#pf-aform'); if(f) f.addEventListener('submit',async ev=>{ ev.preventDefault(); const fd=new FormData(f); STATE.data.actions.push({id:uid(),date:todayStr(),title:String(fd.get('title')||'').trim(),owner:fd.get('owner'),due:fd.get('due'),status:'Open',source:'manual',key:'',note:''}); await persist('actions'); showToast('Action added.'); render(); });
+  const upd=async(id,patch)=>{ const a=STATE.data.actions.find(x=>x.id===id); if(a){ Object.assign(a,patch); await persist('actions'); render(); } };
+  on('[data-pf-adone]','click',e=>upd(e.currentTarget.getAttribute('data-pf-adone'),{status:'Done',closedAt:todayStr()}));
+  on('[data-pf-areopen]','click',e=>upd(e.currentTarget.getAttribute('data-pf-areopen'),{status:'Open',closedAt:''}));
+  on('[data-pf-aowner]','change',e=>upd(e.currentTarget.getAttribute('data-pf-aowner'),{owner:e.currentTarget.value}));
+  on('[data-pf-adue]','change',e=>upd(e.currentTarget.getAttribute('data-pf-adue'),{due:e.currentTarget.value}));
+}
+const _attach6=attachEvents; attachEvents=function(){ _attach6(); try{ pfAttach(); }catch(e){ console.error('pfAttach',e); } };
 
 loadAll();
 </script>
