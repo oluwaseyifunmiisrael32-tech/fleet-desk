@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.13 · 31 Oct 2026';
+const APP_VERSION='v12.14 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8141,6 +8141,77 @@ function wsjAttach(){
 }
 const _attach5=attachEvents; attachEvents=function(){ _attach5(); try{ wsjAttach(); }catch(e){ console.error('wsjAttach',e); } };
 setTimeout(()=>{ try{ if(drvUnresolved().length) drvFixAll(false); }catch(e){} },16000);
+
+
+/* ============================================================ ws_k.js ============================================================ */
+/* ===== v12.14: Live Map speeding & off-route saved per driver and counted in the scorecards · clearing KPI (delivery within 3 days of duty paid) ===== */
+WS_COLLS.push('lmFindings'); STORAGE_KEYS.lmFindings='vms:lmFindings'; if(!STATE.data.lmFindings) STATE.data.lmFindings=[]; MC_SIMPLE.push('lmFindings');
+function lmLocalDate(ts){ const d=new Date(ts*1000); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function lmDriver(r,date){ if(r.asg&&r.asg.date===date&&!drvBad(r.asg.driver)) return r.asg.driver; const x=drvResolve(r.vid,date,true); return x&&x.name?x.name:''; }
+async function lmCapture(){
+  const L=STATE.live; if(!L||L.watchOff||!L.hist||!L.hist.ok||STATE.lmBusy) return; STATE.lmBusy=true;
+  try{
+    const rows=fleetRows(), cur=STATE.data.lmFindings||(STATE.data.lmFindings=[]); let ch=false;
+    const upsert=rec=>{ const o=cur.find(x=>x.id===rec.id); if(!o){ cur.push(rec); ch=true; } else if(o.n!==rec.n||o.top!==rec.top||(rec.driverName&&o.driverName!==rec.driverName)){ Object.assign(o,rec); ch=true; } };
+    const AN=fwAnalyze(rows);
+    rows.forEach(r=>{
+      if(!r.vid) return;
+      const byDay={}; (r.pts||[]).forEach(p=>{ if(num(p[3])>FW_SPEED){ const d=lmLocalDate(p[0]); const o=byDay[d]||(byDay[d]={n:0,top:0}); o.n++; o.top=Math.max(o.top,Math.round(num(p[3]))); } });
+      Object.keys(byDay).forEach(d=>{ const o=byDay[d]; if(o.n>=2) upsert({id:'spd|'+d+'|'+r.vid,date:d,vehicleId:r.vid,type:'speed',n:o.n,top:o.top,driverName:lmDriver(r,d)}); });
+      (AN.F||[]).filter(f=>f.type==='route'&&f.key===r.key&&/^Off the /.test(f.title)).forEach(f=>{ const d=r.asg&&r.asg.date?r.asg.date:todayStr(); upsert({id:'rte|'+d+'|'+r.vid,date:d,vehicleId:r.vid,type:'route',n:1,top:0,driverName:lmDriver(r,d),detail:String(f.detail||'').replace(/<[^>]+>/g,'').slice(0,200)}); });
+    });
+    if(ch) await persist('lmFindings');
+  }catch(e){ console.error('lmCapture',e); }
+  STATE.lmBusy=false;
+}
+const _fh9=fetchHist; fetchHist=async function(h){ await _fh9(h); try{ lmCapture(); }catch(e){} };
+async function lmBackground(){ try{ if(!GAS_CONFIGURED||(STATE.live&&STATE.live.watchOff)||document.hidden) return; if(STATE.tab!=='live'){ await fetchLive(); } await fetchHist(48); await lmCapture(); }catch(e){} }
+setTimeout(lmBackground,25000); setInterval(lmBackground,1200000);
+function lmInPeriod(P){ return (STATE.data.lmFindings||[]).filter(x=>inPeriod(x.date,P)); }
+const _bdd2=bestDriversData; bestDriversData=function(P){
+  const B=_bdd2(P), idx=makeDriverIndex(); B.lmUnknown=0;
+  lmInPeriod(P).forEach(x=>{ const raw=x.driverName||((drvResolve(x.vehicleId,x.date,true)||{}).name)||''; const c=raw?idx.ensure(raw):null; if(!c){ B.lmUnknown++; return; }
+    let o=B.list.find(y=>y.name===c.name); if(!o){ o={name:c.name,trips:0,viol:0,why:[],bd:0,down:0,tripDays:0,hasMaint:false}; B.list.push(o); }
+    o.viol++; o.why.push(x.type==='route'?'Live Map: off route':'Live Map: speeding'+(x.top?' ('+x.top+' km/h)':'')); });
+  return B;
+};
+const _rbd2=renderBestDrivers; renderBestDrivers=function(P){ return _rbd2(P).replace('Checked: journey deviations and hours violations','Checked: Live Map speeding and off-route, journey deviations and hours violations'); };
+function lmSummaryCard(p){
+  const R=mxRange(p), F=(STATE.data.lmFindings||[]).filter(x=>x.date>=R.start&&x.date<=R.end); const idx=makeDriverIndex(), by={};
+  F.forEach(x=>{ const raw=x.driverName||((drvResolve(x.vehicleId,x.date,true)||{}).name)||''; const c=raw?idx.ensure(raw):null; const k=c?c.name:'Driver not identified'; const o=by[k]||(by[k]={name:k,spd:0,top:0,rte:0,trucks:{}}); if(x.type==='route') o.rte++; else { o.spd++; o.top=Math.max(o.top,x.top||0); } o.trucks[vehicleLabel(x.vehicleId)]=1; });
+  const L=Object.values(by).sort((a,b)=>(b.spd+b.rte)-(a.spd+a.rte));
+  return `<div class="section-title"><span>Live Map checks — speeding &amp; off-route</span><div class="line"></div></div>
+  <div class="dim small" style="margin-bottom:8px;">${esc(rangeText(R))} · from each truck's own tracker trail, saved automatically. A speeding day = 2 or more readings above ${FW_SPEED} km/h. Off route = 3 or more readings outside the approved route corridor on a logged trip. These count toward the best / worst driver lists.</div>
+  <div class="table-wrap"><table><thead><tr><th>Driver</th><th>Speeding days</th><th>Top speed</th><th>Off-route trips</th><th>Trucks</th></tr></thead><tbody>${L.length?L.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${x.spd}</td><td>${x.top?x.top+' km/h':'—'}</td><td>${x.rte}</td><td style="white-space:normal;">${esc(Object.keys(x.trucks).join(', '))}</td></tr>`).join(''):'<tr class="empty-row"><td colspan="5">Nothing flagged in this period. (The Live Map is read about every 20 minutes while the app is open.)</td></tr>'}</tbody></table></div>`;
+}
+const _rms3=renderMixScorecard; renderMixScorecard=function(){ const h=_rms3(); const p=(STATE.mix&&STATE.mix.period)||'lastweek'; return h+lmSummaryCard(p); };
+
+/* ---------- clearing KPI: delivery within 3 days of duty paid ---------- */
+function pcDate(s){ s=String(s||'').trim(); const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); if(m) return new Date(+m[1],+m[2]-1,+m[3]); return dmyToDatePort(s); }
+function pcDelivery(rec){ const u=portUpdates().filter(x=>x.ref===rec.fileRef&&x.delivered).sort((a,b)=>a.date<b.date?-1:1)[0]; return u?pcDate(u.date):(rec.deliveredDate?pcDate(rec.deliveredDate):null); }
+function pcTarget(){ const t=num((STATE.targets||{}).portDeliveryDays); return t>0?t:3; }
+function pcData(){
+  const all=portRecords(false), T=pcTarget(), done=[], open=[]; let noDate=0, noDuty=0;
+  PORT_CLIENTS.forEach(c=>all[c].forEach(r=>{ const du=pcDate(r.duty), st=portStage(r);
+    if(st==='delivered'){ const dl=pcDelivery(r); if(!du){ noDuty++; return; } if(!dl){ noDate++; return; } const d=Math.max(0,Math.round((dl-du)/864e5)); done.push({ref:r.fileRef,client:c,days:d,ok:d<=T}); }
+    else if(du){ const a=Math.max(0,Math.round((Date.now()-du.getTime())/864e5)); open.push({ref:r.fileRef,client:c,days:a,late:a>T,stage:portStageLabel(r,st)}); } }));
+  return {T,done,open,noDate,noDuty};
+}
+const _pkh=portKpiHTML; portKpiHTML=function(){
+  const h=_pkh(), D=pcData(), T=D.T, ok=D.done.filter(x=>x.ok).length, pct=D.done.length?Math.round(ok/D.done.length*100):null, avg=D.done.length?Math.round(D.done.reduce((s,x)=>s+x.days,0)/D.done.length*10)/10:null;
+  const late=D.open.filter(x=>x.late).sort((a,b)=>b.days-a.days), clients={}; D.done.forEach(x=>{ const o=clients[x.client]||(clients[x.client]={n:0,ok:0,sum:0}); o.n++; o.ok+=x.ok?1:0; o.sum+=x.days; });
+  const card=`<div class="section-title"><span>Clearing KPI — delivery within ${T} days of duty paid</span><div class="line"></div></div>
+  <div class="grid cols-4" style="margin-bottom:12px;">
+   ${kc('Delivered within '+T+' days',pct===null?'—':pct+'%',ok+' of '+D.done.length+' delivered files',pct===null?'':pct>=80?'green':pct>=50?'amber':'red')}
+   ${kc('Average duty → delivery',avg===null?'—':avg+' days','Target '+T+' days or less',avg===null?'':avg<=T?'green':'red',avg===null?'':avg<=T?'On target':'Over')}
+   ${kc('Open, past '+T+' days',late.length,'Duty paid, not yet delivered',late.length?'red':'green')}
+   ${kc('Open, duty paid',D.open.length,'Still inside the window: '+(D.open.length-late.length))}
+  </div>
+  ${late.length?`<div class="card" style="padding:12px 14px;margin-bottom:12px;"><div style="font-weight:600;margin-bottom:6px;">Files past the ${T}-day window — follow up today</div>${late.slice(0,12).map(x=>`<div style="display:flex;gap:10px;margin:3px 0;"><b class="pf-ref" style="min-width:90px;">${esc(x.ref)}</b><span style="min-width:90px;">${esc(x.client)}</span><span class="tag red">${x.days} days since duty</span><span class="dim small">${esc(x.stage)}</span></div>`).join('')}${late.length>12?`<div class="dim small">…and ${late.length-12} more</div>`:''}</div>`:''}
+  ${Object.keys(clients).length?`<div class="table-wrap" style="margin-bottom:8px;"><table><thead><tr><th>Client</th><th>Delivered files</th><th>Within ${T} days</th><th>Average days</th></tr></thead><tbody>${Object.entries(clients).map(([c,o])=>`<tr><td><b>${esc(c)}</b></td><td>${o.n}</td><td>${Math.round(o.ok/o.n*100)}% (${o.ok})</td><td>${Math.round(o.sum/o.n*10)/10}</td></tr>`).join('')}</tbody></table></div>`:''}
+  <div class="dim small" style="margin-bottom:10px;">Measured from the “Duty paid” date to the day the file is marked delivered in a daily update.${D.noDate||D.noDuty?` ${D.noDuty+D.noDate} delivered file${D.noDuty+D.noDate===1?'':'s'} can't be measured (${D.noDuty} without a duty date, ${D.noDate} without a recorded delivery date).`:''}</div>`;
+  const mk='<div class="section-title"><span>Where open files currently sit</span>'; return h.indexOf(mk)>-1?h.replace(mk,card+mk):card+h;
+};
 
 loadAll();
 </script>
