@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v12.14 · 31 Oct 2026';
+const APP_VERSION='v12.15 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8191,11 +8191,11 @@ function pcDate(s){ s=String(s||'').trim(); const m=/^(\d{4})-(\d{2})-(\d{2})/.e
 function pcDelivery(rec){ const u=portUpdates().filter(x=>x.ref===rec.fileRef&&x.delivered).sort((a,b)=>a.date<b.date?-1:1)[0]; return u?pcDate(u.date):(rec.deliveredDate?pcDate(rec.deliveredDate):null); }
 function pcTarget(){ const t=num((STATE.targets||{}).portDeliveryDays); return t>0?t:3; }
 function pcData(){
-  const all=portRecords(false), T=pcTarget(), done=[], open=[]; let noDate=0, noDuty=0;
+  const all=portRecords(false), T=pcTarget(), done=[], open=[]; let noDate=0, noDuty=0, stale=0;
   PORT_CLIENTS.forEach(c=>all[c].forEach(r=>{ const du=pcDate(r.duty), st=portStage(r);
     if(st==='delivered'){ const dl=pcDelivery(r); if(!du){ noDuty++; return; } if(!dl){ noDate++; return; } const d=Math.max(0,Math.round((dl-du)/864e5)); done.push({ref:r.fileRef,client:c,days:d,ok:d<=T}); }
-    else if(du){ const a=Math.max(0,Math.round((Date.now()-du.getTime())/864e5)); open.push({ref:r.fileRef,client:c,days:a,late:a>T,stage:portStageLabel(r,st)}); } }));
-  return {T,done,open,noDate,noDuty};
+    else if(du){ const a=Math.max(0,Math.round((Date.now()-du.getTime())/864e5)); if(a>45){ stale++; return; } open.push({ref:r.fileRef,client:c,days:a,late:a>T,stage:portStageLabel(r,st)}); } }));
+  return {T,done,open,noDate,noDuty,stale};
 }
 const _pkh=portKpiHTML; portKpiHTML=function(){
   const h=_pkh(), D=pcData(), T=D.T, ok=D.done.filter(x=>x.ok).length, pct=D.done.length?Math.round(ok/D.done.length*100):null, avg=D.done.length?Math.round(D.done.reduce((s,x)=>s+x.days,0)/D.done.length*10)/10:null;
@@ -8209,7 +8209,7 @@ const _pkh=portKpiHTML; portKpiHTML=function(){
   </div>
   ${late.length?`<div class="card" style="padding:12px 14px;margin-bottom:12px;"><div style="font-weight:600;margin-bottom:6px;">Files past the ${T}-day window — follow up today</div>${late.slice(0,12).map(x=>`<div style="display:flex;gap:10px;margin:3px 0;"><b class="pf-ref" style="min-width:90px;">${esc(x.ref)}</b><span style="min-width:90px;">${esc(x.client)}</span><span class="tag red">${x.days} days since duty</span><span class="dim small">${esc(x.stage)}</span></div>`).join('')}${late.length>12?`<div class="dim small">…and ${late.length-12} more</div>`:''}</div>`:''}
   ${Object.keys(clients).length?`<div class="table-wrap" style="margin-bottom:8px;"><table><thead><tr><th>Client</th><th>Delivered files</th><th>Within ${T} days</th><th>Average days</th></tr></thead><tbody>${Object.entries(clients).map(([c,o])=>`<tr><td><b>${esc(c)}</b></td><td>${o.n}</td><td>${Math.round(o.ok/o.n*100)}% (${o.ok})</td><td>${Math.round(o.sum/o.n*10)/10}</td></tr>`).join('')}</tbody></table></div>`:''}
-  <div class="dim small" style="margin-bottom:10px;">Measured from the “Duty paid” date to the day the file is marked delivered in a daily update.${D.noDate||D.noDuty?` ${D.noDuty+D.noDate} delivered file${D.noDuty+D.noDate===1?'':'s'} can't be measured (${D.noDuty} without a duty date, ${D.noDate} without a recorded delivery date).`:''}</div>`;
+  <div class="dim small" style="margin-bottom:10px;">${D.stale?`${D.stale} open file${D.stale===1?' has':'s have'} had duty paid for over 45 days — likely delivered already but not marked; update them to keep this KPI honest. `:''}Measured from the “Duty paid” date to the day the file is marked delivered in a daily update.${D.noDate||D.noDuty?` ${D.noDuty+D.noDate} delivered file${D.noDuty+D.noDate===1?'':'s'} can't be measured (${D.noDuty} without a duty date, ${D.noDate} without a recorded delivery date).`:''}</div>`;
   const mk='<div class="section-title"><span>Where open files currently sit</span>'; return h.indexOf(mk)>-1?h.replace(mk,card+mk):card+h;
 };
 
