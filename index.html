@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.1 · 31 Oct 2026';
+const APP_VERSION='v13.2 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8684,6 +8684,44 @@ function ctAttach(){
   on('[data-ct-podprint]','click',e=>ctPodPrint(e.currentTarget.getAttribute('data-ct-podprint')));
 }
 const _attach7=attachEvents; attachEvents=function(){ _attach7(); try{ ctAttach(); }catch(e){ console.error('ctAttach',e); } };
+
+
+/* ============================================================ ws_n.js ============================================================ */
+/* ===== v13.2: monthly report — tonnage breakdown for the month (gypsum by route, clinker, east deliveries, paper sludge and other materials) ===== */
+const TB_GYP=['gypsum_ewekoro','gypsum_sagamu','gypsum_adumbu','gypsum_adumbu_sagamu'];
+function tbTitle(s){ s=String(s||'').trim(); return s?s.charAt(0).toUpperCase()+s.slice(1):''; }
+function tbCat(r){
+  const m=matKey(r.material);
+  if(/sludge/.test(m)) return {k:'m|sludge',label:'Paper sludge',grp:'other'};
+  if(TB_GYP.indexOf(r.route)>=0) return {k:'g|'+r.route,label:(ROUTES[r.route]?ROUTES[r.route].label:r.route).replace(/^Gypsum — /,''),grp:'gypsum'};
+  if(r.route==='clinker') return {k:'clinker',label:'Clinker — Ewekoro ⇄ Sagamu',grp:'clinker'};
+  if(r.route==='east') return {k:'east',label:'East deliveries',grp:'east'};
+  return m?{k:'m|'+m,label:tbTitle(r.material),grp:'other'}:{k:'m|',label:'Other / material not stated',grp:'other'};
+}
+function tbSum(recs){ const o={}; recs.forEach(r=>{ const c=tbCat(r), x=o[c.k]||(o[c.k]={label:c.label,grp:c.grp,trips:0,ton:0}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); }); return o; }
+function tonBreakdownBlocks(F,G,L){
+  const A=tbSum(F), B=tbSum(G), tot=Object.values(A).reduce((s,x)=>s+x.ton,0), totT=Object.values(A).reduce((s,x)=>s+x.trips,0), totP=Object.values(B).reduce((s,x)=>s+x.ton,0);
+  const z={label:'',trips:0,ton:0}, g=(o,k)=>o[k]||z;
+  const row=(label,a,b)=>[label,fmt(a.trips),fmt(a.ton,1),tot?pct(a.ton/tot):'—',a.trips?fmt(a.ton/a.trips,1):'—',fmt(b.ton,1),chg(a.ton,b.ton,'higher',{dec:1})];
+  const sum=(o,keys)=>keys.reduce((s,k)=>({trips:s.trips+g(o,k).trips,ton:s.ton+g(o,k).ton}),{trips:0,ton:0});
+  const rows=[], gk=TB_GYP.map(k=>'g|'+k);
+  gk.forEach(k=>rows.push(row('Gypsum — '+(ROUTES[k.slice(2)]?ROUTES[k.slice(2)].label.replace(/^Gypsum — /,''):k),g(A,k),g(B,k))));
+  rows.push(row('▸ Total gypsum',sum(A,gk),sum(B,gk)));
+  rows.push(row('Clinker — Ewekoro ⇄ Sagamu',g(A,'clinker'),g(B,'clinker')));
+  rows.push(row('East deliveries',g(A,'east'),g(B,'east')));
+  const ok=[...new Set([...Object.keys(A),...Object.keys(B)])].filter(k=>k.indexOf('m|')===0).sort((x,y)=>g(A,y).ton-g(A,x).ton||(g(B,y).ton-g(B,x).ton));
+  if(!ok.some(k=>k==='m|sludge')) ok.unshift('m|sludge');
+  ok.forEach(k=>rows.push(row((k==='m|sludge'?'Paper sludge':(A[k]||B[k]).label),g(A,k),g(B,k))));
+  if(ok.length>1) rows.push(row('▸ Total other materials',sum(A,ok),sum(B,ok)));
+  rows.push(row('ALL CARGO',{trips:totT,ton:tot},{trips:0,ton:totP}));
+  const blocks=[tableBlock('Tonnage breakdown for the month',['Cargo / route','Trips','Tonnage (MT)','Share','Avg load / trip (MT)',`Tonnage (${L.prevShort})`,'Change'],rows,'Cargo is grouped by route; anything with “sludge” in the material name counts as paper sludge, and the other routes are split by the material typed in Transport Ops.')];
+  const dest={}; F.filter(r=>r.route==='east').forEach(r=>{ const d=String(r.destination||'').trim().toLowerCase()||'(not stated)'; const x=dest[d]||(dest[d]={label:d==='(not stated)'?'Destination not stated':tbTitle(r.destination.trim()),trips:0,ton:0}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); });
+  const dl=Object.values(dest).sort((a,b)=>b.ton-a.ton); if(dl.length>0&&!(dl.length===1&&dl[0].label==='Destination not stated')) blocks.push(tableBlock('East deliveries by destination',['Destination','Trips','Tonnage (MT)','Avg load / trip (MT)'],dl.map(x=>[x.label,fmt(x.trips),fmt(x.ton,1),x.trips?fmt(x.ton/x.trips,1):'—'])));
+  return blocks;
+}
+const _repT2=repTransport;
+repTransport=function(r,p,L,recs){ const d=_repT2(r,p,L,recs); if(L.prevShort!=='prev mo') return d; try{ const F=repFiltered(r).transport, G=repFiltered(p).transport; const b=tonBreakdownBlocks(F,G,L); d.blocks=d.blocks.filter(x=>x.title!=='Tonnage by material & route'&&x.title!=='Routes — trips and tonnage'); const at=Math.min(1,d.blocks.length); d.blocks.splice(at,0,...b); d.hasData=d.hasData||F.length>0; }catch(e){ console.error('tonBreakdown',e); } return d; };
+REP_BUILDERS.transport=repTransport;
 
 loadAll();
 </script>
