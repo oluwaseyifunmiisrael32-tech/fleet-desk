@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.2 · 31 Oct 2026';
+const APP_VERSION='v13.3 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8722,6 +8722,69 @@ function tonBreakdownBlocks(F,G,L){
 const _repT2=repTransport;
 repTransport=function(r,p,L,recs){ const d=_repT2(r,p,L,recs); if(L.prevShort!=='prev mo') return d; try{ const F=repFiltered(r).transport, G=repFiltered(p).transport; const b=tonBreakdownBlocks(F,G,L); d.blocks=d.blocks.filter(x=>x.title!=='Tonnage by material & route'&&x.title!=='Routes — trips and tonnage'); const at=Math.min(1,d.blocks.length); d.blocks.splice(at,0,...b); d.hasData=d.hasData||F.length>0; }catch(e){ console.error('tonBreakdown',e); } return d; };
 REP_BUILDERS.transport=repTransport;
+
+
+/* ============================================================ ws_o.js ============================================================ */
+/* ===== v13.3: Weekly/Monthly reports read the saved month folders, so a finished month still reports in full ===== */
+STATE.repArch=STATE.repArch||{};
+function repMonths(r){ const ms=[]; let m=r.start.slice(0,7); const end=r.end.slice(0,7); let n=0; while(m<=end&&n++<4){ ms.push(m); m=addMonthsStr(m+'-01',1).slice(0,7); } return ms; }
+function repNeedArch(kind,start){ const {range,prev}=reportRanges(kind,start), have=(STATE.data.monthIndex||[]).map(x=>x.ym), need=new Set(); [range,prev].forEach(r=>repMonths(r).forEach(ym=>{ if(have.indexOf(ym)>-1&&!(ym in STATE.repArch)) need.add(ym); })); return [...need]; }
+async function repLoadArch(yms){
+  yms.forEach(ym=>{ STATE.repArch[ym]='loading'; });
+  for(const ym of yms){ try{ const key='vms:arch:'+ym, got=await gasGetAllChunked([key]); const o=JSON.parse(got[key]); STATE.repArch[ym]=(o&&o.data)||{}; }catch(e){ delete STATE.repArch[ym]; STATE.repArchErr=true; } }
+  if(STATE.tab==='reports'||STATE.tab==='monthly') render();
+}
+const REP_COLL={transport:'transport',journey:'journey',inspections:'inspections',pretrip:'pretrip',safety:'safety',maintenance:'maintenance',maintenanceDaily:'maintenanceDaily',maintInspections:'maintInspections',cng:'cngFills',diesel:'dieselTrips'};
+const _repF=repFiltered;
+repFiltered=function(r){
+  const F=_repF(r); try{ repMonths(r).forEach(ym=>{ const a=STATE.repArch[ym]; if(!a||typeof a!=='object') return;
+    Object.keys(REP_COLL).forEach(k=>{ const rows=a[REP_COLL[k]]; if(!Array.isArray(rows)||!rows.length) return; const have=new Set(F[k].map(x=>x.id)); const add=rows.filter(x=>x.date>=r.start&&x.date<=r.end&&!have.has(x.id)); if(add.length) F[k]=F[k].concat(add); }); }); }catch(e){ console.error('repFiltered',e); }
+  return F;
+};
+const _rprp=renderPeriodReportPage;
+renderPeriodReportPage=function(kind){
+  let note=''; try{ const need=repNeedArch(kind,repSelected(kind)); if(need.length){ repLoadArch(need); } const pend=[...repMonths(reportRanges(kind,repSelected(kind)).range),...repMonths(reportRanges(kind,repSelected(kind)).prev)].some(ym=>STATE.repArch[ym]==='loading'); if(pend) note='<div class="note warn" style="margin-bottom:12px;">⏳ Loading the saved month from its folder — the report will fill in a moment.</div>'; }catch(e){ console.error(e); }
+  const h=_rprp(kind); return note?h.replace('<div class="report-toolbar">',note+'<div class="report-toolbar">'):h;
+};
+const _mcClose2=mcClose; mcClose=async function(){ const r=await _mcClose2.apply(this,arguments); STATE.repArch={}; return r; };
+
+
+/* ============================================================ ws_o.js ============================================================ */
+/* ===== v13.3: reports, summary, performance and driver lists see through the month-end folders (closed months are read from their folder, never cleared from the screen's point of view) ===== */
+STATE.archCache=STATE.archCache||{}; STATE.archLoading=STATE.archLoading||{};
+function archColl(recs){ const D=STATE.data; for(const k in D){ if(D[k]===recs) return k; } return null; }
+function archYms(start,end){
+  const cur=monthStartOf(todayStr()).slice(0,7), idx=new Set((STATE.data.monthIndex||[]).map(m=>m.ym)), out=[]; if(!idx.size||!start||!end) return out;
+  for(let s=start.slice(0,7)+'-01'; s.slice(0,7)<=end.slice(0,7); s=addMonthsStr(s,1)){ const ym=s.slice(0,7); if(ym<cur&&idx.has(ym)) out.push(ym); }
+  return out;
+}
+async function archLoad(ym){
+  if(STATE.archCache[ym]||STATE.archLoading[ym]||!GAS_CONFIGURED) return; STATE.archLoading[ym]=1;
+  try{ const key='vms:arch:'+ym, got=await gasGetAllChunked([key]); const obj=JSON.parse(got[key]); STATE.archCache[ym]=(obj&&obj.data)||{}; }catch(e){ STATE.archCache[ym]={}; }
+  delete STATE.archLoading[ym];
+  try{ if(!document.hidden&&!formsDirty()&&!isEditing()&&!STATE.archMonth) render(); }catch(e){}
+}
+function archExtra(c,start,end){ let out=[]; archYms(start,end).forEach(ym=>{ const d=STATE.archCache[ym]; if(!d){ archLoad(ym); return; } (d[c]||[]).forEach(r=>{ if(r&&r.date&&r.date>=start&&r.date<=end) out.push(r); }); }); return out; }
+function archMergeList(recs,base,s,e){
+  if(!s||!e||s>=monthStartOf(todayStr())||STATE.archMonth) return base; const c=archColl(recs); if(!c) return base;
+  const ex=archExtra(c,s,e); if(!ex.length) return base; const have=new Set(base.map(x=>x.id)); return base.concat(ex.filter(x=>!have.has(x.id)));
+}
+const _fr9=filterRange; filterRange=function(a,s,e){ return archMergeList(a,_fr9(a,s,e),s,e); };
+const _fp9=filterPeriod; filterPeriod=function(recs,period){ const base=_fp9(recs,period); const r=periodRange(period); return r?archMergeList(recs,base,r.start,r.end):base; };
+function withArch(start,end,fn){
+  const D=STATE.data; if(STATE.archMonth||!archYms(start,end).length) return fn();
+  const m=Object.assign({},D); Object.keys(D).forEach(k=>{ if(Array.isArray(D[k])){ const ex=archExtra(k,start,end); if(ex.length){ const have=new Set(D[k].map(x=>x.id)); m[k]=D[k].concat(ex.filter(x=>!have.has(x.id))); } } });
+  STATE.data=m; try{ return fn(); } finally{ STATE.data=D; }
+}
+const arcWin=()=>[addDays(todayStr(),-75),todayStr()];
+const _bdd9=bestDriversData; bestDriversData=function(P){ const R=periodRange(P); return R?withArch(R.start,R.end,()=>_bdd9(P)):_bdd9(P); };
+const _rtt9=renderTripTimings; renderTripTimings=function(){ const R=ttRange(STATE.ttPeriod); return R?withArch(R.start,R.end,()=>_rtt9()):_rtt9(); };
+const _perf9=WS_TABS.performance; WS_TABS.performance=function(){ const w=arcWin(); return withArch(w[0],w[1],()=>_perf9()); };
+const _lmSum9=lmSummaryCard; lmSummaryCard=function(p){ const R=mxRange(p); return R?withArch(R.start,R.end,()=>_lmSum9(p)):_lmSum9(p); };
+/* load the two most recent closed months in the background, so last week's and last month's numbers are complete */
+function archPreload(){ try{ const cur=monthStartOf(todayStr()); (STATE.data.monthIndex||[]).forEach(m=>{ if(m.ym>=addMonthsStr(cur,-3).slice(0,7)&&m.ym<cur.slice(0,7)) archLoad(m.ym); }); }catch(e){} }
+const _loadAll9=loadAll; loadAll=async function(){ const r=await _loadAll9.apply(this,arguments); archPreload(); return r; };
+setTimeout(archPreload,6000);
 
 loadAll();
 </script>
