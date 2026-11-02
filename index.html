@@ -5540,7 +5540,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.0 · 31 Oct 2026';
+const APP_VERSION='v13.1 · 31 Oct 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -8102,7 +8102,7 @@ function renderTripTimings(){
   <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Gate wait</th><th>Loading</th><th>Turnaround</th><th>Loaded</th><th>Return</th><th>Total transit</th><th>Timeline</th><th>Verdict</th><th>Where time was lost</th><th></th></tr></thead><tbody>
   ${V.length?V.map(x=>{ const r=x.r, c=x.c, auto=splitKeys(r.tAuto).length, src=auto?(auto>=jtMissing(r)||auto>=4?'📡':'📡✋'):(jtMissing(r)<9?'✋':'');
     return `<tr><td>${esc(fmtDate(r.date))}</td><td>${wsVeh(r.vehicleId)}</td><td style="white-space:normal;">${esc(r.driverName||'—')}</td><td style="white-space:normal;">${esc((ROUTES[r.route]?ROUTES[r.route].label:r.route||'').replace(/ \(to & fro\)/,''))}</td>
-    <td>${jH(c.wait)}</td><td>${jH(c.load)}</td><td>${x.turn===null?'—':jH(x.turn)}${x.okA===false?' <span class="tag red">over</span>':''}</td><td>${jH(c.out)}</td><td>${jH(c.back)}</td><td>${x.tr===null?'—':jH(x.tr)}${x.tgtT?' <span class="dim small">/ '+x.tgtT+' h</span>':''}${x.okT===false?' <span class="tag red">over</span>':''}</td><td>${ttBar(r)}</td><td>${wsTag(x.v,x.cls)} <span title="${auto?'filled from the Live Map':'typed in'}">${src}</span>${r.tNote&&jtMissing(r)>0?`<div class="dim small" style="max-width:200px;white-space:normal;">${esc(r.tNote.slice(0,90))}</div>`:''}</td><td style="white-space:normal;min-width:190px;">${x.lost.odd?`<div class="small" style="color:#e8a33d;">⚠ Check the ${esc(x.lost.odd.join(', ').toLowerCase())} time — over 24 h, not counted</div>`:''}${x.v==='Incomplete'?'<span class="dim small">—</span>':(x.v==='Favourable'?'<span class="dim small">Within target</span>':x.lost.slice(0,2).map(l=>`<div class="small">Longest: <b>${esc(l.label)}</b> ${jH(l.h)}</div>`).join(''))}</td><td><button class="btn small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/9</button></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="14">No trips logged in this period.</td></tr>'}</tbody></table></div>
+    <td>${jH(c.wait)}</td><td>${jH(c.load)}</td><td>${x.turn===null?'—':jH(x.turn)}${x.okA===false?' <span class="tag red">over</span>':''}</td><td>${jH(c.out)}</td><td>${jH(c.back)}</td><td>${x.tr===null?'—':jH(x.tr)}${x.tgtT?' <span class="dim small">/ '+x.tgtT+' h</span>':''}${x.okT===false?' <span class="tag red">over</span>':''}</td><td>${ttBar(r)}</td><td>${wsTag(x.v,x.cls)} <span title="${auto?'filled from the Live Map':'typed in'}">${src}</span>${r.tNote&&jtMissing(r)>0?`<div class="dim small" style="max-width:200px;white-space:normal;">${esc(r.tNote.slice(0,90))}</div>`:''}</td><td style="white-space:normal;min-width:190px;">${x.lost.odd?`<div class="small" style="color:#e8a33d;">⚠ Check the ${esc(x.lost.odd.join(', ').toLowerCase())} time — over 24 h, not counted</div>`:''}${x.v==='Incomplete'?'<span class="dim small">—</span>':(x.v==='Favourable'?'<span class="dim small">Within target</span>':x.lost.slice(0,2).map(l=>`<div class="small">${l.std?(l.overStd>0.1?'Over standard: ':'Within standard: '):'Longest: '}<b>${esc(l.label)}</b> ${jH(l.h)}${l.std?` <span class="dim">(standard ${jH(l.std)}${l.overStd>0.1?', +'+jH(l.overStd):''})</span>`:''}</div>`).join(''))}</td><td><button class="btn small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/9</button></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="14">No trips logged in this period.</td></tr>'}</tbody></table></div>
   <div class="dim small" style="margin:8px 0 14px;display:flex;gap:12px;flex-wrap:wrap;">${TT_SEG.map(s=>`<span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s[3]};margin-right:4px;"></i>${s[2]}</span>`).join('')}</div>`;
 }
 const _rjp3=renderJourneyPage;
@@ -8435,6 +8435,255 @@ function pfAttach(){
   on('[data-pf-adue]','change',e=>upd(e.currentTarget.getAttribute('data-pf-adue'),{due:e.currentTarget.value}));
 }
 const _attach6=attachEvents; attachEvents=function(){ _attach6(); try{ pfAttach(); }catch(e){ console.error('pfAttach',e); } };
+
+
+/* ============================================================ ws_m.js ============================================================ */
+/* ===== v13.1: Controls (documents, fuel & odometers, stock, sites & detention, delivery proof) · Admin (roles, change history, backups) · Monday one-pager ===== */
+['docs','stock','stockLog','pods','audit'].forEach(k=>{ if(WS_COLLS.indexOf(k)<0) WS_COLLS.push(k); STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
+STATE.ctView=STATE.ctView||'docs'; STATE.adView=STATE.adView||'roles';
+const mMed=a=>{ const s=a.filter(x=>x!==null&&x!==undefined&&!isNaN(x)).sort((x,y)=>x-y); return s.length?s[Math.floor((s.length-1)/2)]:null; };
+const mP80=a=>{ const s=a.filter(x=>x!==null&&x!==undefined&&!isNaN(x)).sort((x,y)=>x-y); return s.length?s[Math.min(s.length-1,Math.floor(s.length*0.8))]:null; };
+const mDays=d=>d?Math.round((Date.parse(d+'T00:00:00')-Date.parse(todayStr()+'T00:00:00'))/864e5):null;
+
+/* ---------- 1. odometers kept current from the Live Map ---------- */
+function odoSync(){
+  try{
+    const L=STATE.live; if(!L||!L.hist||!L.hist.ok||L.watchOff) return; const rows=fleetRows(); if(!rows.length) return;
+    const gf=fwOdoFactor([].concat(...rows.map(x=>x.pts))); let ch=0;
+    rows.forEach(r=>{ if(!r.vid||!r.pts||r.pts.length<3) return; const v=(STATE.data.vehicles||[]).find(x=>x.id===r.vid); if(!v) return;
+      const f=fwOdoFactor(r.pts)||gf; const last=r.pts[r.pts.length-1]; if(!f||last[4]==null||(Date.now()/1000-last[0])>3*86400) return;
+      const liveKm=last[4]/f, cur=num(v.currentOdometer), b=v.lmOdo;
+      if(!b||num(b.set)!==cur){ if(cur>0){ v.lmOdo={live:liveKm,reg:cur,set:cur,at:todayStr()}; ch++; } return; }   // a person typed a newer reading: start counting from it
+      const nv=Math.round((b.reg+(liveKm-b.live))*10)/10; if(nv>cur&&nv-cur<3000){ v.currentOdometer=nv; v.lmOdo.set=nv; v.lmOdo.at=todayStr(); ch++; } });
+    if(ch&&Date.now()-(STATE.odoSaved||0)>7200000){ STATE.odoSaved=Date.now(); persist('vehicles'); }
+  }catch(e){ console.error('odoSync',e); }
+}
+const _lmc2=lmCapture; lmCapture=async function(){ await _lmc2(); odoSync(); };
+
+/* ---------- 7/8. documents ---------- */
+const DOC_TRUCK=['Insurance','Road worthiness','Vehicle licence','Haulage / hackney permit','CNG cylinder certificate','Fire extinguisher service','Third-party cover'];
+const DOC_DRIVER=['Driver’s licence','Medical fitness','Defensive driving','CNG / hazmat training','Site induction'];
+function docState(d){ const n=mDays(d.expires); if(n===null) return {k:'grey',t:'No expiry date',n}; if(n<0) return {k:'red',t:'Expired '+(-n)+' day'+(n===-1?'':'s')+' ago',n}; if(n<=30) return {k:'amber',t:'Expires in '+n+' day'+(n===1?'':'s'),n}; return {k:'green',t:'Valid · '+n+' days',n}; }
+function docRef(d){ return d.kind==='Truck'?vehicleLabel(d.ref):d.ref; }
+function ctDocs(){
+  const D=(STATE.data.docs||[]).slice().sort((a,b)=>String(a.expires||'9').localeCompare(String(b.expires||'9'))), st=D.map(docState);
+  const exp=st.filter(x=>x.k==='red').length, soon=st.filter(x=>x.k==='amber').length, trucks=(STATE.data.vehicles||[]), withDocs=new Set(D.filter(d=>d.kind==='Truck').map(d=>d.ref)), none=trucks.filter(v=>!withDocs.has(v.id)).length;
+  return `<div class="grid cols-4" style="margin-bottom:12px;">${kc('Expired',exp,'Needs renewing now',exp?'red':'green')}${kc('Expiring in 30 days',soon,'Start renewal',soon?'amber':'green')}${kc('Documents on file',D.length,'Trucks and drivers')}${kc('Trucks with none recorded',none,'of '+trucks.length,none?'amber':'green')}</div>
+  <form id="ct-docform" class="form-card" style="margin-bottom:12px;"><div class="form-grid">
+   <div><label>For</label><select name="kind" id="ct-dockind"><option>Truck</option><option>Driver</option></select></div>
+   <div id="ct-docref"><label>Truck</label><select name="ref">${(STATE.data.vehicles||[]).map(v=>`<option value="${esc(v.id)}">${esc(v.regNo)}</option>`).join('')}</select></div>
+   <div><label>Document</label><select name="type" id="ct-doctype">${DOC_TRUCK.map(t=>`<option>${esc(t)}</option>`).join('')}</select></div>
+   <div><label>Number (optional)</label><input type="text" name="number"></div><div><label>Expires</label><input type="date" name="expires" required></div></div>
+   <div class="form-actions"><button class="btn primary" type="submit">Save document</button><span class="dim small">When one is renewed, add the new one and delete the old.</span></div></form>
+  <div class="table-wrap"><table><thead><tr><th>For</th><th>Document</th><th>Number</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody>${D.map((d,i)=>`<tr><td><b>${esc(docRef(d))}</b> <span class="dim small">${esc(d.kind)}</span></td><td>${esc(d.type)}</td><td>${esc(d.number||'—')}</td><td>${esc(d.expires?fmtDate(d.expires):'—')}</td><td>${wsTag(st[i].t,st[i].k)}</td><td><button class="btn small danger" data-ct-docdel="${d.id}">Delete</button></td></tr>`).join('')||'<tr class="empty-row"><td colspan="6">No documents recorded yet. Add the insurance and road-worthiness dates for each truck, and licence and medical dates for each driver.</td></tr>'}</tbody></table></div>`;
+}
+
+/* ---------- 5. fuel anomaly checks + odometer sync ---------- */
+function ctFuelFlags(){
+  const D=STATE.data, from=addDays(todayStr(),-60), out=[], flag=(sev,vid,date,title,detail)=>out.push({sev,vid,date,title,detail});
+  const fills=(D.cngFills||[]).filter(r=>r.date>=from&&r.vehicleId).sort((a,b)=>a.date<b.date?-1:1), by={};
+  fills.forEach(r=>{ (by[r.vehicleId]=by[r.vehicleId]||[]).push(r); });
+  const price=fills.map(r=>num(r.cost)/num(r.quantity)).filter(x=>x>0), mp=mMed(price);
+  Object.keys(by).forEach(v=>{ const L=by[v], mq=L.length>=4?mMed(L.map(r=>num(r.quantity))):null, perDay={};
+    L.forEach((r,i)=>{ (perDay[r.date]=perDay[r.date]||[]).push(r);
+      if(mq&&num(r.quantity)>mq*1.4) flag('med',v,r.date,'Unusually large fill',`${fmt(num(r.quantity),1)} SCM against a usual ${fmt(mq,1)} SCM for this truck.`);
+      const p=num(r.cost)/num(r.quantity); if(mp&&p>0&&Math.abs(p-mp)/mp>0.3) flag(Math.abs(p-mp)/mp>0.5?'high':'med',v,r.date,'Price per SCM is off',`${naira(p,0)} per SCM against a fleet median of ${naira(mp,0)}.`);
+      const pv=L[i-1]; if(pv&&num(r.odometer)>0&&num(pv.odometer)>0){ const dk=num(r.odometer)-num(pv.odometer); if(dk<=0) flag('med',v,r.date,'Odometer did not go up',`${fmt(num(r.odometer),0)} km on this fill, ${fmt(num(pv.odometer),0)} km on the previous one.`); else { const ratio=num(pv.quantity)/dk; r._ratio=ratio; } } });
+    const mr=mMed(L.map(r=>r._ratio).filter(x=>x>0)); if(mr) L.forEach(r=>{ if(r._ratio&&L.filter(x=>x._ratio).length>=4&&r._ratio>mr*1.4) flag('med',v,r.date,'Using more gas than usual',`${fmt(r._ratio*100,1)} SCM per 100 km against a usual ${fmt(mr*100,1)}.`); });
+    Object.keys(perDay).forEach(d=>{ if(perDay[d].length>=2) flag('med',v,d,'Two fills on the same day',`${perDay[d].length} CNG fills logged for the same truck on ${fmtDate(d)}.`); });
+    L.forEach(r=>{ const trip=(D.transport||[]).concat(D.journey||[]).some(t=>t.vehicleId===v&&Math.abs(daysBetween(t.date,r.date))<=1); if(!trip) flag('low',v,r.date,'Fill with no trip logged',`No trip is logged for this truck within a day of the fill.`); });
+  });
+  const fl={}; (D.fuel||[]).filter(r=>r.date>=addDays(todayStr(),-120)&&r.vehicleId).forEach(r=>{ const c=fuelCalc(r); if(c.kmPerL>0) (fl[r.vehicleId]=fl[r.vehicleId]||[]).push({r,k:c.kmPerL}); });
+  Object.keys(fl).forEach(v=>{ const m=mMed(fl[v].map(x=>x.k)); if(fl[v].length>=3) fl[v].forEach(x=>{ if(x.k<m*0.7) flag('med',v,x.r.date,'Poor fuel efficiency',`${fmt(x.k,2)} km/L against this truck's usual ${fmt(m,2)} km/L.`); }); });
+  return out.sort((a,b)=>({high:0,med:1,low:2})[a.sev]-({high:0,med:1,low:2})[b.sev]||(a.date<b.date?1:-1));
+}
+function ctFuel(){
+  const F=ctFuelFlags(), vs=STATE.data.vehicles||[];
+  return `<div class="grid cols-3" style="margin-bottom:12px;">${kc('Needs a look',F.filter(f=>f.sev!=='low').length,'Last 60 days',F.some(f=>f.sev==='high')?'red':F.filter(f=>f.sev!=='low').length?'amber':'green')}${kc('Odometers from Live Map',vs.filter(v=>v.lmOdo).length+' trucks','Registry readings kept current automatically')}${kc('Fills checked',(STATE.data.cngFills||[]).filter(r=>r.date>=addDays(todayStr(),-60)).length,'CNG fills + fuel log')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Check</th><th>What was found</th><th></th></tr></thead><tbody>${F.slice(0,80).map(f=>`<tr><td>${esc(fmtDate(f.date))}</td><td><b>${esc(vehicleLabel(f.vid))}</b></td><td>${wsTag(f.title,f.sev==='high'?'red':f.sev==='med'?'amber':'grey')}</td><td style="white-space:normal;">${esc(f.detail)}</td><td></td></tr>`).join('')||'<tr class="empty-row"><td colspan="5">Nothing unusual in the last 60 days.</td></tr>'}</tbody></table></div>
+  <div class="dim small" style="margin:6px 0 14px;">Checks: fills much larger than usual, price per SCM away from the fleet median, odometer not rising, more gas per km than usual, two fills in a day, fills with no trip, and poor km/L in the fuel log. A flag is a reason to ask, not proof.</div>
+  <div class="section-title"><span>Odometers</span><div class="line"></div></div><div class="table-wrap"><table><thead><tr><th>Truck</th><th>Registry odometer</th><th>Last service at</th><th>Service interval</th><th>Source</th></tr></thead><tbody>${vs.map(v=>`<tr><td><b>${esc(v.regNo)}</b></td><td>${fmt(num(v.currentOdometer),0)} km</td><td>${v.lastServiceOdometer?fmt(num(v.lastServiceOdometer),0)+' km':'—'}</td><td>${v.serviceIntervalKm?fmt(num(v.serviceIntervalKm),0)+' km':'—'}</td><td>${v.lmOdo?'Live Map · '+esc(fmtDate(v.lmOdo.at)):'<span class="dim">typed in</span>'}</td></tr>`).join('')}</tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">Once a truck has an odometer typed in, the Live Map adds the distance it drives, so service-due warnings stay accurate without anyone re-typing readings. Typing a new reading restarts the count from that reading.</div>`;
+}
+
+/* ---------- 6. stock ---------- */
+const ST_CATS=['Spare part','Tyre','Consumable','Lubricant / fluid'];
+function ctStock(){
+  const S=STATE.data.stock||[], low=S.filter(s=>num(s.qty)<=num(s.min)), log=(STATE.data.stockLog||[]).filter(l=>l.type==='count'&&l.date>=addDays(todayStr(),-90)), ok=log.filter(l=>num(l.variance)===0).length;
+  return `<div class="grid cols-4" style="margin-bottom:12px;">${kc('Items in store',S.length,'')}${kc('At or below minimum',low.length,'Reorder now',low.length?'red':'green')}${kc('Count accuracy',log.length?pct(ok/log.length):'—',log.length?ok+' of '+log.length+' counts matched (90 days)':'Do a count to measure it',log.length?(ok/log.length>=.95?'green':ok/log.length>=.85?'amber':'red'):'')}${kc('Last movement',(STATE.data.stockLog||[]).length?fmtDate((STATE.data.stockLog||[]).slice(-1)[0].date):'—','')}</div>
+  <form id="ct-stockform" class="form-card" style="margin-bottom:12px;"><div class="form-grid"><div><label>Item</label><input type="text" name="item" required placeholder="e.g. Brake pads — HOWO front"></div><div><label>Type</label><select name="cat">${ST_CATS.map(c=>`<option>${esc(c)}</option>`).join('')}</select></div><div><label>Unit</label><input type="text" name="unit" value="pcs"></div><div><label>Quantity now</label><input type="number" name="qty" min="0" step="any" value="0"></div><div><label>Reorder at</label><input type="number" name="min" min="0" step="any" value="1"></div></div><div class="form-actions"><button class="btn primary" type="submit">Add item</button></div></form>
+  <div class="table-wrap"><table><thead><tr><th>Item</th><th>Type</th><th>On hand</th><th>Reorder at</th><th>Status</th><th>Last counted</th><th></th></tr></thead><tbody>${S.slice().sort((a,b)=>(num(a.qty)<=num(a.min)?0:1)-(num(b.qty)<=num(b.min)?0:1)||String(a.item).localeCompare(b.item)).map(s=>`<tr><td><b>${esc(s.item)}</b></td><td>${esc(s.cat)}</td><td>${fmt(num(s.qty),1)} ${esc(s.unit||'')}</td><td>${fmt(num(s.min),1)}</td><td>${num(s.qty)<=num(s.min)?wsTag('Reorder','red'):wsTag('OK','green')}</td><td>${s.counted?esc(fmtDate(s.counted)):'<span class="dim">never</span>'}</td><td style="white-space:nowrap;"><button class="btn small" data-st-act="in:${s.id}">+ Receive</button> <button class="btn small" data-st-act="out:${s.id}">− Issue</button> <button class="btn small" data-st-act="count:${s.id}">Count</button> <button class="btn small danger" data-st-act="del:${s.id}">✕</button></td></tr>`).join('')||'<tr class="empty-row"><td colspan="7">Nothing in the store list yet. Add your key spares and tyres with a reorder level.</td></tr>'}</tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">Receive when stock arrives, Issue when it goes to a truck (name the truck), and Count when you check the shelf. A count that doesn't match the book is recorded as a variance — that is the stock-accuracy KPI.</div>`;
+}
+async function stAct(kind,id){
+  const s=(STATE.data.stock||[]).find(x=>x.id===id); if(!s) return; const L=STATE.data.stockLog;
+  if(kind==='del'){ if(!confirm('Remove '+s.item+' from the list?')) return; STATE.data.stock=STATE.data.stock.filter(x=>x.id!==id); await persist('stock'); return render(); }
+  const q=prompt(kind==='in'?`How many ${s.item} received?`:kind==='out'?`How many ${s.item} issued?`:`How many ${s.item} are on the shelf now? (book says ${s.qty})`); if(q===null||q===''||isNaN(num(q))) return; const n=num(q);
+  if(kind==='count'){ const v=n-num(s.qty); L.push({id:uid(),date:todayStr(),itemId:id,item:s.item,type:'count',book:num(s.qty),counted:n,variance:v,by:wsWho()}); s.qty=n; s.counted=todayStr(); }
+  else { const note=prompt(kind==='in'?'Supplier / reference (optional)':'Which truck or job? (optional)')||''; s.qty=Math.max(0,num(s.qty)+(kind==='in'?n:-n)); L.push({id:uid(),date:todayStr(),itemId:id,item:s.item,type:kind,qty:n,note,by:wsWho()}); }
+  await persist('stock'); await persist('stockLog'); render();
+}
+
+/* ---------- 2/4. stage standards per route + detention charges ---------- */
+const CT_STAGES=[['gate','Gate wait',(r)=>jH0(r.tGateIn,r.tLoadStart)],['load','Loading',(r)=>jH0(r.tLoadStart,r.tLoadEnd)],['exit','Leaving the loading point',(r)=>jH0(r.tLoadEnd,r.tLeftLoading)],['off','Offloading',(r)=>jH0(r.tArriveOff,r.tLeftOff)]];
+function ctSites(){
+  const P=STATE.pfPeriod, J=(STATE.data.journey||[]).filter(r=>!ttSkip(r)&&r.route&&r.date>=addDays(todayStr(),-45)), routes=[...new Set(J.map(r=>r.route))];
+  const std=(rt,k)=>{ const c=pfCfg('std|'+rt+'|'+k); return c&&c.target!==''&&c.target!==undefined?num(c.target):''; };
+  const tbl=routes.map(rt=>{ const L=J.filter(r=>r.route===rt); return `<tr><td style="white-space:normal;"><b>${esc((ROUTES[rt]?ROUTES[rt].label:rt).replace(/ \(to & fro\)/,''))}</b><div class="dim small">${L.length} trips</div></td>${CT_STAGES.map(([k,l,f])=>{ const v=L.map(r=>{ const h=f(r); return h!==null&&h>0&&h<=24?h:null; }).filter(x=>x!==null); return `<td>${v.length?`<div class="small">typical <b>${jH(mMed(v))}</b> · 80% within <b>${jH(mP80(v))}</b></div><div class="dim small">${v.length} trips</div>`:'<span class="dim small">no times</span>'}<input type="number" step="0.1" min="0" placeholder="standard h" value="${std(rt,k)}" data-ct-std="${esc(rt)}|${k}" style="width:92px;margin-top:3px;"></td>`; }).join('')}</tr>`; }).join('');
+  const dc=pfCfg('detention')||{}, fl=num(dc.freeLoad), fo=num(dc.freeOff), rate=num(dc.rate), have=dc.freeLoad!==undefined&&dc.freeLoad!==''&&rate>0, R=ttRange(P);
+  let rows=[], tot=0; if(have){ (STATE.data.journey||[]).filter(r=>!ttSkip(r)&&r.date>=R.start&&r.date<=R.end).forEach(r=>{ const hl=jH0(r.tGateIn,r.tLeftLoading), ho=jH0(r.tArriveOff,r.tLeftOff); const el=hl!==null&&hl<=48?Math.max(0,hl-fl):0, eo=ho!==null&&ho<=48?Math.max(0,ho-fo):0; if(el+eo>0){ const amt=(el+eo)*rate; tot+=amt; rows.push({r,hl,ho,el,eo,amt}); } }); rows.sort((a,b)=>b.amt-a.amt); }
+  return `<div class="section-title"><span>Time standards by route</span><div class="line"></div></div><div class="dim small" style="margin-bottom:8px;">What the last 45 days actually show for each stage, with a box to set the standard you want. Once a standard is set, trips over it are named on the Journey page. Wrong entries (over 24 h) are ignored.</div>
+  <div class="table-wrap"><table><thead><tr><th>Route</th>${CT_STAGES.map(s=>`<th>${s[1]}</th>`).join('')}</tr></thead><tbody>${tbl||'<tr class="empty-row"><td colspan="5">No trips with times yet.</td></tr>'}</tbody></table></div>
+  <div class="section-title"><span>Detention charges</span><div class="line"></div></div>
+  <div class="card" style="padding:12px 14px;margin-bottom:10px;"><div class="form-grid" style="margin-top:0;"><div><label>Free hours at loading point (gate-in → leaving)</label><input type="number" step="0.5" min="0" data-ct-det="freeLoad" value="${esc(dc.freeLoad===undefined?'':dc.freeLoad)}"></div><div><label>Free hours at offloading point</label><input type="number" step="0.5" min="0" data-ct-det="freeOff" value="${esc(dc.freeOff===undefined?'':dc.freeOff)}"></div><div><label>Charge per extra hour, per truck (₦)</label><input type="number" min="0" data-ct-det="rate" value="${esc(dc.rate===undefined?'':dc.rate)}"></div></div><div class="dim small">Use the free time and rate in your customer agreement. Nothing is calculated until all three are set.</div></div>
+  ${have?`<div class="tabs" style="margin-bottom:10px;">${PF_PERIODS.map(([k,l])=>`<button data-pf-period="${k}" class="${STATE.pfPeriod===k?'active':''}">${l}</button>`).join('')}</div><div class="grid cols-3" style="margin-bottom:10px;">${kc('Billable detention',naira(tot),rows.length+' trips held beyond free time',tot?'amber':'')}${kc('Hours beyond free time',fmt(rows.reduce((s,x)=>s+x.el+x.eo,0),1)+' h','')}${kc('Worst trip',rows[0]?naira(rows[0].amt):'—',rows[0]?vehicleLabel(rows[0].r.vehicleId):'')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Route</th><th>At loading</th><th>At offloading</th><th>Extra hours</th><th>Charge</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(fmtDate(x.r.date))}</td><td>${wsVeh(x.r.vehicleId)}</td><td style="white-space:normal;">${esc((ROUTES[x.r.route]?ROUTES[x.r.route].label:x.r.route||'').replace(/ \(to & fro\)/,''))}</td><td>${jH(x.hl)}${x.el?` <span class="tag red">+${jH(x.el)}</span>`:''}</td><td>${jH(x.ho)}${x.eo?` <span class="tag red">+${jH(x.eo)}</span>`:''}</td><td>${fmt(x.el+x.eo,1)} h</td><td><b>${naira(x.amt)}</b></td></tr>`).join('')||'<tr class="empty-row"><td colspan="7">No trip was held beyond the free time.</td></tr>'}</tbody></table></div>`:''}`;
+}
+/* trips over a set standard are named on the Journey page */
+const _ttLost2=ttLost; ttLost=function(r,c){ const L=_ttLost2(r,c); L.forEach(l=>{ const s=pfCfg('std|'+r.route+'|'+l.k); if(s&&s.target!==''&&s.target!==undefined&&num(s.target)>0){ l.std=num(s.target); l.overStd=l.h-l.std; } }); L.sort((a,b)=>((b.overStd||-9)-(a.overStd||-9))||b.h-a.h); return L; };
+
+/* ---------- 3. delivery proof ---------- */
+function ctProof(){
+  const J=(STATE.data.journey||[]).filter(r=>!ttSkip(r)&&r.date>=addDays(todayStr(),-7)).sort((a,b)=>a.date<b.date?1:-1), P=STATE.data.pods||[], pod=r=>P.find(p=>p.journeyId===r.id);
+  const open=J.filter(r=>!pod(r)).length;
+  return `<div class="grid cols-3" style="margin-bottom:12px;">${kc('Trips without proof',open,'Last 7 days',open?'amber':'green')}${kc('Proofs recorded',P.filter(p=>p.date>=addDays(todayStr(),-7)).length,'Last 7 days')}${kc('Total on file',P.length,'')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Driver</th><th>Route</th><th>Proof of delivery</th><th></th></tr></thead><tbody>${J.map(r=>{ const p=pod(r); return `<tr><td>${esc(fmtDate(r.date))}</td><td>${wsVeh(r.vehicleId)}</td><td>${esc(r.driverName||'—')}</td><td style="white-space:normal;">${esc((ROUTES[r.route]?ROUTES[r.route].label:r.route||'').replace(/ \(to & fro\)/,''))}</td><td>${p?`${wsTag('Delivered','green')} <span class="small">${esc(p.receiver)} · ${esc(p.time||'')}${p.waybill?' · '+esc(p.waybill):''}</span>`:'<span class="dim small">none yet</span>'}</td><td>${p?`<button class="btn small" data-ct-podprint="${p.id}">🖨 Slip</button>`:`<button class="btn small primary" data-ct-pod="${r.id}">Delivered ✔</button>`}</td></tr>`; }).join('')||'<tr class="empty-row"><td colspan="6">No trips logged in the last 7 days.</td></tr>'}</tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">Tap “Delivered ✔” at the moment of offloading: it records who received the load, the waybill number and the time, and fills the “left offloading” time if it is still empty.</div>`;
+}
+async function ctPod(id){
+  const r=(STATE.data.journey||[]).find(x=>x.id===id); if(!r) return; const who=prompt('Received by (name at the delivery point)'); if(who===null||!who.trim()) return; const wb=prompt('Waybill / delivery note number (optional)')||'', note=prompt('Quantity or condition notes (optional)')||'';
+  const now=new Date(), hh=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  STATE.data.pods.push({id:uid(),journeyId:id,vehicleId:r.vehicleId,route:r.route,driverName:r.driverName||'',date:todayStr(),time:hh,receiver:who.trim(),waybill:wb,note,by:wsWho()});
+  if(r.date===todayStr()&&!r.tLeftOff){ r.tLeftOff=todayStr()+'T'+hh; r.tAuto=splitKeys(r.tAuto).filter(k=>k!=='tLeftOff').join(','); await persist('journey'); }
+  await persist('pods'); showToast('Proof of delivery recorded.'); render();
+}
+function ctPodPrint(id){ const p=(STATE.data.pods||[]).find(x=>x.id===id); if(!p) return; pfPrint(`<h1>SKB Logistics — Proof of Delivery</h1><table><tr><th>Date</th><td>${esc(fmtDate(p.date))} ${esc(p.time||'')}</td></tr><tr><th>Truck</th><td>${esc(vehicleLabel(p.vehicleId))}</td></tr><tr><th>Driver</th><td>${esc(p.driverName||'—')}</td></tr><tr><th>Route</th><td>${esc(ROUTES[p.route]?ROUTES[p.route].label:p.route||'')}</td></tr><tr><th>Waybill / delivery note</th><td>${esc(p.waybill||'—')}</td></tr><tr><th>Notes</th><td>${esc(p.note||'—')}</td></tr><tr><th>Received by</th><td>${esc(p.receiver)}</td></tr></table><p style="margin-top:50px;">Signature: ____________________ &nbsp;&nbsp; Date: ____________</p>`); }
+
+/* ---------- controls page ---------- */
+function renderControlsPage(){
+  const V=STATE.ctView, views=[['docs','Documents'],['fuel','Fuel & odometers'],['stock','Stock'],['sites','Time standards & detention'],['proof','Delivery proof']];
+  const body=V==='fuel'?ctFuel():V==='stock'?ctStock():V==='sites'?ctSites():V==='proof'?ctProof():ctDocs();
+  return wsHead('Controls','Documents that expire, fuel that doesn’t add up, stock that runs out, and proof that the load was delivered.')+`<div class="tabs" style="margin-bottom:14px;">${views.map(([k,l])=>`<button data-ct-view="${k}" class="${V===k?'active':''}">${l}</button>`).join('')}</div>`+body;
+}
+
+/* ---------- 10. roles: who may delete and who may only look ---------- */
+const RL_DELETE={'Maintenance Manager':['maintenance','maintenanceDaily','maintInspections','defects','jobcards','breakdowns','rcas','tyres','tyreInsp','repairReqs','stock','stockLog','docs','jsas'],'Logistics Manager':['transport','journey','jplans','pods','port','portUpdates','portFiles','dieselTrips','cngFills','fuel','docs','actions'],'General Manager':'*','MD':'*'};
+function roleNow(){ try{ return localStorage.getItem('fd_role')||''; }catch(e){ return ''; } }
+function rolesFor(dept){ return Object.keys(RL_DELETE).filter(r=>RL_DELETE[r]==='*'||RL_DELETE[r].indexOf(dept)>-1); }
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-delete],[data-delete-vehicle],[data-ct-docdel]'); if(!b||!document.getElementById('app')||!document.getElementById('app').contains(b)) return;
+  const dept=b.hasAttribute('data-delete')?b.getAttribute('data-delete').split(':')[0]:b.hasAttribute('data-delete-vehicle')?'vehicles':'docs';
+  if(wsAuth(rolesFor(dept).concat(dept==='vehicles'?[]:[]),'delete records here')) return;
+  e.stopPropagation(); e.preventDefault();
+},true);
+document.addEventListener('submit',e=>{ if(roleNow()!=='Viewer') return; const f=e.target; if(f&&f.closest&&f.closest('#app')){ e.stopPropagation(); e.preventDefault(); showToast('You are set to Viewer, so entries are locked. Change “You are” at the top to enter data.'); } },true);
+
+/* ---------- 11. change history ---------- */
+const AUD_SKIP=new Set(['lastSeen','audit','monthIndex','kpiCfg']);
+STATE.audSnap={}; STATE.audQ=[];
+function audLabel(c,r){ if(c==='docs') return (r.kind==='Truck'?vehicleLabel(r.ref):r.ref)+' · '+(r.type||''); const s=r.regNo||(r.vehicleId&&vehicleLabel(r.vehicleId))||r.ref||r.fileRef||r.title||r.item||r.name||r.driverName||''; return String(s).slice(0,60); }
+function audSnapshot(c){ const m=new Map(); (STATE.data[c]||[]).forEach(r=>{ if(r&&r.id!==undefined) m.set(r.id,JSON.stringify(r)); }); STATE.audSnap[c]=m; }
+function audSnapAll(){ Object.keys(STORAGE_KEYS).forEach(c=>{ if(Array.isArray(STATE.data[c])&&!AUD_SKIP.has(c)) audSnapshot(c); }); }
+function audDiff(c){
+  if(AUD_SKIP.has(c)||!Array.isArray(STATE.data[c])) return; const old=STATE.audSnap[c]; if(!old){ audSnapshot(c); return; }
+  const cur=new Map(); STATE.data[c].forEach(r=>{ if(r&&r.id!==undefined) cur.set(r.id,r); }); const ev=[], who=wsWho(), at=new Date().toISOString();
+  cur.forEach((r,id)=>{ if(!old.has(id)) ev.push({action:'added',r}); else { const js=JSON.stringify(r); if(js!==old.get(id)){ let was={}; try{ was=JSON.parse(old.get(id)); }catch(e){} const fields=Object.keys(r).filter(k=>JSON.stringify(r[k])!==JSON.stringify(was[k])&&!/^(t[A-Z]|tAuto|tNote|durationActual|lmOdo)/.test(k)); if(fields.length) ev.push({action:'edited',r,fields}); } } });
+  old.forEach((js,id)=>{ if(!cur.has(id)){ let r={}; try{ r=JSON.parse(js); }catch(e){} ev.push({action:'deleted',r}); } });
+  audSnapshot(c); if(!ev.length) return;
+  if(ev.length>25) STATE.audQ.push({id:uid(),at,by:who,coll:c,action:'bulk',summary:ev.length+' records changed in one save'});
+  else ev.forEach(x=>STATE.audQ.push({id:uid(),at,by:who,coll:c,action:x.action,summary:audLabel(c,x.r)+(x.fields?' — '+x.fields.slice(0,4).join(', '):''),date:x.r.date||''}));
+  clearTimeout(STATE.audT); STATE.audT=setTimeout(audFlush,4000);
+}
+async function audFlush(){ if(!STATE.audQ.length) return; const q=STATE.audQ.splice(0); STATE.data.audit=(STATE.data.audit||[]).concat(q).slice(-1500); await persist('audit'); }
+const _persistA=persist; persist=async function(k){ try{ audDiff(k); }catch(e){ console.error('audDiff',e); } return _persistA.apply(this,arguments); };
+const _loadAll2=loadAll; loadAll=async function(){ const r=await _loadAll2.apply(this,arguments); try{ audSnapAll(); }catch(e){} return r; };
+setTimeout(()=>{ try{ audSnapAll(); }catch(e){} },8000);
+const AUD_NAMES={transport:'Transport',journey:'Journey',inspections:'Inspection',pretrip:'Pre-trip',safety:'Safety',vehicles:'Vehicle',maintenance:'Maintenance',maintenanceDaily:'Daily maintenance',fuel:'Fuel log',maintInspections:'Maintenance inspection',cngFills:'CNG fill',dieselTrips:'Diesel trip',defects:'Defect',jobcards:'Job card',breakdowns:'Roadside breakdown',rcas:'RCA',tyres:'Tyre',tyreInsp:'Tyre inspection',jsas:'JSA',jplans:'Journey plan',repairReqs:'Repair request',actions:'Action',docs:'Document',stock:'Stock item',stockLog:'Stock movement',pods:'Proof of delivery',portUpdates:'Port update',portFiles:'Port file'};
+function adHistory(){
+  const A=(STATE.data.audit||[]).slice().reverse().slice(0,300), f=STATE.adFilter||'';
+  const L=f?A.filter(a=>a.action===f):A;
+  return `<div class="tabs" style="margin-bottom:10px;">${[['','All'],['added','Added'],['edited','Edited'],['deleted','Deleted']].map(([k,l])=>`<button data-ad-filter="${k}" class="${f===k?'active':''}">${l}</button>`).join('')}</div>
+  <div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Record</th></tr></thead><tbody>${L.map(a=>`<tr><td style="white-space:nowrap;">${esc(new Date(a.at).toLocaleString([],{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))}</td><td>${esc(a.by||'—')}</td><td>${wsTag(a.action,a.action==='deleted'?'red':a.action==='edited'?'amber':a.action==='bulk'?'grey':'green')} <span class="dim small">${esc(AUD_NAMES[a.coll]||a.coll)}</span></td><td style="white-space:normal;">${esc(a.summary||'')}</td></tr>`).join('')||'<tr class="empty-row"><td colspan="4">Nothing recorded yet. Changes made on this screen from now on are listed here.</td></tr>'}</tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">Shows the last 300 of up to 1,500 changes kept. “Who” is the role chosen on that device (and the name set under Approvals).</div>`;
+}
+
+/* ---------- 12. backups ---------- */
+function bkLast(){ const c=pfCfg('backup'); return c&&c.last?c.last:''; }
+async function bkDownload(){
+  const data={}; Object.keys(STORAGE_KEYS).forEach(k=>{ if(STATE.data[k]!==undefined) data[k]=STATE.data[k]; });
+  const blob=new Blob([JSON.stringify({app:'FleetDesk',version:APP_VERSION,at:new Date().toISOString(),by:wsWho(),data},null,1)],{type:'application/json'});
+  triggerDownload(blob,'FleetDesk-backup-'+todayStr()+'.json'); await pfSetCfg('backup',{last:todayStr(),by:wsWho()}); showToast('Backup downloaded. Keep it somewhere safe (Drive, email to yourself).'); render();
+}
+function adBackup(){
+  const last=bkLast(), n=last?-mDays(last):null, tot=Object.keys(STORAGE_KEYS).reduce((s,k)=>s+(Array.isArray(STATE.data[k])?STATE.data[k].length:0),0);
+  return `<div class="grid cols-3" style="margin-bottom:12px;">${kc('Last backup',last?fmtDate(last):'Never',last?(n===0?'today':n+' day'+(n===1?'':'s')+' ago'):'Download one now',!last||n>7?'red':n>5?'amber':'green')}${kc('Records held',fmt(tot,0),'Across all tabs')}${kc('Backups are',' weekly','A reminder shows after 7 days')}</div>
+  <div class="card" style="padding:14px;"><div style="font-weight:600;margin-bottom:6px;">Download everything</div><div class="dim small" style="margin-bottom:10px;">One file with every record in the app. Your live data already sits in the shared Google Sheet; this is your own copy in case the sheet is changed or deleted by mistake. Save it to Google Drive or email it to yourself.</div><button class="btn primary" data-ad-backup="1">⬇ Download backup now</button></div>
+  <div class="dim small" style="margin-top:8px;">To restore from a backup file, send it to me and I'll load it back — restoring is deliberately not a button, because one wrong click would overwrite live data.</div>`;
+}
+function adRoles(){
+  const me=roleNow()||'Not chosen', pins=((STATE.data.apprCfg||{}).pins)||{};
+  const rows=[['Viewer','Look only. Entries are locked.'],['Not chosen (default)','Enter data. Cannot delete.'],['Yard Admin','Enter data. Cannot delete. Raises requests.'],['Maintenance Manager','Enter data. Delete maintenance, workshop, tyres, stock and documents.'],['Logistics Manager','Enter data. Delete transport, journey, port, fuel and delivery records. Approves journeys.'],['General Manager','Everything, including deleting vehicles. Authorises repair requests.'],['MD','Everything. Final approval of repair requests.']];
+  return `<div class="card" style="padding:14px;margin-bottom:12px;"><div style="font-weight:600;margin-bottom:6px;">This device is set to: <span class="tag amber">${esc(me)}</span></div><div class="dim small">Change it with “You are” at the top of the Approvals page. Set a PIN for a role under Approvals so only the real person can use it.</div></div>
+  <div class="table-wrap"><table><thead><tr><th>Role</th><th>What it can do</th><th>PIN</th></tr></thead><tbody>${rows.map(([r,t])=>`<tr><td><b>${esc(r)}</b></td><td style="white-space:normal;">${esc(t)}</td><td>${pins[r]?wsTag('Set','green'):'<span class="dim small">'+(RL_DELETE[r]?'not set':'—')+'</span>'}</td></tr>`).join('')}</tbody></table></div>
+  <div class="note warn" style="margin-top:12px;"><b>Honest limit:</b> a role is chosen on each phone or computer, and a PIN is a simple check, not real login security. It stops accidents and casual changes — deleting asks for the manager PIN — but anyone with the sheet link can still open the Google Sheet itself. The Change history tab shows what was done and by which role.</div>`;
+}
+function renderAdminPage(){
+  const V=STATE.adView, views=[['roles','Roles & access'],['history','Change history'],['backup','Backups']];
+  return wsHead('Admin','Who can do what, what has been changed, and your own copy of the data.')+`<div class="tabs" style="margin-bottom:14px;">${views.map(([k,l])=>`<button data-ad-view="${k}" class="${V===k?'active':''}">${l}</button>`).join('')}</div>`+(V==='history'?adHistory():V==='backup'?adBackup():adRoles());
+}
+
+/* ---------- 9. Monday one-pager ---------- */
+function pfMonday(){
+  const P='lastweek', K=pfKpis(P).filter(k=>k.st==='red').slice(0,8), A=pfOpenActions().sort((a,b)=>String(a.due||'9').localeCompare(String(b.due||'9'))).slice(0,8), {L}=pfRank(P), top=L.slice(0,3), bot=L.slice(-3).reverse().filter(x=>top.indexOf(x)<0), W=pfAlerts().slice(0,8);
+  const costs=(STATE.data.vehicles||[]).map(v=>Object.assign({name:v.regNo},pfCostFor(v.id,P))).filter(c=>c.trips>0&&c.total>0).map(c=>Object.assign(c,{cpt:c.total/c.trips})).sort((a,b)=>b.cpt-a.cpt).slice(0,3);
+  const docs=(STATE.data.docs||[]).map(d=>({d,s:docState(d)})).filter(x=>x.s.k==='red'||x.s.k==='amber').slice(0,6), R=periodRange(P), dq=pfDq();
+  const sec=(t,b)=>`<div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">${t}</div>${b||'<div class="dim small">Nothing.</div>'}</div>`;
+  return `<div class="flex between" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;"><div class="dim">Week of ${esc(rangeText(R))} · ${esc(fmtDate(todayStr()))}</div><div style="display:flex;gap:8px;"><button class="btn small" data-pf-mondayprint="1">🖨 Print</button><button class="btn small primary" data-pf-mondaysend="1">📲 Send to my phone</button></div></div>
+  <div class="grid cols-2" id="pf-monday">
+   ${sec('Red KPIs',K.map(k=>`<div style="margin:4px 0;"><b>${esc(k.label)}</b> <span class="dim small">${esc(pfVal(k,k.actual))} vs ${k.target===null?'no target':esc(pfVal(k,k.target))} · ${esc(k.owner)}</span></div>`).join(''))}
+   ${sec('Open actions ('+pfOpenActions().length+')',A.map(a=>`<div style="margin:4px 0;">${a.due&&a.due<todayStr()?wsTag('Overdue','red'):''} <b>${esc(a.title.slice(0,90))}</b> <span class="dim small">${esc(a.owner)} · due ${esc(fmtDate(a.due))}</span></div>`).join(''))}
+   ${sec('Drivers — last week',top.map((o,i)=>`<div style="margin:4px 0;">${wsTag('Top '+(i+1),'green')} <b>${esc(o.name)}</b> <span class="dim small">${Math.round(o.score)} · ${fmt(o.trips,0)} trips</span></div>`).join('')+bot.map(o=>`<div style="margin:4px 0;">${wsTag('Coach','amber')} <b>${esc(o.name)}</b> <span class="dim small">${Math.round(o.score)} · ${esc(o.why.slice(0,2).join(' · ')||o.viol+' violations')}</span></div>`).join(''))}
+   ${sec('Highest cost per trip',costs.map(c=>`<div style="margin:4px 0;"><b>${esc(c.name)}</b> <span class="dim small">${naira(c.cpt)} per trip · ${naira(c.total)} total</span></div>`).join(''))}
+   ${sec('Early warnings',W.map(a=>`<div style="margin:4px 0;">${wsTag(a.sev==='high'?'Act now':'Watch',a.sev==='high'?'red':'amber')} <b>${esc(a.title)}</b></div>`).join(''))}
+   ${sec('Documents & data',docs.map(x=>`<div style="margin:4px 0;">${wsTag(x.s.t,x.s.k)} <b>${esc(docRef(x.d))}</b> <span class="dim small">${esc(x.d.type)}</span></div>`).join('')+`<div style="margin:6px 0;" class="dim small">Data quality ${pct(dq.pct)} · last backup ${bkLast()?esc(fmtDate(bkLast())):'never'}</div>`)}
+  </div>`;
+}
+function pfMondayText(){ const P='lastweek', K=pfKpis(P).filter(k=>k.st==='red').length, A=pfOpenActions(), od=A.filter(a=>a.due&&a.due<todayStr()).length, {L}=pfRank(P), W=pfAlerts().filter(a=>a.sev==='high').length;
+  return `${K} red KPIs · ${A.length} open actions (${od} overdue) · ${W} act-now warnings`+(L[0]?` · top driver ${L[0].name}`:'')+'. Open FleetDesk → Performance → Monday one-pager.'; }
+async function pfMondayAuto(){ try{ const n=new Date(); if(n.getDay()!==1||n.getHours()<7||!GAS_CONFIGURED||!(STATE.data.vehicles||[]).length) return; const c=pfCfg('monday'); if(c&&c.sent===todayStr()) return; await pfSetCfg('monday',{sent:todayStr()}); wsNotify('FleetDesk — Monday review',pfMondayText(),3); }catch(e){} }
+setTimeout(pfMondayAuto,45000);
+
+/* hook the Performance tab: new view, extra alerts */
+const _pfAlerts0=pfAlerts; pfAlerts=function(){ const out=_pfAlerts0();
+  try{ (STATE.data.docs||[]).forEach(d=>{ const s=docState(d); if(s.k==='red'||s.k==='amber') out.push({key:'doc|'+d.id+'|'+(s.k),sev:s.k==='red'?'high':'med',title:docRef(d)+': '+d.type+' — '+s.t.toLowerCase(),detail:'Renew before it stops the truck or driver.',owner:d.kind==='Truck'?'Maintenance Manager':'Logistics Manager'}); }); }catch(e){}
+  try{ (STATE.data.stock||[]).filter(s=>num(s.qty)<=num(s.min)).forEach(s=>out.push({key:'stk|'+s.id+'|'+s.qty,sev:'med',title:s.item+' is at the reorder level',detail:fmt(num(s.qty),1)+' '+(s.unit||'')+' left, reorder at '+num(s.min)+'.',owner:'Maintenance Manager'})); }catch(e){}
+  try{ ctFuelFlags().filter(f=>f.sev==='high'&&f.date>=addDays(todayStr(),-7)).forEach(f=>out.push({key:'fuel|'+f.vid+'|'+f.date+'|'+f.title,sev:'med',title:vehicleLabel(f.vid)+': '+f.title,detail:f.detail,owner:'Logistics Manager'})); }catch(e){}
+  try{ const l=bkLast(); if(!l||-mDays(l)>7) out.push({key:'bk|'+todayStr().slice(0,7),sev:'med',title:'No backup in the last 7 days',detail:'Download one under Admin → Backups.',owner:'General Manager'}); }catch(e){}
+  return out.sort((a,b)=>(a.sev==='high'?0:1)-(b.sev==='high'?0:1)); };
+const _pfPage0=renderPerfPage; renderPerfPage=function(){ if(STATE.pfView!=='monday') return _pfPage0().replace('<button data-pf-view="data"','<button data-pf-view="monday" class="'+(STATE.pfView==='monday'?'active':'')+'">Monday one-pager</button><button data-pf-view="data"'); return wsHead('Performance','One place to see how trucks, drivers and departments are doing — and who must fix what.')+`<div class="tabs" style="margin-bottom:10px;">${[['board','KPI board'],['cards','Scorecards'],['actions','Actions'],['costs','Cost per trip & km'],['people','Recognition'],['monday','Monday one-pager'],['data','Warnings & data quality']].map(([k,l])=>`<button data-pf-view="${k}" class="${STATE.pfView===k?'active':''}">${l}</button>`).join('')}</div>`+pfMonday(); };
+WS_TABS.performance=function(){ return renderPerfPage(); };
+(function(){ const at=NAV.findIndex(n=>n[0]==='maintenance')+1; NAV.push(['controls','Controls'],['admin','Admin']); Object.assign(NAV_ICON,{controls:'🛡️',admin:'⚙️'}); Object.assign(NAV_LABEL,{controls:'Controls',admin:'Admin'}); NAV_GROUP.controls='Controls & Admin'; NAV_GROUP.admin='Controls & Admin'; })();
+WS_TABS.controls=renderControlsPage; WS_TABS.admin=renderAdminPage;
+const _crit3=criticalBadgeFor; criticalBadgeFor=function(k){ if(k==='controls'){ const n=(STATE.data.docs||[]).filter(d=>docState(d).k==='red').length+(STATE.data.stock||[]).filter(s=>num(s.qty)<=num(s.min)).length; return n||null; } return _crit3(k); };
+function ctAttach(){
+  const app=document.getElementById('app'); if(!app) return; const on=(s,ev,f)=>app.querySelectorAll(s).forEach(e=>e.addEventListener(ev,f));
+  on('[data-ct-view]','click',e=>{ STATE.ctView=e.currentTarget.getAttribute('data-ct-view'); render(); });
+  on('[data-ad-view]','click',e=>{ STATE.adView=e.currentTarget.getAttribute('data-ad-view'); render(); });
+  on('[data-ad-filter]','click',e=>{ STATE.adFilter=e.currentTarget.getAttribute('data-ad-filter'); render(); });
+  on('[data-ad-backup]','click',bkDownload);
+  on('[data-pf-mondayprint]','click',()=>{ const d=document.getElementById('pf-monday'); if(d) pfPrint('<h1>SKB Logistics — Monday review</h1>'+d.innerHTML.replace(/<button[^>]*>.*?<\/button>/g,'')); });
+  on('[data-pf-mondaysend]','click',()=>{ wsNotify('FleetDesk — Monday review',pfMondayText(),3); showToast('Sent to your phone (if the phone topic is set under Approvals).'); });
+  const kind=app.querySelector('#ct-dockind'); if(kind) kind.addEventListener('change',()=>{ const k=kind.value; app.querySelector('#ct-docref').innerHTML=k==='Truck'?`<label>Truck</label><select name="ref">${(STATE.data.vehicles||[]).map(v=>`<option value="${esc(v.id)}">${esc(v.regNo)}</option>`).join('')}</select>`:`<label>Driver name</label><input type="text" name="ref" list="dl-drivers" required>`; app.querySelector('#ct-doctype').innerHTML=(k==='Truck'?DOC_TRUCK:DOC_DRIVER).map(t=>`<option>${esc(t)}</option>`).join(''); });
+  const df=app.querySelector('#ct-docform'); if(df) df.addEventListener('submit',async ev=>{ ev.preventDefault(); const fd=new FormData(df); STATE.data.docs.push({id:uid(),kind:fd.get('kind'),ref:String(fd.get('ref')||'').trim(),type:fd.get('type'),number:fd.get('number')||'',expires:fd.get('expires'),added:todayStr()}); await persist('docs'); showToast('Document saved.'); render(); });
+  on('[data-ct-docdel]','click',async e=>{ const id=e.currentTarget.getAttribute('data-ct-docdel'); if(!confirm('Delete this document record?')) return; STATE.data.docs=STATE.data.docs.filter(d=>d.id!==id); await persist('docs'); render(); });
+  const sf=app.querySelector('#ct-stockform'); if(sf) sf.addEventListener('submit',async ev=>{ ev.preventDefault(); const fd=new FormData(sf); STATE.data.stock.push({id:uid(),item:String(fd.get('item')).trim(),cat:fd.get('cat'),unit:fd.get('unit')||'pcs',qty:num(fd.get('qty')),min:num(fd.get('min')),counted:''}); await persist('stock'); showToast('Item added.'); render(); });
+  on('[data-st-act]','click',e=>{ const [k,id]=e.currentTarget.getAttribute('data-st-act').split(':'); stAct(k,id); });
+  on('[data-ct-std]','change',async e=>{ await pfSetCfg('std|'+e.currentTarget.getAttribute('data-ct-std'),{target:e.currentTarget.value}); showToast('Standard saved.'); });
+  on('[data-ct-det]','change',async e=>{ await pfSetCfg('detention',{[e.currentTarget.getAttribute('data-ct-det')]:e.currentTarget.value}); render(); });
+  on('[data-ct-pod]','click',e=>ctPod(e.currentTarget.getAttribute('data-ct-pod')));
+  on('[data-ct-podprint]','click',e=>ctPodPrint(e.currentTarget.getAttribute('data-ct-podprint')));
+}
+const _attach7=attachEvents; attachEvents=function(){ _attach7(); try{ ctAttach(); }catch(e){ console.error('ctAttach',e); } };
 
 loadAll();
 </script>
