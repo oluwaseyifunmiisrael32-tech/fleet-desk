@@ -5531,7 +5531,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.4 · 3 Nov 2026';
+const APP_VERSION='v13.5 · 3 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5634,7 +5634,7 @@ const TAB_SPECS=[
  {tab:'APP-SHAGAMU',route:'gypsum_sagamu',material:'Gypsum',means:'One gypsum trip Apapa → Sagamu',orig:['TRUCK NO','DATE','WEIGHT'],widths:{0:14,1:13,2:12}},
  {tab:'ADUNMBU-EWK',route:'gypsum_adumbu',material:'Gypsum',means:'One gypsum trip Adumbu → Ewekoro',orig:['TRUCK NO','DATE','WEIGHT',''],widths:{0:14,1:13,2:12}},
  {tab:'ADUNMBU-SHAGAMU',route:'gypsum_adumbu_sagamu',material:'Gypsum',means:'One gypsum trip Adumbu → Sagamu (new tab)',orig:['TRUCK NO','DATE','WEIGHT'],widths:{0:14,1:13,2:12}},
- {tab:'ITORI  -SHG',route:'clinker',material:'Clinker',means:'One clinker trip Itori → Sagamu (confirm this is clinker)',orig:['TRUCK NO','DATE','WEIGHT',''],widths:{0:14,1:13,2:12}},
+ {tab:'ITORI  -SHG',route:'itori_sagamu',material:'Clinker',means:'One trip Itori → Sagamu',orig:['TRUCK NO','DATE','WEIGHT',''],widths:{0:14,1:13,2:12}},
  {tab:'SLOUGH',route:'other',material:'',means:'One trip, no weight recorded (confirm route/material)',orig:['TRUCK NO','DATE'],widths:{0:14,1:13}},
  {tab:'EAST',route:'east',material:'',means:'One east delivery per row — type the tonnage',orig:['TRUCK DETAILS','LOADING LOCATION','MATERIAL','LOADING DATE','TAKEOFF DATE','ARRIVAL DATE','OFFLOADED DATE','OFFLOADING LOCATION','','BACKHAUL DESTINATION','MATERIAL','BACKHAUL LOADING DATE','EXIT DATE','DELIVERY DATE','',' EXTRA BACKHAUL DESTINATION','BACKHAUL LOADING DATE','EXIT DATE','DELIVERY DATE',''],widths:{0:14,1:18,2:16,3:14,4:14,5:14,6:14,7:20,9:18,10:14,11:16,12:12,13:14,15:20,16:16,17:12,18:14}},
  {tab:'IGBESA',route:'other',material:'',means:'One journey per row (loading date used)',orig:['TRUCK NO','DRIVER','DESTINATION','LOADING DATE','OFFLOADING DATE'],widths:{0:14,1:18,2:22,3:14,4:16}}];
@@ -8685,6 +8685,7 @@ function tbTitle(s){ s=String(s||'').trim(); return s?s.charAt(0).toUpperCase()+
 function tbCat(r){
   const m=matKey(r.material);
   if(/sludge/.test(m)) return {k:'m|sludge',label:'Paper sludge',grp:'other'};
+  if(routeKey(r)==='itori_sagamu') return {k:'itori',label:'Itori → Sagamu',grp:'clinker'};
   if(TB_GYP.indexOf(r.route)>=0) return {k:'g|'+r.route,label:(ROUTES[r.route]?ROUTES[r.route].label:r.route).replace(/^Gypsum — /,''),grp:'gypsum'};
   if(r.route==='clinker') return {k:'clinker',label:'Clinker — Ewekoro ⇄ Sagamu',grp:'clinker'};
   if(r.route==='east') return {k:'east',label:'East deliveries',grp:'east'};
@@ -8692,7 +8693,7 @@ function tbCat(r){
 }
 function tbSum(recs){ const o={}; recs.forEach(r=>{ const c=tbCat(r), x=o[c.k]||(o[c.k]={label:c.label,grp:c.grp,trips:0,ton:0}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); }); return o; }
 function tonBreakdownBlocks(F,G,L){
-  const A=tbSum(F), B=tbSum(G), tot=Object.values(A).reduce((s,x)=>s+x.ton,0), totT=Object.values(A).reduce((s,x)=>s+x.trips,0), totP=Object.values(B).reduce((s,x)=>s+x.ton,0);
+  const RA=railTonCtx('r'), RB=railTonCtx('p'), A=tbSum(F), B=tbSum(G), tot=Object.values(A).reduce((s,x)=>s+x.ton,0)+RA, totT=Object.values(A).reduce((s,x)=>s+x.trips,0), totP=Object.values(B).reduce((s,x)=>s+x.ton,0)+RB;
   const z={label:'',trips:0,ton:0}, g=(o,k)=>o[k]||z;
   const row=(label,a,b)=>[label,fmt(a.trips),fmt(a.ton,1),tot?pct(a.ton/tot):'—',a.trips?fmt(a.ton/a.trips,1):'—',fmt(b.ton,1),chg(a.ton,b.ton,'higher',{dec:1})];
   const sum=(o,keys)=>keys.reduce((s,k)=>({trips:s.trips+g(o,k).trips,ton:s.ton+g(o,k).ton}),{trips:0,ton:0});
@@ -8700,6 +8701,8 @@ function tonBreakdownBlocks(F,G,L){
   gk.forEach(k=>rows.push(row('Gypsum — '+(ROUTES[k.slice(2)]?ROUTES[k.slice(2)].label.replace(/^Gypsum — /,''):k),g(A,k),g(B,k))));
   rows.push(row('▸ Total gypsum',sum(A,gk),sum(B,gk)));
   rows.push(row('Clinker — Ewekoro ⇄ Sagamu',g(A,'clinker'),g(B,'clinker')));
+  rows.push(row('Itori → Sagamu',g(A,'itori'),g(B,'itori')));
+  if(RA||RB) rows.push(['Rail — '+fmt(railWagonsCtx())+' wagons','—',fmt(RA,1),tot?pct(RA/tot):'—','—',fmt(RB,1),chg(RA,RB,'higher',{dec:1})]);
   rows.push(row('East deliveries',g(A,'east'),g(B,'east')));
   const ok=[...new Set([...Object.keys(A),...Object.keys(B)])].filter(k=>k.indexOf('m|')===0).sort((x,y)=>g(A,y).ton-g(A,x).ton||(g(B,y).ton-g(B,x).ton));
   if(!ok.some(k=>k==='m|sludge')) ok.unshift('m|sludge');
@@ -8712,7 +8715,7 @@ function tonBreakdownBlocks(F,G,L){
   return blocks;
 }
 const _repT2=repTransport;
-repTransport=function(r,p,L,recs){ const d=_repT2(r,p,L,recs); if(L.prevShort!=='prev mo') return d; try{ const F=repFiltered(r).transport, G=repFiltered(p).transport; const b=tonBreakdownBlocks(F,G,L); d.blocks=d.blocks.filter(x=>x.title!=='Tonnage by material & route'&&x.title!=='Routes — trips and tonnage'); const at=Math.min(1,d.blocks.length); d.blocks.splice(at,0,...b); d.hasData=d.hasData||F.length>0; }catch(e){ console.error('tonBreakdown',e); } return d; };
+repTransport=function(r,p,L,recs){ const d=_repT2(r,p,L,recs); if(L.prevShort!=='prev mo') return d; try{ const F=repFiltered(r).transport, G=repFiltered(p).transport; TB_RANGE={r,p}; const b=tonBreakdownBlocks(F,G,L); d.blocks=d.blocks.filter(x=>x.title!=='Tonnage by material & route'&&x.title!=='Routes — trips and tonnage'); const at=Math.min(1,d.blocks.length); d.blocks.splice(at,0,...b); d.hasData=d.hasData||F.length>0; }catch(e){ console.error('tonBreakdown',e); } return d; };
 REP_BUILDERS.transport=repTransport;
 
 
@@ -9079,6 +9082,95 @@ function p13Settle(){
 const _la11=loadAll; loadAll=async function(){ const r=await _la11.apply(this,arguments); p13Settle(); archLoadAll(); setTimeout(safetyMigrate,4000); return r; };
 const _al11=archLoad; archLoad=async function(ym){ const r=await _al11(ym); try{ sanitizeDowntime((STATE.archCache[ym]||{}).maintenance); }catch(e){} return r; };
 p13Settle();
+
+/* ============================================================ ws_q.js ============================================================ */
+/* ===== v13.5: rail tonnage · Itori → Sagamu as its own route · tonnage check against your own route totals ===== */
+['rail'].forEach(k=>{ if(WS_COLLS.indexOf(k)<0) WS_COLLS.push(k); STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
+ROUTES.itori_sagamu={label:'Itori → Sagamu',tripsPerDayTarget:0,durationTargetHrs:null,material:'Clinker'};
+var TB_RANGE=null;
+const RAIL_T=60;
+STATE.tcYm=STATE.tcYm||null;
+function routeKey(r){ return (r&&r.route==='clinker'&&/itori/i.test(String(r.notes||'')+' '+String(r.destination||'')))?'itori_sagamu':(r&&r.route); }
+function railIn(rg){ return (STATE.data.rail||[]).filter(x=>x&&x.date>=rg.start&&x.date<=rg.end); }
+function railTon(rg){ return railIn(rg).reduce((s,x)=>s+num(x.wagons)*(num(x.perWagon)||RAIL_T),0); }
+function railTonCtx(w){ const rg=TB_RANGE&&TB_RANGE[w]; return rg?railTon(rg):0; }
+function railWagonsCtx(){ const rg=TB_RANGE&&TB_RANGE.r; return rg?railIn(rg).reduce((s,x)=>s+num(x.wagons),0):0; }
+/* rail adds to tonnage moved, never to truck trips */
+const _kt12=kpisTransport;
+kpisTransport=function(recs,period){
+  const k=_kt12(recs,period);
+  try{ const rg=(period!==undefined&&periodRange(period))||RANGE_OF.get(recs); if(rg){ const rt=railTon(rg); if(rt){ const tn=k.find(x=>x.key==='tonnage'); if(tn){ tn.actual+=rt; tn.ratio=attainment(tn.actual,tn.target,'higher'); } } } }catch(e){}
+  return k;
+};
+
+/* ---------- tonnage check ---------- */
+const TC_LABEL={clinker:'CLINKER',gypsum_ewekoro:'APAPA - EWK',gypsum_sagamu:'APAPA - SHG',gypsum_adumbu:'ADUNMBU - EWK',gypsum_adumbu_sagamu:'ADUNMBU - SHG',itori_sagamu:'ITORI - SHG',east:'EAST deliveries',other:'Other / not stated'};
+function tcMonths(){ const s=new Set(); (STATE.data.transport||[]).forEach(r=>{ if(r.date) s.add(r.date.slice(0,7)); }); (STATE.data.monthIndex||[]).forEach(m=>s.add(m.ym)); (STATE.data.rail||[]).forEach(r=>{ if(r.date) s.add(r.date.slice(0,7)); }); return [...s].sort().reverse(); }
+function tcData(ym){
+  const s=ym+'-01', e=monthEndOf(s);
+  return withArch(s,e,()=>{
+    const raw=(STATE.data.transport||[]).filter(r=>r.date>=s&&r.date<=e), recs=dedupeTransport(raw);
+    const R={}, D={}; let uploads=0, other=0;
+    recs.forEach(r=>{ const k=routeKey(r)||'other', x=R[k]||(R[k]={k,n:0,trips:0,ton:0,up:0,ot:0}); x.n++; x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); if(/^Imported from route tab/i.test(r.notes||'')){ x.up++; uploads++; } else { x.ot++; other++; }
+      const d=D[r.date]||(D[r.date]={date:r.date,n:0,trips:0,ton:0,trucks:new Set()}); d.n++; d.trips+=num(r.tripsActual); d.ton+=num(r.tonnageActual); d.trucks.add(trKey(r)); });
+    const big=recs.slice().sort((a,b)=>num(b.tonnageActual)-num(a.tonnageActual)).slice(0,8);
+    const odd=recs.filter(r=>num(r.tripsActual)>0&&num(r.tonnageActual)/num(r.tripsActual)>70).length;
+    return {recs,raw:raw.length,dropped:raw.length-recs.length,R,D:Object.values(D).sort((a,b)=>a.date<b.date?-1:1),big,odd,uploads,other};
+  });
+}
+function tcView(){
+  archLoadAll();
+  const ms=tcMonths(); if(!ms.length) return '';
+  const cy=monthStartOf(todayStr()).slice(0,7), ym=STATE.tcYm&&ms.indexOf(STATE.tcYm)>=0?STATE.tcYm:(ms.find(m=>m<cy)||ms[0]);
+  const A=tcData(ym), rg={start:ym+'-01',end:monthEndOf(ym+'-01')}, rails=railIn(rg), railMT=railTon(rg), railW=rails.reduce((s,x)=>s+num(x.wagons),0);
+  const fig=(pfCfg('tonCheck:'+ym)||{}), order=['clinker','itori_sagamu','gypsum_ewekoro','gypsum_sagamu','gypsum_adumbu','gypsum_adumbu_sagamu','east','other'].filter(k=>A.R[k]||fig[k]!==undefined||['clinker','itori_sagamu','gypsum_ewekoro','gypsum_sagamu','gypsum_adumbu'].indexOf(k)>=0);
+  const inp=(k,v)=>`<input type="number" step="0.01" data-tc-fig="${k}" value="${v===undefined||v===null?'':v}" placeholder="type yours" style="width:130px;">`;
+  const diff=(a,b)=>{ if(b===undefined||b===null||b==='') return '<span class="dim">—</span>'; const d=Math.round((a-num(b))*100)/100; return Math.abs(d)<0.5?wsTag('matches','green'):`<span class="tag ${d>0?'red':'amber'}">${d>0?'+':''}${fmt(d,2)}</span>`; };
+  let sT=0,sM=0,sY=0; const rows=order.map(k=>{ const x=A.R[k]||{n:0,trips:0,ton:0,up:0,ot:0}; sT+=x.trips; sM+=x.ton; if(fig[k]!==undefined&&fig[k]!=='') sY+=num(fig[k]);
+    return `<tr><td><b>${esc(TC_LABEL[k]||k)}</b></td><td>${x.n}</td><td>${x.up} / ${x.ot}</td><td>${fmt(x.trips)}</td><td><b>${fmt(x.ton,2)}</b></td><td>${inp(k,fig[k])}</td><td>${diff(x.ton,fig[k])}</td></tr>`; }).join('');
+  const rrow=`<tr><td><b>RAIL (${fmt(railW)} wagons × ${RAIL_T})</b></td><td>${rails.length}</td><td>—</td><td>—</td><td><b>${fmt(railMT,2)}</b></td><td>${inp('rail',fig.rail)}</td><td>${diff(railMT,fig.rail)}</td></tr>`;
+  sY+=(fig.rail!==undefined&&fig.rail!=='')?num(fig.rail):0;
+  const totalRow=`<tr style="font-weight:700;"><td>TOTAL tonnage moved</td><td>${A.recs.length}</td><td>${A.uploads} / ${A.other}</td><td>${fmt(sT)}</td><td>${fmt(sM+railMT,2)}</td><td>${sY?fmt(sY,2):'—'}</td><td>${sY?diff(sM+railMT,sY):'—'}</td></tr>`;
+  const veh=(STATE.data.vehicles||[]).length||26, ceil=veh*2;
+  const dayRows=A.D.map(d=>{ const bad=d.trips>ceil; return `<tr><td>${esc(fmtDate(d.date))}</td><td>${d.n}</td><td>${d.trucks.size}</td><td>${fmt(d.trips)}</td><td>${fmt(d.ton,1)}</td><td>${bad?wsTag('more than the fleet can do','red'):(d.trips>d.trucks.size*2?wsTag('trucks over 2 trips','amber'):'')}</td></tr>`; }).join('');
+  const bigRows=A.big.map(r=>`<tr><td>${esc(fmtDate(r.date))}</td><td>${esc(vehicleLabel(r.vehicleId)||r.regNoText||'')}</td><td>${esc(TC_LABEL[routeKey(r)]||routeKey(r))}</td><td>${fmt(num(r.tripsActual))}</td><td>${fmt(num(r.tonnageActual),2)}</td></tr>`).join('');
+  const railRows=rails.slice().sort((a,b)=>a.date<b.date?-1:1).map(x=>`<tr><td>${esc(fmtDate(x.date))}</td><td>${fmt(num(x.wagons))}</td><td>${fmt(num(x.perWagon)||RAIL_T)} MT</td><td>${fmt(num(x.wagons)*(num(x.perWagon)||RAIL_T))} MT</td><td>${esc(x.note||'')}</td><td><button class="btn small danger" data-tc-raildel="${esc(x.id)}">Delete</button></td></tr>`).join('');
+  return `<div class="section-title" style="margin-top:0;"><span>Tonnage check — compare with your own totals</span><div class="line"></div></div>
+  <div class="dim small" style="margin-bottom:10px;line-height:1.6;">Pick the month, type your own total for each route, and the last column shows the difference from what the app holds. “Uploads / other” counts entries that came from a route-tab upload against everything else (typed, or from another sheet) — if the same trips arrived both ways they are counted twice. Exact copies are already left out${A.dropped?` (<b>${A.dropped}</b> removed here)`:''}.</div>
+  <div class="tabs" style="margin-bottom:12px;">${ms.slice(0,6).map(m=>`<button data-tc-ym="${m}" class="${m===ym?'active':''}">${esc(mcLabel(m))}</button>`).join('')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Route</th><th>Entries</th><th>Uploads / other</th><th>Trips</th><th>Tonnage in the app (MT)</th><th>Your figure (MT)</th><th>Difference</th></tr></thead><tbody>${rows}${rrow}${totalRow}</tbody></table></div>
+  ${A.odd?`<div class="note warn" style="margin:10px 0;">${A.odd} entr${A.odd===1?'y has':'ies have'} more than 70 MT per trip — a typed total or a wrong column.</div>`:''}
+  <div class="section-title"><span>Rail wagons</span><div class="line"></div></div>
+  <form id="tc-rail-form" class="form-card" style="margin-bottom:10px;"><div class="form-grid"><div><label>Date</label><input type="date" name="date" value="${esc(rg.end<todayStr()?rg.end:todayStr())}" required></div><div><label>Wagons</label><input type="number" name="wagons" min="1" required placeholder="322"></div><div><label>MT per wagon</label><input type="number" name="perWagon" value="${RAIL_T}" step="0.1"></div><div><label>Note</label><input type="text" name="note" placeholder="optional"></div></div><div class="form-actions"><button class="btn primary" type="submit">Add rail wagons</button><span class="dim small">Rail counts in tonnage moved and the monthly tonnage breakdown, never in truck trips.</span></div></form>
+  ${rails.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Wagons</th><th>Per wagon</th><th>Tonnage</th><th>Note</th><th></th></tr></thead><tbody>${railRows}</tbody></table></div>`:''}
+  <div class="section-title"><span>Day by day</span><div class="line"></div></div>
+  <div class="dim small" style="margin-bottom:6px;">A day is flagged when trips are more than the whole registry (${veh} trucks) could do at 2 trips each (${ceil}). Look for the days where the numbers jump.</div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Entries</th><th>Trucks</th><th>Trips</th><th>Tonnage (MT)</th><th></th></tr></thead><tbody>${dayRows||'<tr class="empty-row"><td colspan="6">No entries.</td></tr>'}</tbody></table></div>
+  <div class="section-title"><span>Biggest single entries</span><div class="line"></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Route</th><th>Trips</th><th>Tonnage (MT)</th></tr></thead><tbody>${bigRows||'<tr class="empty-row"><td colspan="5">No entries.</td></tr>'}</tbody></table></div>
+  <div style="height:18px;"></div>`;
+}
+const _dcv12=dcView; dcView=function(){ return tcView()+_dcv12(); };
+
+function qAttach(){
+  document.querySelectorAll('[data-tc-ym]').forEach(e=>e.addEventListener('click',()=>{ STATE.tcYm=e.getAttribute('data-tc-ym'); render(); }));
+  document.querySelectorAll('[data-tc-fig]').forEach(e=>e.addEventListener('change',async()=>{ const ms=tcMonths(), cy=monthStartOf(todayStr()).slice(0,7), ym=STATE.tcYm&&ms.indexOf(STATE.tcYm)>=0?STATE.tcYm:(ms.find(m=>m<cy)||ms[0]); const o={}; o[e.getAttribute('data-tc-fig')]=e.value===''?'':num(e.value); await pfSetCfg('tonCheck:'+ym,o); render(); }));
+  document.querySelectorAll('[data-tc-raildel]').forEach(e=>e.addEventListener('click',async()=>{ if(!confirm('Delete this rail entry?')) return; const id=e.getAttribute('data-tc-raildel'); STATE.data.rail=(STATE.data.rail||[]).filter(x=>x.id!==id); await persist('rail'); render(); }));
+  const f=document.getElementById('tc-rail-form'); if(f) f.addEventListener('submit',async ev=>{ ev.preventDefault(); const w=num(f.elements.wagons.value); if(!f.elements.date.value||w<=0) return; STATE.data.rail=(STATE.data.rail||[]).concat([{id:uid(),date:f.elements.date.value,wagons:String(w),perWagon:String(num(f.elements.perWagon.value)||RAIL_T),note:String(f.elements.note.value||'').trim()}]); await persist('rail'); showToast('Rail wagons added.'); render(); });
+}
+const _att12=attachEvents; attachEvents=function(){ _att12(); try{ qAttach(); }catch(e){ console.error('qAttach',e); } };
+/* your own October totals (typed by you on 3 Nov) are pre-filled once, so the Tonnage check opens already comparing */
+async function qSeedOct(){
+  try{
+    if(!GAS_CONFIGURED||STATE.loading||STATE.qSeeded) return; STATE.qSeeded=1;
+    if((STATE.data.kpiCfg||[]).some(x=>x.key==='tonCheck:2026-10')) return;
+    await pfSetCfg('tonCheck:2026-10',{clinker:1112.92,gypsum_ewekoro:2635.54,gypsum_sagamu:1005.08,gypsum_adumbu:4392.28,itori_sagamu:7323.76,rail:19320});
+    if(!railIn({start:'2026-10-01',end:'2026-10-31'}).length){ STATE.data.rail=(STATE.data.rail||[]).concat([{id:uid(),date:'2026-10-31',wagons:'322',perWagon:'60',note:'October rail total (322 wagons x 60 MT)'}]); await persist('rail'); }
+    render();
+  }catch(e){ console.error('qSeedOct',e); }
+}
+const _la13=loadAll; loadAll=async function(){ const r=await _la13.apply(this,arguments); setTimeout(qSeedOct,5000); return r; };
+
 
 loadAll();
 </script>
