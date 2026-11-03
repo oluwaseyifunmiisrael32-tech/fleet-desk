@@ -428,7 +428,7 @@ const ROUTES = {
 const ROUTE_KEYS_TARGETED = Object.keys(ROUTES).filter(k=>['other','east'].indexOf(k)<0);
 ROUTES.clinker.material='Clinker'; ROUTES.gypsum_ewekoro.material='Gypsum'; ROUTES.gypsum_sagamu.material='Gypsum'; ROUTES.gypsum_adumbu.material='Gypsum'; ROUTES.gypsum_adumbu_sagamu.material='Gypsum';
 
-const REPAIR_COMPONENTS = ['Engine','Brakes','Tyres / Wheels','Electrical','Gearbox / Transmission','Suspension','Cooling System','Hydraulics','Body / Chassis','Other'];
+const REPAIR_COMPONENTS = ['Engine','Cooling System','Fuel system','CNG gas system','Exhaust & turbo','Filters, oil & lubrication','Clutch','Gearbox / Transmission','Axle, hub, bearings & drive shaft','Brakes','Air system & compressor','Suspension','Steering','Tyres / Wheels','Battery, starter & alternator','Lights, horn & wiring','Electrical','Hydraulics','Trailer, tipper & coupling','Glass, mirrors & wipers','Cab, seats, doors & AC','Welding & body work','Body / Chassis','Washing & general service','Other'];
 
 const DEFAULT_TARGETS = {
   tonnagePerTripTarget: 30, turnaroundTargetHrs: 6, transitTargetHrs: 4,
@@ -450,7 +450,7 @@ const DEFAULT_TARGETS = {
 const FUEL_CALC_URL = "https://claude.ai/public/artifacts/d45cbde1-5358-4c10-8750-0e5bfa4517a4";
 
 let STATE = {
-  loading:true, tab:'summary', maintView:'ops', repairWindow:30, truckDetail:null, transportRoute:'ALL', transportMaterial:'ALL', safetyView:'kpi', hsseTab:'overview', hsseWeek:null, hsseBand:'ALL', driverDetail:null, hsseMsg:null,
+  loading:true, tab:'summary', maintView:'ops', repairWindow:-1, truckDetail:null, transportRoute:'ALL', transportMaterial:'ALL', safetyView:'kpi', hsseTab:'overview', hsseWeek:null, hsseBand:'ALL', driverDetail:null, hsseMsg:null,
   periodByDept:{transport:'lastweek', journey:'lastweek', inspections:'lastweek', safety:'lastweek', maintenance:'lastweek', costkm:'lastweek'},
   data:{ transport:[], journey:[], inspections:[], pretrip:[], safety:[], vehicles:[], maintenance:[], maintenanceDaily:[], fuel:[], maintInspections:[], hsseScores:{weeks:[]}, hsseLogs:{}, cngFills:[], dieselTrips:[], portFlags:{}, portUpdates:[], seeds:{}, portFiles:[], lastSeen:{}, routeRefs:{}, routePlans:[] },
   targets:{...DEFAULT_TARGETS},
@@ -835,8 +835,8 @@ function repairAnalytics(vehicles, logs){
   const topRepaired = frequency.slice(0,5);
   const groupMap = {};
   repairLogs.forEach(l=>{
-    const key = l.vehicleId+'|'+(l.component||'Unspecified');
-    if(!groupMap[key]) groupMap[key]={vehicleId:l.vehicleId, regNo:vehicleLabel(l.vehicleId), component:l.component||'Unspecified', count:0, lastDate:l.date};
+    const key = l.vehicleId+'|'+compLbl(l,'Unspecified');
+    if(!groupMap[key]) groupMap[key]={vehicleId:l.vehicleId, regNo:vehicleLabel(l.vehicleId), component:compLbl(l,'Unspecified'), count:0, lastDate:l.date};
     groupMap[key].count++;
     if(l.date && (!groupMap[key].lastDate || l.date>groupMap[key].lastDate)) groupMap[key].lastDate=l.date;
   });
@@ -2439,7 +2439,7 @@ function maintInspectionBlock(ctx){
 }
 
 /* ---------------- repair analysis & truck risk ratings ---------------- */
-function windowFilter(recs,days){ if(!days) return recs; return recs.filter(r=>{ const d=daysAgo(r.date); return d>=0 && d<days; }); }
+function windowFilter(recs,days){ if(!days) return recs; return recs.filter(r=>inWinD(r.date,days)); }
 function lastMonths(n){
   const out=[]; const t=new Date(); t.setDate(1);
   for(let i=n-1;i>=0;i--){ const x=new Date(t.getFullYear(),t.getMonth()-i,1); out.push({key:x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0'),label:x.toLocaleString(undefined,{month:'short'})}); }
@@ -2449,7 +2449,7 @@ function tierOf(rating){ return rating>=60?'CRITICAL':rating>=40?'HIGH':rating>=
 function analyzeMaintenance(days){
   const vehicles=STATE.data.vehicles||[]; const all=STATE.data.maintenance||[];
   const recs=windowFilter(all,days);
-  const prevRecs=days?all.filter(r=>{ const d=daysAgo(r.date); return d>=days && d<2*days; }):[];
+  const prevRecs=days>0?all.filter(r=>{ const d=daysAgo(r.date); return d>=days && d<2*days; }):(days<0?all.filter(r=>inWinD(r.date,days-1)):[]);
   const isRepair=r=>r.type==='Breakdown'||r.type==='Repair';
   const repairs=recs.filter(isRepair); const prevRepairs=prevRecs.filter(isRepair).length;
   const breakdowns=repairs;   // repairs are treated as breakdowns
@@ -2458,8 +2458,8 @@ function analyzeMaintenance(days){
   const bdWithDowntime=breakdowns.filter(r=>isRepairJob(r)&&num(r.downtimeHours)>0);
   const mttr=bdWithDowntime.length?bdWithDowntime.reduce((a,r)=>a+num(r.downtimeHours),0)/bdWithDowntime.length:0;
   const cost=recs.reduce((a,r)=>a+num(r.cost),0);
-  const byComp={}; repairs.forEach(r=>{ const c=r.component||'Unspecified'; byComp[c]=(byComp[c]||0)+1; });
-  const compCost={}; recs.forEach(r=>{ if(num(r.cost)>0){ const c=r.component||'Unspecified'; compCost[c]=(compCost[c]||0)+num(r.cost); } });
+  const byComp={}; repairs.forEach(r=>{ const c=compLbl(r,'Unspecified'); byComp[c]=(byComp[c]||0)+1; });
+  const compCost={}; recs.forEach(r=>{ if(num(r.cost)>0){ const c=compLbl(r,'Unspecified'); compCost[c]=(compCost[c]||0)+num(r.cost); } });
   const months=lastMonths(6).map(m=>{ const inM=all.filter(r=>String(r.date||'').slice(0,7)===m.key); return {label:m.label,key:m.key,repairs:inM.filter(isRepair).length,scheduled:inM.filter(r=>r.type==='Scheduled').length,downtime:inM.filter(isRepair).reduce((a,r)=>a+num(r.downtimeHours),0)}; });
   const profiles=vehicles.map(v=>{
     const rs=repairs.filter(r=>r.vehicleId===v.id).sort((a,b)=>a.date<b.date?-1:1);
@@ -2467,7 +2467,7 @@ function analyzeMaintenance(days){
     const sch=scheduled.filter(r=>r.vehicleId===v.id).length;
     const dt=rs.reduce((a,r)=>a+num(r.downtimeHours),0);
     const cst=recs.filter(r=>r.vehicleId===v.id).reduce((a,r)=>a+num(r.cost),0);
-    const comp={}; rs.forEach(r=>{ const c=r.component||'Unspecified'; comp[c]=(comp[c]||0)+1; });
+    const comp={}; rs.forEach(r=>{ const c=compLbl(r,'Unspecified'); comp[c]=(comp[c]||0)+1; });
     const named=Object.entries(comp).filter(([c])=>c!=='Unspecified').sort((a,b)=>b[1]-a[1]);
     const chronic=named.filter(([,n])=>n>=3), repeat=named.filter(([,n])=>n===2);
     let gap=null; if(rs.length>1){ const g=[]; for(let i=1;i<rs.length;i++) g.push((new Date(rs[i].date)-new Date(rs[i-1].date))/86400000); gap=g.reduce((a,b)=>a+b,0)/g.length; }
@@ -2516,11 +2516,11 @@ function truckRecs(p){
 function buildMaintInsights(M){
   const I=[]; const push=(sev,title,text)=>I.push({sev,title,text});
   const P=M.profiles; const names=(arr,n)=>arr.slice(0,n||4).map(p=>`${p.regNo} (${p.rating})`).join(', ');
-  const win=M.days?`the last ${M.days} days`:'all recorded history';
+  const win=M.days?winLbl(M.days):'all recorded history';
   if(!M.recs.length) push('amber','No maintenance events in this period',`Nothing was logged for ${win}. Log services, breakdowns and repairs so the analysis and risk ratings reflect reality — until then the ratings only use service due dates and inspection findings.`);
   if(M.days && (M.repairs.length||M.prevRepairs)){
     const d=M.repairs.length-M.prevRepairs;
-    push(d>0?'amber':(d<0?'green':'amber'),'Repair volume trend',`${M.repairs.length} repair/breakdown event(s) in ${win} versus ${M.prevRepairs} in the previous ${M.days} days (${d>0?'+':''}${d}). ${d>0?'Reactive work is rising — check whether planned servicing is keeping up.':d<0?'Reactive work is falling — keep the preventive schedule going.':'No change.'}`);
+    push(d>0?'amber':(d<0?'green':'amber'),'Repair volume trend',`${M.repairs.length} repair/breakdown event(s) in ${win} versus ${M.prevRepairs} in ${winPrev(M.days)} (${d>0?'+':''}${d}). ${d>0?'Reactive work is rising — check whether planned servicing is keeping up.':d<0?'Reactive work is falling — keep the preventive schedule going.':'No change.'}`);
   }
   if(M.scheduled+M.repairs.length>0){
     const pm=Math.round(M.pmShare*100);
@@ -2558,13 +2558,13 @@ function buildMaintInsights(M){
 function maintTopbar(sub){ return `<div class="topbar"><div><h1>Maintenance &amp; Predictive Servicing</h1><div class="sub">${sub}</div></div><div class="topbar-right">${syncBadge()}</div></div>`; }
 function renderMaintRisk(){
   const M=analyzeMaintenance(STATE.repairWindow);
-  const wins=[[7,'Last 7 days'],[14,'Last 14 days'],[30,'Last 30 days']];
+  const wins=[[7,'Last 7 days'],[14,'Last 14 days'],[-1,'This month'],[-2,'Last month']];
   const tabs=`<div class="tabs" style="max-width:100%;overflow-x:auto;">${wins.map(([d,l])=>`<button data-repair-window="${d}" class="${STATE.repairWindow===d?'active':''}">${l}</button>`).join('')}</div>`;
   if(!STATE.data.vehicles.length) return tabs+`<div class="card dim" style="text-align:center;padding:30px;">Register trucks (KPIs &amp; Registry tab) and log maintenance events to see repair analysis and risk ratings.</div>`;
   const P=M.profiles; const critN=P.filter(p=>p.tier==='CRITICAL').length, highN=P.filter(p=>p.tier==='HIGH').length;
   const d=M.days?M.repairs.length-M.prevRepairs:0;
   const cards=`<div class="grid cols-4">
-    ${kc('Breakdowns / Repairs',M.repairs.length,M.days?`Previous ${M.days} days: ${M.prevRepairs}`:'All recorded history',M.days&&(M.repairs.length||M.prevRepairs)?(d>0?'amber':'green'):null,d>0?'Rising':'Falling')}
+    ${kc('Breakdowns / Repairs',M.repairs.length,M.days?`${winPrevCap(M.days)}: ${M.prevRepairs}`:'All recorded history',M.days&&(M.repairs.length||M.prevRepairs)?(d>0?'amber':'green'):null,d>0?'Rising':'Falling')}
     ${kc('Trucks with Repeat Faults',P.filter(p=>p.chronic.length||p.repeat.length).length,'Same component repaired 2+ times',P.some(p=>p.chronic.length)?'red':(P.some(p=>p.repeat.length)?'amber':'green'),P.some(p=>p.chronic.length)?'Chronic':(P.some(p=>p.repeat.length)?'Watch':'None'))}
     ${kc('Repair Downtime',fmt(M.downtime,0)+' h','Avg '+fmt(M.mttr,1)+' h per breakdown (target '+STATE.targets.mttrTargetHrs+' h)',M.mttr?(M.mttr<=STATE.targets.mttrTargetHrs?'green':'red'):null,M.mttr<=STATE.targets.mttrTargetHrs?'On target':'Over')}
     ${kc('Planned Share',pct(M.pmShare),M.scheduled+' scheduled · '+M.repairs.length+' repairs',(M.scheduled+M.repairs.length)?(M.pmShare>=0.7?'green':M.pmShare>=0.5?'amber':'red'):null,M.pmShare>=0.7?'Healthy':M.pmShare>=0.5?'Fair':'Reactive')}
@@ -2601,7 +2601,7 @@ function renderMaintRisk(){
     ${chartCard('Downtime by truck (hours)','Time out of service for repairs',dtChart||'<div class="dim small">No downtime hours recorded.</div>')}
     ${M.hasCost?chartCard('Repair cost by component','',costChart):''}
   </div>
-  ${otherSection(M.repairs, M.days?'Last '+M.days+' days':'All recorded history')}
+  ${otherSection(M.repairs, M.days?winCap(M.days):'All recorded history')}
   <div class="section-title"><span>Truck Risk Ratings</span><div class="line"></div></div>
   <div class="card" style="margin-bottom:12px;"><div class="dim small" style="line-height:1.7;">Rating out of 100 = <b>service status</b> (overdue 25, due soon 10) + <b>repair frequency</b> (up to 20) + <b>breakdowns</b> (up to 15) + <b>repeat failures</b> of the same component (chronic 15, repeat 8) + <b>downtime</b> (up to 10) + <b>open inspection defects</b> (up to 10) + <b>driver-reported defects</b> (up to 5). <span class="tag red">CRITICAL ≥ 60</span> <span class="tag amber">HIGH 40–59</span> <span class="tag teal">MODERATE 20–39</span> <span class="tag green">LOW &lt; 20</span></div></div>
   <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Risk Rating</th><th>Repairs</th><th>Breakdowns</th><th>Downtime</th><th>Top component</th><th>Avg gap</th><th>Service</th><th>Open defects</th><th>Open jobs</th><th>Last repair</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -2619,7 +2619,7 @@ function renderTruckModal(){
     <div class="flex between" style="gap:10px;align-items:flex-start;margin-bottom:10px;"><div><h3 style="margin:0 0 4px;">${esc(p.regNo)} ${p.model?`<span class="dim small">${esc(p.model)}</span>`:''}</h3><div class="flex gap8" style="flex-wrap:wrap;"><span class="tag ${TIER_TAG[p.tier]}">${p.tier} · rating ${p.rating}/100</span><span class="tag ${p.service.status}">${esc(p.service.reason)}</span>${p.openJobs?`<span class="tag amber">${p.openJobs} open job(s)</span>`:''}</div></div><div class="flex gap8"><button type="button" class="btn small" data-edit="vehicles:${esc(p.vehicleId)}">Edit truck</button><button class="btn small ghost" data-close-truck="1">Close</button></div></div>
     <div class="section-sub" style="margin:10px 0 6px;">Rating breakdown</div>
     ${hbarChart(parts.map(([l,v,m])=>({label:l,value:v,text:fmt(v,0)+' / '+m,color:'var(--amber)'})),{max:25})}
-    <div class="section-sub" style="margin:14px 0 6px;">Repairs by component (${M.days?'last '+M.days+' days':'all time'})</div>${comp||'<div class="dim small">No repairs in this window.</div>'}
+    <div class="section-sub" style="margin:14px 0 6px;">Repairs by component (${M.days?winLbl(M.days).replace(/^the /,''):'all time'})</div>${comp||'<div class="dim small">No repairs in this window.</div>'}
     ${hist?`<div class="section-sub" style="margin:14px 0 6px;">Recent history</div>${hist}`:''}
     <div class="section-sub" style="margin:14px 0 6px;">Recommended actions</div>
     <ul style="margin:0 0 0 18px;padding:0;font-size:12.5px;line-height:1.65;">${truckRecs(p).map(r=>`<li>${esc(r)}</li>`).join('')}</ul>
@@ -3249,6 +3249,7 @@ const OTHER_BUCKETS = [
   ['Steering', /steer|tie.?rod|track.?rod|drag.?link/i],
   ['Battery, starter & alternator', /batter|alternator|starter|dynamo|jump.?start/i],
   ['Lights, horn & wiring', /light|lamp|bulb|horn|indicator|wiring|wire|fuse|relay|reflector/i],
+  ['CNG gas system', /\bcng\b|\bgas\b|cylinder|regulator|\blpg\b/i],
   ['Fuel system', /fuel|diesel|injector|lift pump|water separator|nozzle|\btank\b/i],
   ['Exhaust & turbo', /exhaust|turbo|silencer|muffler|dpf|manifold/i],
   ['Air system & compressor', /compressor|air dryer|air tank|air line|air leak|air.?bag|governor|\bair\b/i],
@@ -3259,7 +3260,36 @@ const OTHER_BUCKETS = [
   ['Cab, seats, doors & AC', /\bcab\b|seat|door|window|\ba\/?c\b|air.?con|dashboard/i],
   ['Welding, fabrication & body work', /weld|fabricat|crack|patch|bracket|mudguard|bumper|fender|paint|panel/i],
   ['Washing & general service', /wash|clean|general service|routine service/i],
+  ['Brakes', /brake|brake pad|liner|drum|caliper|slack adjuster/i],
+  ['Tyres / Wheels', /tyre|tire|wheel|puncture|\brim\b|valve stem/i],
+  ['Suspension', /spring|shock|suspension|leaf|u-?bolt|hanger/i],
+  ['Cooling System', /radiator|coolant|water pump|thermostat|overheat|fan belt|hose/i],
+  ['Gearbox / Transmission', /gearbox|transmission|gear\b/i],
+  ['Engine', /engine|piston|head gasket|cylinder head|valve clearance|injection pump/i],
+  ['Hydraulics', /hydraul/i],
+  ['Electrical', /electric|\becu\b|sensor|short.?circuit/i],
 ];
+
+/* one label per repair: a specific component, or what the "Other" really was — never a lump */
+function compLbl(r,blank){
+  const c=r&&r.component;
+  if(c&&c!=='Other'&&c!=='Unspecified') return c;
+  if(c==='Other'){ const o=otherItem(r)||''; if(/^Unclassified/.test(o)) return 'Other — no description'; return /^Other:/.test(o)?o.replace(/^Other:\s*/,'Other — '):o; }
+  const t=[r&&r.otherDetail,r&&r.notes,r&&r.parts].filter(Boolean).join(' ');
+  if(t){ for(const b of OTHER_BUCKETS) if(b[1].test(t)) return b[0]; }
+  return blank||'Not recorded';
+}
+function inWinD(d,w){
+  if(!w) return true; if(!d) return false;
+  if(w>0){ const n=daysAgo(d); return n>=0&&n<w; }
+  const t=new Date(); const m0=new Date(t.getFullYear(),t.getMonth()+(w===-1?0:w===-2?-1:w+1),1), m1=new Date(m0.getFullYear(),m0.getMonth()+1,0);
+  const f=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  return d>=f(m0)&&d<=f(m1)&&d<=f(t);
+}
+function winLbl(w){ return w>0?'the last '+w+' days':(w===-1?'this month':w===-2?'last month':'the month before last'); }
+function winCap(w){ return w>0?'Last '+w+' days':(w===-1?'This month':w===-2?'Last month':'Month before last'); }
+function winPrev(w){ return w>0?'the previous '+w+' days':(w===-1?'last month':w===-2?'the month before':'the month before that'); }
+function winPrevCap(w){ const x=winPrev(w); return x.charAt(0).toUpperCase()+x.slice(1).replace(/^The previous/,'Previous'); }
 function otherItemsDatalist(){ return `<datalist id="dl-other-items">${OTHER_BUCKETS.map(b=>`<option value="${esc(b[0])}"></option>`).join('')}</datalist>`; }
 function otherItem(r){
   if(!r||r.component!=='Other') return null;
@@ -3365,12 +3395,12 @@ function histRow(x){
 function renderMaintHistory(){
   if(!STATE.data.vehicles.length) return `<div class="card dim" style="text-align:center;padding:30px;">Register trucks (KPIs &amp; Registry tab) and log maintenance events to build each truck’s history.</div>`;
   const H=buildHistory(); const ft=STATE.histTruck||'ALL', fy=STATE.histType||'ALL', fw=STATE.histWin||0;
-  const keep=x=>(fy==='ALL'||(fy==='bd'?x.bd:!x.bd))&&(!fw||(daysAgo(x.r.date)>=0&&daysAgo(x.r.date)<fw));
+  const keep=x=>(fy==='ALL'||(fy==='bd'?x.bd:!x.bd))&&inWinD(x.r.date,fw);
   const sel=(attr,val,opts)=>`<select ${attr}>${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(val)===String(v)?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
   const filters=`<div class="filterbar">
     <div><label>Truck</label>${sel('data-hist-filter="truck"',ft,[['ALL','All trucks'],...H.trucks.map(t=>[t.v.id,t.v.regNo])])}</div>
     <div><label>Show</label>${sel('data-hist-filter="type"',fy,[['ALL','Everything'],['bd','Breakdowns / repairs only'],['sch','Scheduled services only']])}</div>
-    <div><label>Period</label>${sel('data-hist-filter="win"',fw,[[0,'All time'],[30,'Last 30 days'],[90,'Last 90 days'],[365,'Last 12 months']])}</div>
+    <div><label>Period</label>${sel('data-hist-filter="win"',fw,[[0,'All time'],[-1,'This month'],[-2,'Last month'],[90,'Last 90 days'],[365,'Last 12 months']])}</div>
   </div>`;
   const trucks=H.trucks.filter(t=>ft==='ALL'||t.v.id===ft);
   const totalRep=trucks.reduce((a,t)=>a+t.repairs,0), totalSch=trucks.reduce((a,t)=>a+t.scheduled,0);
@@ -3409,7 +3439,7 @@ function renderMaintParts(){
   if(!STATE.data.vehicles.length) return `<div class="card dim" style="text-align:center;padding:30px;">Register trucks first, then list the parts used when you log a maintenance event.</div>`;
   const P=allPartPurchases(); const pt=STATE.partsTruck||'ALL', pw=STATE.partsWin||0;
   const sel=(attr,val,opts)=>`<select ${attr}>${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(val)===String(v)?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
-  const shown=P.filter(p=>(pt==='ALL'||p.vehicleId===pt)&&(!pw||(daysAgo(p.date)>=0&&daysAgo(p.date)<pw)));
+  const shown=P.filter(p=>(pt==='ALL'||p.vehicleId===pt)&&inWinD(p.date,pw));
   const parts=[...new Set(P.map(p=>p.key))].sort();
   const lookup=`<div class="card" style="margin-bottom:16px;border-left:3px solid var(--teal);">
     <div style="font-weight:600;font-size:14px;">Have we bought this part before?</div>
@@ -3426,7 +3456,7 @@ function renderMaintParts(){
   const repRows=reps.map(g=>`<tr><td><b>${esc(vehicleLabel(g.vid))}</b></td><td style="white-space:normal;">${esc(partTitle(g.name))}</td><td>${g.n}</td><td>${fmtDate(g.prev)}</td><td>${fmtDate(g.last)}</td><td><b>${g.lastGap}</b> d</td><td>${fmt(g.avg,0)} d</td><td>${g.lastGap<=30?'<span class="tag red">Bought again within 30 d</span>':g.lastGap<=90?'<span class="tag amber">Within 90 d</span>':'<span class="tag green">Normal wear</span>'}</td><td><button type="button" class="btn small" data-edit="vehicles:${esc(g.vid)}">Edit truck</button></td></tr>`).join('');
   const logRows=shown.slice().reverse().slice(0,STATE.partsAll?9999:60).map(p=>`<tr><td>${fmtDate(p.date)}</td><td><b>${esc(vehicleLabel(p.vehicleId))}</b></td><td style="white-space:normal;">${esc(partTitle(p.name))}</td><td>${fmt(p.qty,p.qty%1?1:0)}</td><td>${p.prevDate?`${fmtDate(p.prevDate)} <span class="dim">(${p.prevGap} d earlier)</span>`:'<span class="tag green">First time on this truck</span>'}</td><td>${p.nth>=2?`<span class="tag ${p.prevGap<=30?'red':p.prevGap<=90?'amber':'grey'}">#${p.nth}</span>`:'—'}</td><td><button type="button" class="btn small" data-edit="vehicles:${esc(p.vehicleId)}">Edit truck</button></td></tr>`).join('');
   const noParts=(STATE.data.maintenance||[]).filter(r=>r.cost&&!r.parts&&r.type!=='Scheduled').length;
-  return `<div class="filterbar"><div><label>Truck</label>${sel('data-parts-filter="truck"',pt,[['ALL','All trucks'],...STATE.data.vehicles.map(v=>[v.id,v.regNo])])}</div><div><label>Period</label>${sel('data-parts-filter="win"',pw,[[0,'All time'],[30,'Last 30 days'],[90,'Last 90 days'],[365,'Last 12 months']])}</div></div>
+  return `<div class="filterbar"><div><label>Truck</label>${sel('data-parts-filter="truck"',pt,[['ALL','All trucks'],...STATE.data.vehicles.map(v=>[v.id,v.regNo])])}</div><div><label>Period</label>${sel('data-parts-filter="win"',pw,[[0,'All time'],[-1,'This month'],[-2,'Last month'],[90,'Last 90 days'],[365,'Last 12 months']])}</div></div>
   ${lookup}
   <div class="grid cols-4">${kc('Part Purchases',shown.length,'Lines logged in this view')}${kc('Different Parts',new Set(shown.map(p=>p.key)).size,'Distinct part names')}${kc('Repeat Purchases',shown.filter(p=>p.nth>=2).length,'Same part, same truck',shown.some(p=>p.nth>=2&&p.prevGap<=90)?'amber':null,'Watch')}${kc('Bought Again ≤ 30 d',shown.filter(p=>p.prevGap!==null&&p.prevGap<=30).length,'Possible faulty part / fitting',shown.some(p=>p.prevGap!==null&&p.prevGap<=30)?'red':'green',shown.some(p=>p.prevGap!==null&&p.prevGap<=30)?'Check':'None')}</div>
   ${noParts?`<div class="note warn" style="margin-top:12px;">${noParts} repair(s) with a cost have no parts listed, so they are missing here. Use <b>Edit</b> in the Maintenance Log to add the parts.</div>`:''}
@@ -4129,7 +4159,7 @@ function bulkCard(){
 function renderBulkModal(){
   const b=STATE.bulk; if(!b) return '';
   const rows=b.rows||[]; const ok=rows.filter(r=>r.state==='ok').length, dup=rows.filter(r=>r.state==='dup').length, bad=rows.filter(r=>r.state==='error').length;
-  const importN=ok+(b.replace?dup:0);
+  const skipB=b.allDates?0:rows.filter(r=>r.before).length; const importN=ok+(b.replace?dup-skipB:0);
   const tag=r=>r.state==='ok'?'<span class="tag green">Ready</span>':r.state==='dup'?`<span class="tag amber">${b.replace?'Will replace':'Already exists — skip'}</span>`:'<span class="tag red">Fix</span>';
   const body=b.err?`<div class="note warn">${esc(b.err)}</div>`:`
     <div class="grid cols-3" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px;"><div class="card kpi"><div class="label">Ready to import</div><div class="value" style="color:var(--green);">${ok}</div></div><div class="card kpi"><div class="label">Already in Transport Ops</div><div class="value" style="color:var(--amber);">${dup}</div></div><div class="card kpi"><div class="label">Need fixing</div><div class="value" style="color:${bad?'var(--red)':'var(--dim)'};">${bad}</div></div></div>
@@ -4145,7 +4175,7 @@ async function importBulk(){
   const b=STATE.bulk; if(!b) return; const add=[]; let replaced=0;
   let data=[...STATE.data.transport];
   b.rows.forEach(r=>{
-    if(r.state==='error'||r.archDup||(r.state==='dup'&&!b.replace)) return;
+    if(r.state==='error'||r.archDup||(r.before&&!b.allDates)||(r.state==='dup'&&!b.replace)) return;
     const rec={id:r.dupId||uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),notes:r.notes||'',vessel:r.vessel||'',destination:r.destination||'',driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
     Object.keys(rec).forEach(k=>{ if(typeof rec[k]==='number') rec[k]=String(rec[k]); });
     compactRec(rec);
@@ -5531,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.5 · 3 Nov 2026';
+const APP_VERSION='v13.6 · 4 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -7755,6 +7785,7 @@ function mcSane(monthStart){
   return true;
 }
 async function mcClose(manual){
+  if(!manual&&!(typeof pfCfg==='function'&&(pfCfg('monthClose')||{}).auto===true)) return;   // finished months stay on the live screens unless someone clears them by hand
   if(STATE.mcBusy||STATE.loading||STATE.connectionError||!GAS_CONFIGURED) return;
   const monthStart=monthStartOf(todayStr()), P=mcPlan(monthStart); if(!P.n) return;
   if(!manual&&!mcSane(monthStart)){ STATE.mcAsk=true; render(); return; }
@@ -8838,7 +8869,7 @@ const archSources=()=>{ const s=[{ym:'live',recs:STATE.data.transport||[],maint:
 /* ---------- 4. data check: duplicates, impossible trip counts, odd repair times ---------- */
 function dcAnalyze(){
   const src=archSources(), vehicles=(STATE.data.vehicles||[]).length||26, pending=src.filter(s=>s.recs===null).length;
-  const all=[]; src.forEach(s=>{ if(s.recs) s.recs.forEach(r=>all.push({r,ym:s.ym})); });
+  const all=[]; const liveIds=new Set((STATE.data.transport||[]).map(r=>r.id)); src.forEach(s=>{ if(s.recs) s.recs.forEach(r=>{ if(s.ym!=='live'&&liveIds.has(r.id)) return; all.push({r,ym:s.ym}); }); });
   const groups={}; all.forEach(x=>{ if(!x.r.date||!trKey(x.r)) return; (groups[trSig(x.r)]=groups[trSig(x.r)]||[]).push(x); });
   const dupes=[]; Object.keys(groups).forEach(k=>{ const g=groups[k]; if(g.length>1) g.slice(1).forEach(x=>dupes.push(x)); });
   const dupIds=new Set(dupes.map(x=>x.r.id)); const uniq=all.filter(x=>!dupIds.has(x.r.id));
@@ -8897,7 +8928,7 @@ parseBulkWorkbook=function(wb){
 };
 
 /* ---------- 5. repair report: per truck, repeats, categories, top 3 ---------- */
-const rrComp=r=>r.component||'Not recorded';
+const rrComp=r=>compLbl(r,'Not recorded');
 function rrCompute(P){
   const R=periodRange(P), lb=addDays(R.start,-60);
   return withArch(lb,R.end,()=>{
@@ -8942,7 +8973,7 @@ async function rrSetKind(items,kind){
   try{
     const live=[], byYm={}; items.forEach(([id,date])=>{ if(date.slice(0,7)<curYm()) (byYm[date.slice(0,7)]=byYm[date.slice(0,7)]||[]).push(id); else live.push(id); });
     for(const ym of Object.keys(byYm)){ const ids=new Set(byYm[ym]); await archPatch(ym,d=>{ let n=0; (d.maintenance||[]).forEach(r=>{ if(ids.has(r.id)){ r.kind=kind; n++; } }); return n; }); }
-    if(live.length){ const s=new Set(live); STATE.data.maintenance.forEach(r=>{ if(s.has(r.id)) r.kind=kind; }); await persist('maintenance'); }
+    { const s=new Set(items.map(x=>x[0])); let ch=0; STATE.data.maintenance.forEach(r=>{ if(s.has(r.id)&&r.kind!==kind){ r.kind=kind; ch++; } }); if(ch||live.length) await persist('maintenance'); }
     showToast('Updated '+items.length+' repair'+(items.length===1?'':'s')+'.');
   }catch(e){ console.error(e); showToast('Stopped: '+(e&&e.message||e)); }
   render();
@@ -9171,6 +9202,58 @@ async function qSeedOct(){
 }
 const _la13=loadAll; loadAll=async function(){ const r=await _la13.apply(this,arguments); setTimeout(qSeedOct,5000); return r; };
 
+
+/* ============================================================ ws_r.js ============================================================ */
+/* ===== v13.6: uploads continue from the last saved date · finished months stay on the live screens (and come back) · maintenance by month · "Other" repairs broken down ===== */
+
+/* ---------- 1. an upload continues from the last date already saved, per route ---------- */
+function lastByRoute(){
+  const m={}, lim=addDays(todayStr(),1);
+  const add=r=>{ if(r&&r.date&&r.route&&r.date<=lim&&(!m[r.route]||r.date>m[r.route])) m[r.route]=r.date; };
+  (STATE.data.transport||[]).forEach(add);
+  Object.keys(STATE.archCache||{}).forEach(ym=>((STATE.archCache[ym]||{}).transport||[]).forEach(add));
+  return m;
+}
+const _pbw14=parseBulkWorkbook;
+parseBulkWorkbook=function(wb){
+  const out=_pbw14(wb);
+  try{
+    const last=lastByRoute(); let n=0; const seen={};
+    (out.rows||[]).forEach(r=>{ if(r.state!=='ok'||!r.date||!r.route) return; const L=last[r.route]; if(L&&r.date<L){ r.state='dup'; r.dupId=null; r.before=true; r.warns=(r.warns||[]).concat(['Before the last saved date for this route ('+fmtDate(L)+') — skipped']); n++; seen[r.route]=L; } });
+    const list=Object.keys(last).filter(k=>(out.rows||[]).some(r=>r.route===k)).map(k=>(ROUTES[k]?ROUTES[k].label:k)+' — '+fmtDate(last[k]));
+    if(list.length) out.summary=(out.summary||'')+`<div class="note" style="margin:0 0 10px;line-height:1.6;">Continuing from the last saved date for each route: ${esc(list.join(' · '))}.${n?` <b>${n} older line${n===1?'':'s'}</b> in the file were left out.`:' Everything in this file is new.'}${n?`<label style="display:flex;gap:8px;align-items:center;text-transform:none;font-size:12.5px;margin-top:6px;"><input type="checkbox" data-bulk-alldates="1" style="width:auto;"> Also import older dates that are missing (lines already saved are still skipped)</label>`:''}</div>`;
+  }catch(e){ console.error('continue from last date',e); }
+  return out;
+};
+document.addEventListener('change',e=>{ const t=e.target; if(t&&t.matches&&t.matches('[data-bulk-alldates]')&&STATE.bulk){ const on=t.checked; STATE.bulk.allDates=on; (STATE.bulk.rows||[]).forEach(r=>{ if(r.before) r.state=on?'ok':'dup'; }); render(); } });
+
+/* ---------- 2. finished months stay on the live screens; earlier folders are brought back once ---------- */
+async function restoreFolders(){
+  try{
+    if(!GAS_CONFIGURED||STATE.loading||STATE.rsBusy) return;
+    const done=((pfCfg('folderRestore')||{}).yms)||[];
+    const todo=(STATE.data.monthIndex||[]).map(m=>m.ym).filter(ym=>done.indexOf(ym)<0);
+    if(!todo.length) return; STATE.rsBusy=1;
+    const okYm=[]; const touched=new Set(); let added=0;
+    for(const ym of todo){
+      archLoad(ym); let w=0; while(STATE.archLoading[ym]&&w++<60) await new Promise(r=>setTimeout(r,500));
+      const d=STATE.archCache[ym], ent=(STATE.data.monthIndex||[]).find(x=>x.ym===ym);
+      if(!d||(!Object.keys(d).some(c=>Array.isArray(d[c])&&d[c].length)&&ent&&ent.total>0)){ delete STATE.archCache[ym]; continue; }
+      Object.keys(d).forEach(c=>{ if(!Array.isArray(d[c])||!d[c].length||!STORAGE_KEYS[c]) return; const live=STATE.data[c]||(STATE.data[c]=[]); const have=new Set(live.map(r=>r&&r.id)); const add=d[c].filter(r=>r&&r.id&&!have.has(r.id)); if(add.length){ STATE.data[c]=live.concat(add); touched.add(c); added+=add.length; } });
+      okYm.push(ym);
+    }
+    for(const c of touched){ await persist(c); }
+    if(okYm.length){ await pfSetCfg('folderRestore',{yms:done.concat(okYm)}); if(added) showToast(okYm.map(mcLabel).join(', ')+' is back on the live screens ('+added+' records). The folder stays as a backup.'); render(); }
+  }catch(e){ console.error('restoreFolders',e); }
+  STATE.rsBusy=0;
+}
+const _la14=loadAll; loadAll=async function(){ const r=await _la14.apply(this,arguments); setTimeout(restoreFolders,7000); return r; };
+
+/* ---------- 3. “Other” needs a description ---------- */
+document.addEventListener('submit',e=>{ const f=e.target; if(f&&f.matches&&f.matches('form[data-log-form="maintenance"]')&&f.elements.type&&f.elements.type.value==='Breakdown'&&f.elements.component&&f.elements.component.value==='Other'&&f.elements.otherDetail&&!String(f.elements.otherDetail.value||'').trim()){ e.preventDefault(); e.stopImmediatePropagation(); showToast('Say what was repaired under “Other” — or pick the component from the list.'); } },true);
+
+/* keep the upload tick-box in step after a redraw */
+const _att14=attachEvents; attachEvents=function(){ _att14(); try{ document.querySelectorAll('[data-bulk-alldates]').forEach(e=>{ e.checked=!!(STATE.bulk&&STATE.bulk.allDates); }); }catch(e){} };
 
 loadAll();
 </script>
