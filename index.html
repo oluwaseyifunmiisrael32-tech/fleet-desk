@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.7 · 4 Nov 2026';
+const APP_VERSION='v13.8 · 4 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5680,7 +5680,7 @@ function tabLayout(sp){
   idx.n=heads.length; return {heads,idx};
 }
 function colL(i){ return xlCol(i); }
-function vesselNames(){ const s={}; (STATE.data.transport||[]).forEach(r=>{ const v=String(r.vessel||'').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); return Object.values(s).sort(); }
+function vesselNames(){ const s={}; (STATE.data.rail||[]).forEach(r=>{ const v=String(r.vessel||'MV OSLO').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); (STATE.data.transport||[]).forEach(r=>{ const v=String(r.vessel||'').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); return Object.values(s).sort(); }
 function vesselDatalist(){ return `<datalist id="dl-vessels">${vesselNames().map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`; }
 function uniqTrucks(){ const s={}; (STATE.data.vehicles||[]).forEach(v=>{ const k=normReg(v.regNo); if(k&&!s[k]) s[k]=v.regNo; }); return Object.values(s).sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true})); }
 
@@ -5815,10 +5815,11 @@ function matRouteCard(){
   const T=MAT_PERIODS.map(p=>matGroupTotals(p[0]==='all'?recs:recs.filter(r=>inPeriod(r.date,p[0]))));
   const cell=x=>x.trips||x.ton?`<b>${fmt(x.ton,1)} MT</b><div class="dim small">${fmt(x.trips)} trip${x.trips===1?'':'s'}</div>`:'<span class="dim">—</span>';
   const heads=MAT_PERIODS.map(p=>`<th>${p[1]}${p[0]==='all'?'':`<div class="dim small" style="font-weight:400;text-transform:none;">${esc(rangeText(periodRange(p[0])))}</div>`}</th>`).join('');
+  try{ const all=railTon({start:'0000-01-01',end:'9999-12-31'}); if(all){ MAT_PERIODS.forEach((p,i)=>{ const rt=p[0]==='all'?all:railTon(periodRange(p[0])); T[i].forEach(x=>{ if(x.kind==='gypsum'||x.kind==='total') x.ton+=rt; }); T[i].push({label:'Rail — MV OSLO (already included in gypsum above)',kind:'rail',trips:0,ton:rt}); }); } }catch(e){ console.error('rail in gypsum',e); }
   const gy=T[4].find(x=>x.kind==='gypsum');
   return `<div class="section-sub" style="margin:18px 0 8px;">Tonnage by material &amp; route — weekly and monthly</div>
   <div class="table-wrap"><table><thead><tr><th>Material / route</th>${heads}</tr></thead><tbody>${T[0].map((x,i)=>{ const st=x.kind==='gypsum'?' style="font-weight:700;background:rgba(232,163,61,.12);"':(x.kind==='total'?' style="font-weight:700;"':''); return `<tr${st}><td style="white-space:normal;">${esc(x.label)}</td>${T.map(t=>`<td>${cell(t[i])}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>
-  <div class="card" style="margin:10px 0 4px;border-left:3px solid var(--amber);"><span class="dim small">Total gypsum delivered so far</span><div style="font-size:22px;font-weight:700;">${fmt(gy.ton,1)} MT <span class="dim small" style="font-weight:400;">· ${fmt(gy.trips)} trip${gy.trips===1?'':'s'} across the four gypsum routes</span></div></div>
+  <div class="card" style="margin:10px 0 4px;border-left:3px solid var(--amber);"><span class="dim small">Total gypsum delivered so far</span><div style="font-size:22px;font-weight:700;">${fmt(gy.ton,1)} MT <span class="dim small" style="font-weight:400;">· ${fmt(gy.trips)} trip${gy.trips===1?'':'s'} across the four gypsum routes, plus rail</span></div></div>
   <div class="dim small" style="margin:6px 0 14px;">Weeks run Monday–Sunday. “This month” is the calendar month so far; the filters above do not apply to this table.</div>`;
 }
 function destOf(r){ return String(r.destination||'').trim()||((String(r.notes||'').match(/ — to (.+)$/)||[])[1]||'').trim(); }
@@ -5833,9 +5834,10 @@ const GYP_ROUTE_KEYS=['gypsum_adumbu','gypsum_adumbu_sagamu','gypsum_ewekoro','g
 function vesselCard(){
   const G=(STATE.data.transport||[]).filter(r=>GYP_ROUTE_KEYS.indexOf(r.route)>=0); if(!G.length&&!vesselNames().length) return '';
   const by={}; G.forEach(r=>{ const v=String(r.vessel||'').trim(); const k=v?v.toUpperCase():'~'; const x=by[k]||(by[k]={v:v||'No vessel recorded',none:!v,trips:0,ton:0,R:{},first:r.date,last:r.date}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); x.R[r.route]=(x.R[r.route]||0)+num(r.tonnageActual); if(r.date<x.first) x.first=r.date; if(r.date>x.last) x.last=r.date; });
+  (STATE.data.rail||[]).forEach(x=>{ const v=String(x.vessel||'MV OSLO').trim(), k=v.toUpperCase(), t=num(x.wagons)*(num(x.perWagon)||RAIL_T); const o=by[k]||(by[k]={v,none:false,trips:0,ton:0,R:{},first:x.date,last:x.date}); o.ton+=t; o.R.rail=(o.R.rail||0)+t; if(x.date<o.first) o.first=x.date; if(x.date>o.last) o.last=x.date; });
   const rows=Object.values(by).sort((a,b)=>(a.none?1:0)-(b.none?1:0)||b.ton-a.ton);
-  return `<div class="section-sub" style="margin:18px 0 8px;">Gypsum delivered by vessel</div>
-  <div class="table-wrap"><table><thead><tr><th>Vessel</th><th>Adumbu → Ewekoro</th><th>Adumbu → Sagamu</th><th>Apapa → Ewekoro</th><th>Apapa → Sagamu</th><th>Total (MT)</th><th>Trips</th><th>First – last delivery</th></tr></thead><tbody>${rows.map(x=>`<tr${x.none?' style="opacity:.8;"':''}><td><b>${esc(x.v)}</b></td>${GYP_ROUTE_KEYS.map(k=>`<td>${x.R[k]?fmt(x.R[k],1):'<span class="dim">—</span>'}</td>`).join('')}<td><b>${fmt(x.ton,1)}</b></td><td>${fmt(x.trips)}</td><td>${esc(fmtDate(x.first)+(x.last!==x.first?' – '+fmtDate(x.last):''))}</td></tr>`).join('')}</tbody></table></div>
+  return `<div class="section-sub" style="margin:18px 0 8px;">Gypsum delivered by vessel — all time, trucks and rail</div>
+  <div class="table-wrap"><table><thead><tr><th>Vessel</th><th>Adumbu → Ewekoro</th><th>Adumbu → Sagamu</th><th>Apapa → Ewekoro</th><th>Apapa → Sagamu</th><th>Rail</th><th>Total (MT)</th><th>Trips</th><th>First – last delivery</th></tr></thead><tbody>${rows.map(x=>`<tr${x.none?' style="opacity:.8;"':''}><td><b>${esc(x.v)}</b></td>${GYP_ROUTE_KEYS.map(k=>`<td>${x.R[k]?fmt(x.R[k],1):'<span class="dim">—</span>'}</td>`).join('')}<td>${x.R.rail?fmt(x.R.rail,1):'<span class="dim">—</span>'}</td><td><b>${fmt(x.ton,1)}</b></td><td>${fmt(x.trips)}</td><td>${esc(fmtDate(x.first)+(x.last!==x.first?' – '+fmtDate(x.last):''))}</td></tr>`).join('')}</tbody></table></div>
   <div class="dim small" style="margin:6px 0 14px;">Type the vessel name in the “Vessel Name” field when you log a gypsum delivery, or in the Vessel Name column of the route tabs. Entries without one are grouped under “No vessel recorded” — edit them to link them to a vessel.</div>`;
 }
 
@@ -8726,20 +8728,20 @@ function tbSum(recs){ const o={}; recs.forEach(r=>{ const c=tbCat(r), x=o[c.k]||
 function tonBreakdownBlocks(F,G,L){
   const RA=railTonCtx('r'), RB=railTonCtx('p'), A=tbSum(F), B=tbSum(G), tot=Object.values(A).reduce((s,x)=>s+x.ton,0)+RA, totT=Object.values(A).reduce((s,x)=>s+x.trips,0), totP=Object.values(B).reduce((s,x)=>s+x.ton,0)+RB;
   const z={label:'',trips:0,ton:0}, g=(o,k)=>o[k]||z;
-  const row=(label,a,b)=>[label,fmt(a.trips),fmt(a.ton,1),tot?pct(a.ton/tot):'—',a.trips?fmt(a.ton/a.trips,1):'—',fmt(b.ton,1),chg(a.ton,b.ton,'higher',{dec:1})];
+  const row=(label,a,b)=>[label,fmt(a.trips),fmt(a.ton,1),tot?pct(a.ton/tot):'—',a.trips?fmt((a.avgBase!==undefined?a.avgBase:a.ton)/a.trips,1):'—',fmt(b.ton,1),chg(a.ton,b.ton,'higher',{dec:1})];
   const sum=(o,keys)=>keys.reduce((s,k)=>({trips:s.trips+g(o,k).trips,ton:s.ton+g(o,k).ton}),{trips:0,ton:0});
   const rows=[], gk=TB_GYP.map(k=>'g|'+k);
   gk.forEach(k=>rows.push(row('Gypsum — '+(ROUTES[k.slice(2)]?ROUTES[k.slice(2)].label.replace(/^Gypsum — /,''):k),g(A,k),g(B,k))));
-  rows.push(row('▸ Total gypsum',sum(A,gk),sum(B,gk)));
+  if(RA||RB) rows.push(['Gypsum — Rail (MV OSLO, '+fmt(railWagonsCtx())+' wagons)','—',fmt(RA,1),tot?pct(RA/tot):'—','—',fmt(RB,1),chg(RA,RB,'higher',{dec:1})]);
+  { const sa=sum(A,gk), sb=sum(B,gk); sa.avgBase=sa.ton; sa.ton+=RA; sb.ton+=RB; rows.push(row('▸ Total gypsum',sa,sb)); }
   rows.push(row('Clinker — Ewekoro ⇄ Sagamu',g(A,'clinker'),g(B,'clinker')));
   rows.push(row('Itori → Sagamu',g(A,'itori'),g(B,'itori')));
-  if(RA||RB) rows.push(['Rail — '+fmt(railWagonsCtx())+' wagons','—',fmt(RA,1),tot?pct(RA/tot):'—','—',fmt(RB,1),chg(RA,RB,'higher',{dec:1})]);
   rows.push(row('East deliveries',g(A,'east'),g(B,'east')));
   const ok=[...new Set([...Object.keys(A),...Object.keys(B)])].filter(k=>k.indexOf('m|')===0).sort((x,y)=>g(A,y).ton-g(A,x).ton||(g(B,y).ton-g(B,x).ton));
   if(!ok.some(k=>k==='m|sludge')) ok.unshift('m|sludge');
   ok.forEach(k=>rows.push(row((k==='m|sludge'?'Paper sludge':(A[k]||B[k]).label),g(A,k),g(B,k))));
   if(ok.length>1) rows.push(row('▸ Total other materials',sum(A,ok),sum(B,ok)));
-  rows.push(row('ALL CARGO',{trips:totT,ton:tot},{trips:0,ton:totP}));
+  rows.push(row('ALL CARGO',{trips:totT,ton:tot,avgBase:tot-RA},{trips:0,ton:totP}));
   const blocks=[tableBlock('Tonnage breakdown for the month',['Cargo / route','Trips','Tonnage (MT)','Share','Avg load / trip (MT)',`Tonnage (${L.prevShort})`,'Change'],rows,'Cargo is grouped by route; anything with “sludge” in the material name counts as paper sludge, and the other routes are split by the material typed in Transport Ops.')];
   const dest={}; F.filter(r=>r.route==='east').forEach(r=>{ const d=String(r.destination||'').trim().toLowerCase()||'(not stated)'; const x=dest[d]||(dest[d]={label:d==='(not stated)'?'Destination not stated':tbTitle(r.destination.trim()),trips:0,ton:0}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); });
   const dl=Object.values(dest).sort((a,b)=>b.ton-a.ton); if(dl.length>0&&!(dl.length===1&&dl[0].label==='Destination not stated')) blocks.push(tableBlock('East deliveries by destination',['Destination','Trips','Tonnage (MT)','Avg load / trip (MT)'],dl.map(x=>[x.label,fmt(x.trips),fmt(x.ton,1),x.trips?fmt(x.ton/x.trips,1):'—'])));
@@ -9159,21 +9161,21 @@ function tcView(){
   const diff=(a,b)=>{ if(b===undefined||b===null||b==='') return '<span class="dim">—</span>'; const d=Math.round((a-num(b))*100)/100; return Math.abs(d)<0.5?wsTag('matches','green'):`<span class="tag ${d>0?'red':'amber'}">${d>0?'+':''}${fmt(d,2)}</span>`; };
   let sT=0,sM=0,sY=0; const rows=order.map(k=>{ const x=A.R[k]||{n:0,trips:0,ton:0,up:0,ot:0,d0:'',d1:''}; sT+=x.trips; sM+=x.ton; if(fig[k]!==undefined&&fig[k]!=='') sY+=num(fig[k]);
     return `<tr><td><b>${esc(TC_LABEL[k]||k)}</b></td><td>${x.n}</td><td>${x.up} / ${x.ot}</td><td>${x.d1?esc(fmtDate(x.d0)+' → '+fmtDate(x.d1)):'—'}</td><td>${fmt(x.trips)}</td><td><b>${fmt(x.ton,2)}</b></td><td>${inp(k,fig[k])}</td><td>${diff(x.ton,fig[k])}</td></tr>`; }).join('');
-  const rrow=`<tr><td><b>RAIL (${fmt(railW)} wagons × ${RAIL_T})</b></td><td>${rails.length}</td><td>—</td><td>${rails.length?esc(fmtDate(rails.map(x=>x.date).sort()[0])):'—'}</td><td>—</td><td><b>${fmt(railMT,2)}</b></td><td>${inp('rail',fig.rail)}</td><td>${diff(railMT,fig.rail)}</td></tr>`;
+  const rrow=`<tr><td><b>RAIL — gypsum, MV OSLO (${fmt(railW)} wagons × ${RAIL_T})</b></td><td>${rails.length}</td><td>—</td><td>${rails.length?esc(fmtDate(rails.map(x=>x.date).sort()[0])):'—'}</td><td>—</td><td><b>${fmt(railMT,2)}</b></td><td>${inp('rail',fig.rail)}</td><td>${diff(railMT,fig.rail)}</td></tr>`;
   sY+=(fig.rail!==undefined&&fig.rail!=='')?num(fig.rail):0;
   const totalRow=`<tr style="font-weight:700;"><td>TOTAL tonnage moved</td><td>${A.recs.length}</td><td>${A.uploads} / ${A.other}</td><td>${A.lastDay?'last entry '+esc(fmtDate(A.lastDay)):'—'}</td><td>${fmt(sT)}</td><td>${fmt(sM+railMT,2)}</td><td>${sY?fmt(sY,2):'—'}</td><td>${sY?diff(sM+railMT,sY):'—'}</td></tr>`;
   const veh=(STATE.data.vehicles||[]).length||26, ceil=veh*2;
   const dayRows=A.D.map(d=>{ const bad=d.trips>ceil; return `<tr><td>${esc(fmtDate(d.date))}</td><td>${d.n}</td><td>${d.trucks.size}</td><td>${fmt(d.trips)}</td><td>${fmt(d.ton,1)}</td><td>${bad?wsTag('more than the fleet can do','red'):(d.trips>d.trucks.size*2?wsTag('trucks over 2 trips','amber'):'')}</td></tr>`; }).join('');
   const bigRows=A.big.map(r=>`<tr><td>${esc(fmtDate(r.date))}</td><td>${esc(vehicleLabel(r.vehicleId)||r.regNoText||'')}</td><td>${esc(TC_LABEL[routeKey(r)]||routeKey(r))}</td><td>${fmt(num(r.tripsActual))}</td><td>${fmt(num(r.tonnageActual),2)}</td></tr>`).join('');
   const railRows=rails.slice().sort((a,b)=>a.date<b.date?-1:1).map(x=>`<tr><td>${esc(fmtDate(x.date))}</td><td>${fmt(num(x.wagons))}</td><td>${fmt(num(x.perWagon)||RAIL_T)} MT</td><td>${fmt(num(x.wagons)*(num(x.perWagon)||RAIL_T))} MT</td><td>${esc(x.note||'')}</td><td><button class="btn small danger" data-tc-raildel="${esc(x.id)}">Delete</button></td></tr>`).join('');
-  return `<div class="section-title" style="margin-top:0;"><span>Tonnage check — compare with your own totals</span><div class="line"></div></div>
+  return vesselDatalist()+`<div class="section-title" style="margin-top:0;"><span>Tonnage check — compare with your own totals</span><div class="line"></div></div>
   <div class="dim small" style="margin-bottom:10px;line-height:1.6;">Pick the month, type your own total for each route, and the last column shows the difference from what the app holds. “Uploads / other” counts entries that came from a route-tab upload against everything else (typed, or from another sheet) — if the same trips arrived both ways they are counted twice. Exact copies are already left out${A.dropped?` (<b>${A.dropped}</b> removed here)`:''}.</div>
   <div class="tabs" style="margin-bottom:12px;">${ms.slice(0,6).map(m=>`<button data-tc-ym="${m}" class="${m===ym?'active':''}">${esc(mcLabel(m))}</button>`).join('')}</div>
   <div class="table-wrap"><table><thead><tr><th>Route</th><th>Entries</th><th>Uploads / other</th><th>Dates covered</th><th>Trips</th><th>Tonnage in the app (MT)</th><th>Your figure (MT)</th><th>Difference</th></tr></thead><tbody>${rows}${rrow}${totalRow}</tbody></table></div>
   ${(A.lastDay&&A.lastDay<addDays(rg.end,-2)&&rg.end<todayStr())?`<div class="note warn" style="margin:10px 0;line-height:1.6;"><b>Nothing is saved after ${esc(fmtDate(A.lastDay))}.</b> The days from then to ${esc(fmtDate(rg.end))} are missing, so the month total is short by those days. Upload the sheet again — the upload now adds only the dates that are missing.</div>`:''}
   ${A.odd?`<div class="note warn" style="margin:10px 0;">${A.odd} entr${A.odd===1?'y has':'ies have'} more than 70 MT per trip — a typed total or a wrong column.</div>`:''}
   <div class="section-title"><span>Rail wagons</span><div class="line"></div></div>
-  <form id="tc-rail-form" class="form-card" style="margin-bottom:10px;"><div class="form-grid"><div><label>Date</label><input type="date" name="date" value="${esc(rg.end<todayStr()?rg.end:todayStr())}" required></div><div><label>Wagons</label><input type="number" name="wagons" min="1" required placeholder="322"></div><div><label>MT per wagon</label><input type="number" name="perWagon" value="${RAIL_T}" step="0.1"></div><div><label>Note</label><input type="text" name="note" placeholder="optional"></div></div><div class="form-actions"><button class="btn primary" type="submit">Add rail wagons</button><span class="dim small">Rail counts in tonnage moved and the monthly tonnage breakdown, never in truck trips.</span></div></form>
+  <form id="tc-rail-form" class="form-card" style="margin-bottom:10px;"><div class="form-grid"><div><label>Date</label><input type="date" name="date" value="${esc(rg.end<todayStr()?rg.end:todayStr())}" required></div><div><label>Wagons</label><input type="number" name="wagons" min="1" required placeholder="322"></div><div><label>MT per wagon</label><input type="number" name="perWagon" value="${RAIL_T}" step="0.1"></div><div><label>Vessel (gypsum)</label><input type="text" name="vessel" list="dl-vessels" value="MV OSLO"></div><div><label>Note</label><input type="text" name="note" placeholder="optional"></div></div><div class="form-actions"><button class="btn primary" type="submit">Add rail wagons</button><span class="dim small">Rail is gypsum for its vessel: it counts in tonnage moved, in the gypsum totals (so far and by month) and under the vessel — never in truck trips.</span></div></form>
   ${rails.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Wagons</th><th>Per wagon</th><th>Tonnage</th><th>Note</th><th></th></tr></thead><tbody>${railRows}</tbody></table></div>`:''}
   <div class="section-title"><span>Day by day</span><div class="line"></div></div>
   <div class="dim small" style="margin-bottom:6px;">A day is flagged when trips are more than the whole registry (${veh} trucks) could do at 2 trips each (${ceil}). Look for the days where the numbers jump.</div>
@@ -9188,7 +9190,7 @@ function qAttach(){
   document.querySelectorAll('[data-tc-ym]').forEach(e=>e.addEventListener('click',()=>{ STATE.tcYm=e.getAttribute('data-tc-ym'); render(); }));
   document.querySelectorAll('[data-tc-fig]').forEach(e=>e.addEventListener('change',async()=>{ const ms=tcMonths(), cy=monthStartOf(todayStr()).slice(0,7), ym=STATE.tcYm&&ms.indexOf(STATE.tcYm)>=0?STATE.tcYm:(ms.find(m=>m<cy)||ms[0]); const o={}; o[e.getAttribute('data-tc-fig')]=e.value===''?'':num(e.value); await pfSetCfg('tonCheck:'+ym,o); render(); }));
   document.querySelectorAll('[data-tc-raildel]').forEach(e=>e.addEventListener('click',async()=>{ if(!confirm('Delete this rail entry?')) return; const id=e.getAttribute('data-tc-raildel'); STATE.data.rail=(STATE.data.rail||[]).filter(x=>x.id!==id); await persist('rail'); render(); }));
-  const f=document.getElementById('tc-rail-form'); if(f) f.addEventListener('submit',async ev=>{ ev.preventDefault(); const w=num(f.elements.wagons.value); if(!f.elements.date.value||w<=0) return; STATE.data.rail=(STATE.data.rail||[]).concat([{id:uid(),date:f.elements.date.value,wagons:String(w),perWagon:String(num(f.elements.perWagon.value)||RAIL_T),note:String(f.elements.note.value||'').trim()}]); await persist('rail'); showToast('Rail wagons added.'); render(); });
+  const f=document.getElementById('tc-rail-form'); if(f) f.addEventListener('submit',async ev=>{ ev.preventDefault(); const w=num(f.elements.wagons.value); if(!f.elements.date.value||w<=0) return; STATE.data.rail=(STATE.data.rail||[]).concat([{id:uid(),date:f.elements.date.value,wagons:String(w),perWagon:String(num(f.elements.perWagon.value)||RAIL_T),vessel:String(f.elements.vessel.value||'').trim()||'MV OSLO',material:'Gypsum',note:String(f.elements.note.value||'').trim()}]); await persist('rail'); showToast('Rail wagons added.'); render(); });
 }
 const _att12=attachEvents; attachEvents=function(){ _att12(); try{ qAttach(); }catch(e){ console.error('qAttach',e); } };
 /* your own October totals (typed by you on 3 Nov) are pre-filled once, so the Tonnage check opens already comparing */
@@ -9197,7 +9199,7 @@ async function qSeedOct(){
     if(!GAS_CONFIGURED||STATE.loading||STATE.qSeeded) return; STATE.qSeeded=1;
     if((STATE.data.kpiCfg||[]).some(x=>x.key==='tonCheck:2026-10')) return;
     await pfSetCfg('tonCheck:2026-10',{clinker:1112.92,gypsum_ewekoro:2635.54,gypsum_sagamu:1005.08,gypsum_adumbu:4392.28,itori_sagamu:7323.76,rail:19320});
-    if(!railIn({start:'2026-10-01',end:'2026-10-31'}).length){ STATE.data.rail=(STATE.data.rail||[]).concat([{id:uid(),date:'2026-10-31',wagons:'322',perWagon:'60',note:'October rail total (322 wagons x 60 MT)'}]); await persist('rail'); }
+    if(!railIn({start:'2026-10-01',end:'2026-10-31'}).length){ STATE.data.rail=(STATE.data.rail||[]).concat([{id:uid(),date:'2026-10-31',wagons:'322',perWagon:'60',vessel:'MV OSLO',material:'Gypsum',note:'October rail total (322 wagons x 60 MT)'}]); await persist('rail'); }
     render();
   }catch(e){ console.error('qSeedOct',e); }
 }
