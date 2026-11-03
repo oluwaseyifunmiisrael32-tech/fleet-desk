@@ -700,7 +700,7 @@ function kpisJourneyOverall(recs, period){
   const riskCount = recs.filter(r=>r.riskAssessment==='Yes').length;
   const riskPct = totalActual? riskCount/totalActual : 0;
   const avgDelay = avgBy(recs,'delayHrs');
-  const totalDeviations = sumBy(recs,'deviations');
+  const totalDeviations = (typeof lmDeviationCount==='function')?lmDeviationCount(period):0;
   const violations = recs.filter(r=>r.driverHoursViolation==='Yes').length;
   const preCovered = recs.filter(r=>checkStatus(r.vehicleId,r.date,'Pre-Trip')!=='Missing').length;
   const postCovered = recs.filter(r=>checkStatus(r.vehicleId,r.date,'Post-Trip')!=='Missing').length;
@@ -752,10 +752,10 @@ function kpisJourneyByTruck(recs){
 function kpisInspections(recs){
   const due=sumBy(recs,'vehiclesDue'), done=sumBy(recs,'vehiclesInspected');
   const defects=sumBy(recs,'defectsFound'), critical=sumBy(recs,'criticalDefects');
-  const compliance = due? done/due : 0;
+  const compliance = due? done/due : null;
   const defectRate = done? defects/done : 0;
   return [
-    {key:'compliance', label:'Inspection Compliance', actual:compliance, target:STATE.targets.inspectionComplianceTarget, fmt:'pct', good:'higher', ratio:attainment(compliance,STATE.targets.inspectionComplianceTarget,'higher')},
+    {key:'compliance', label:'Inspection Compliance', actual:compliance, target:STATE.targets.inspectionComplianceTarget, fmt:'pct', good:'higher', ratio:compliance===null?null:attainment(compliance,STATE.targets.inspectionComplianceTarget,'higher')},
     {key:'defectrate', label:'Defect Rate', actual:defectRate, target:STATE.targets.defectRateTarget, fmt:'pct', good:'lower', ratio:attainment(defectRate,STATE.targets.defectRateTarget,'lower')},
     {key:'critical', label:'Critical Defects', actual:critical, target:0, fmt:0, good:'lower', ratio: critical===0?1:(0.5/critical)},
     {key:'done', label:'Vehicles Inspected', actual:done, target:due, fmt:0, good:'higher', ratio:attainment(done,due,'higher')},
@@ -1290,7 +1290,7 @@ function renderJourneyPageCore(){
         <div><label>Transit time (hrs) — worked out from the times below</label><input type="number" name="durationActual" step="0.1"></div>
         <div><label>Approved route (optional)</label><select name="planId"><option value="">Any approved route for this route</option>${(STATE.data.routePlans||[]).map(pl=>`<option value="${pl.id}">${esc(pl.name)}</option>`).join('')}</select></div>
         <div><label>Delay / Idling (hrs)</label><input type="number" name="delayHrs" step="0.1" value="0"></div>
-        <div><label>Route Deviations (count)</label><input type="number" name="deviations" value="0"></div>
+        <input type="hidden" name="deviations" value="0"><div class="dim small" style="align-self:end;">Route deviations are measured by the Live Map against the approved route — nothing to type.</div>
         <div><label>On-Time Arrival</label><select name="onTime"><option value="Yes">Yes</option><option value="No">No</option></select></div>
         <div><label>Risk Assessment Completed</label><select name="riskAssessment"><option value="Yes">Yes</option><option value="No">No</option></select></div>
         <div><label>Driver Hours Violation</label><select name="driverHoursViolation"><option value="No">No</option><option value="Yes">Yes</option></select></div>
@@ -1982,7 +1982,7 @@ function hsseWeekBar(A){
 function renderHsseReports(){
   const A=analyzeHsse(); const upload=hsseUploadCard(A);
   if(!A) return upload+`<div class="card dim" style="text-align:center;padding:30px;">No HSSE report loaded yet. Upload the SKB HSSE workbook above to see driver risk ratings, incident and violation analysis, charts and recommendations.</div>`;
-  const tabs=[['overview','Overview'],['drivers','Driver Risk'],['incidents','Incidents & Violations'],['fleet','Vehicles, PPE & Toolbox'],['insights','Insights & Actions']];
+  const tabs=[['overview','Overview'],['drivers','Driver Risk'],['incidents','Incidents & Violations'],['fleet','Vehicles, PPE & Toolbox'],['insights','Actions']];
   const t=STATE.hsseTab||'overview';
   const body = t==='drivers'?hsseDrivers(A): t==='incidents'?hsseIncidents(A): t==='fleet'?hsseFleet(A): t==='insights'?hsseInsightsTab(A): hsseOverview(A);
   return upload+hsseWeekBar(A)+`<div class="tabs" style="max-width:100%;overflow-x:auto;">${tabs.map(([k,l])=>`<button data-hsse-tab="${k}" class="${t===k?'active':''}">${l}</button>`).join('')}</div>`+body;
@@ -2107,10 +2107,7 @@ function hsseInsightsTab(A){
   const ind=a&&a.individual.length?`<div class="section-title"><span>Corrective Action Plan from the Report — High-Risk Drivers</span><div class="line"></div></div><div class="table-wrap"><table><thead><tr><th>Driver</th><th>Score</th><th>Main issue</th><th>Action</th><th>Owner</th><th>Timeline</th></tr></thead><tbody>${a.individual.map(x=>`<tr><td style="white-space:normal;">${esc(x.n)}</td><td>${x.score===null?'—':fmt(x.score,2)}</td><td style="white-space:normal;min-width:160px;">${esc(x.issue)}</td><td style="white-space:normal;min-width:280px;">${esc(x.action)}</td><td style="white-space:normal;">${esc(x.owner)}</td><td style="white-space:normal;">${esc(x.when)}</td></tr>`).join('')}</tbody></table></div>`:'';
   const cat=a&&a.category.length?`<div class="section-title"><span>Corrective Actions by Violation Category (from the report)</span><div class="line"></div></div><div class="table-wrap"><table><thead><tr><th>Category</th><th>Drivers</th><th>Likely root cause</th><th>Action</th><th>Owner</th><th>Timeline</th></tr></thead><tbody>${a.category.map(x=>`<tr><td>${esc(x.cat)}</td><td>${x.drivers??'—'}</td><td style="white-space:normal;min-width:160px;">${esc(x.cause)}</td><td style="white-space:normal;min-width:260px;">${esc(x.action)}</td><td style="white-space:normal;">${esc(x.owner)}</td><td style="white-space:normal;">${esc(x.when)}</td></tr>`).join('')}</tbody></table></div>`:'';
   const mon=a&&a.monitoring.length?`<div class="section-title"><span>Fleet-wide Monitoring Plan (from the report)</span><div class="line"></div></div><div class="card"><ul style="margin:0 0 0 18px;padding:0;font-size:12.5px;line-height:1.7;">${a.monitoring.map(m=>`<li>${esc(m)}</li>`).join('')}</ul></div>`:'';
-  return `<div class="section-title" style="margin-top:6px;"><span>Insights</span><div class="line"></div></div>
-  <div class="section-sub">Generated automatically from the uploaded data using rule-based analysis of scores, trends, violations, incidents and inspections. Review before acting.</div>
-  <div class="rec-list">${ins||'<div class="dim small">Not enough data for insights.</div>'}</div>
-  <div class="section-title"><span>Recommended Actions by Driver Risk Rating</span><div class="line"></div></div>
+  return `<div class="section-title"><span>Recommended Actions by Driver Risk Rating</span><div class="line"></div></div>
   <div class="grid cols-2">${plans||'<div class="dim small">No drivers above LOW risk.</div>'}</div>${ind}${cat}${mon}`;
 }
 
@@ -2605,9 +2602,6 @@ function renderMaintRisk(){
     ${M.hasCost?chartCard('Repair cost by component','',costChart):''}
   </div>
   ${otherSection(M.repairs, M.days?'Last '+M.days+' days':'All recorded history')}
-  <div class="section-title"><span>Insights</span><div class="line"></div></div>
-  <div class="section-sub">Generated automatically from repair history, service intervals, inspections and driver-reported defects using rule-based analysis. Review before acting.</div>
-  <div class="rec-list">${insHTML}</div>
   <div class="section-title"><span>Truck Risk Ratings</span><div class="line"></div></div>
   <div class="card" style="margin-bottom:12px;"><div class="dim small" style="line-height:1.7;">Rating out of 100 = <b>service status</b> (overdue 25, due soon 10) + <b>repair frequency</b> (up to 20) + <b>breakdowns</b> (up to 15) + <b>repeat failures</b> of the same component (chronic 15, repeat 8) + <b>downtime</b> (up to 10) + <b>open inspection defects</b> (up to 10) + <b>driver-reported defects</b> (up to 5). <span class="tag red">CRITICAL ≥ 60</span> <span class="tag amber">HIGH 40–59</span> <span class="tag teal">MODERATE 20–39</span> <span class="tag green">LOW &lt; 20</span></div></div>
   <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Risk Rating</th><th>Repairs</th><th>Breakdowns</th><th>Downtime</th><th>Top component</th><th>Avg gap</th><th>Service</th><th>Open defects</th><th>Open jobs</th><th>Last repair</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -2797,7 +2791,7 @@ function buildPredictiveInsights(P){
   if(nof.length) push('amber','No forecast possible',`${nm(nof,6)} — add the last service date / odometer and service interval in the registry.`);
   return sortInsights(I);
 }
-function predictiveTeaser(){
+function predictiveTeaser(){ return '';
   const P=predictServicing(); const top=P.insights.slice(0,3);
   return `<div class="card" style="margin:12px 0;border-left:3px solid var(--teal);"><div class="flex between" style="gap:10px;flex-wrap:wrap;margin-bottom:8px;"><div style="font-weight:600;">Predictive insights <span class="dim small">· forecast from actual usage</span></div><button class="btn small" data-maint-view="predictive">Open full forecast →</button></div>${top.length?`<div class="rec-list">${insightsHTML(top)}</div>`:'<div class="dim small">Register trucks to see forecasts.</div>'}</div>`;
 }
@@ -2833,9 +2827,6 @@ function renderPredictive(){
     ${chartCard('Workshop load — services due per week','Red = more than the weekly workshop capacity ('+P.cap+')',loadChart)}
     ${chartCard('Usage rate by truck (km/day)','Measured from odometer readings; amber = 50%+ above fleet median',rateChart||'<div class="dim small">No usage data yet.</div>')}
   </div>
-  <div class="section-title"><span>Predictive Insights</span><div class="line"></div></div>
-  <div class="section-sub">Generated automatically from usage rates (odometer readings captured in pre/post-trip checks, fuel issues, inspections and the registry), service intervals, workshop capacity, risk ratings and repair patterns. Rule-based analysis — review before acting.</div>
-  <div class="rec-list">${insightsHTML(P.insights)||'<div class="dim small">Not enough data for insights.</div>'}</div>
   <div class="section-title"><span>Recommended Workshop Booking Order (next 4 weeks)</span><div class="line"></div><span class="dim small mono">${P.cap} services / week</span></div>
   <div class="table-wrap"><table><thead><tr><th>#</th><th>Truck</th><th>Due</th><th>Risk</th><th>Book in</th><th>Status</th><th></th></tr></thead><tbody>${qrows||'<tr class="empty-row"><td colspan="7">No services forecast in the next 4 weeks.</td></tr>'}</tbody></table></div>
   <div class="section-title"><span>Service Forecast — All Trucks</span><div class="line"></div></div>
@@ -2859,7 +2850,7 @@ function renderSettingsModal(){
     ['inspectionComplianceTarget','Inspection Compliance Target (0–1)'], ['defectRateTarget','Max Acceptable Defect Rate (0–1)'],
     ['prePostPassRateTarget','Pre/Post-Trip Pass Rate Target (0–1)'], ['ltifrTarget','LTIFR Target'],
     ['nearMissWeeklyTarget','Near-Miss Reporting Target (per week)'], ['pmComplianceTarget','PM Compliance Target (0–1)'],
-    ['breakdownRateTarget','Roadside Breakdown Rate Target (0 = none)'], ['repairRateTarget','Repair Rate Target (0 = none)'], ['mttrTargetHrs','MTTR Target (hrs)'],
+    ['cngFleetSize','CNG trucks counted in the trip target (19)'], ['breakdownRateTarget','Roadside Breakdown Rate Target (0 = none)'], ['repairRateTarget','Repair Rate Target (0 = none)'], ['mttrTargetHrs','MTTR Target (hrs)'],
     ['dailyTruckInspectionTarget','Truck Inspections / Day (Safety & Maint.)'], ['roadPatrolWeeklyTarget','Road Patrols / Week (Safety & Maint.)'],
     ['toolboxTalkWeeklyTarget','Toolbox Talks / Week (Safety & Maint.)'],
     ['checkCoverageTarget','Pre/Post-Trip Check Coverage Target (0–1)'], ['workshopServiceCapacityPerWeek','Workshop Capacity (trucks serviced / week)'], ['cngLongTripsPerFill','CNG: clinker / gypsum trips per fill-up'], ['cngAdumbuTripsPerFill','CNG: Adumbu trips per fill-up (plus 1 clinker/gypsum trip)'], ['truckTripsPerDayTarget','Trips / Truck / Day for Utilization (0 = auto)'], ['dieselPricePerLitre','Default Fuel Price (₦ / litre)'],
@@ -3168,8 +3159,8 @@ function navHTML(badgeCounts){
 /* =================== v5: edit modal, transport truck/driver, maintenance history / parts / weekly comparison,
    best & worst driver rankings (safety + maintenance) =================== */
 const isBd = r => !!r && (r.type==='Breakdown' || r.type==='Repair');
-const isRepairJob = r => isBd(r) && (!!r.srcId || r.kind==='workshop');   // repair done in the workshop/yard, incl. jobs raised by a failed inspection or pre/post-trip check
-const isRoadBd = r => isBd(r) && !r.srcId && r.kind!=='workshop';        // roadside breakdown
+const isRepairJob = r => isBd(r) && (!!r.srcId || r.kind==='workshop' || (r.type==='Repair'&&r.kind!=='road'));   // repair done in the workshop/yard, incl. jobs raised by a failed inspection or pre/post-trip check
+const isRoadBd = r => isBd(r) && !isRepairJob(r);        // roadside breakdown
 const isRealBd = isRoadBd;           // not raised automatically from an inspection / pre-trip check           // repairs are treated as breakdowns
 const bdKindTag = r => isRepairJob(r)?'<span class="tag amber">Repair (workshop)</span>':'<span class="tag red">Roadside breakdown</span>';
 const typeLabel = t => t==='Scheduled' ? 'Scheduled service' : 'Breakdown / Repair';
@@ -3635,7 +3626,7 @@ function renderMaintenancePage(){
   if(STATE.maintView==='weekly') return maintTopbar('Last week against the week before — breakdowns, downtime, cost, parts, and the best and worst drivers.')+maintViewTabs()+renderMaintWeekly();
   if(STATE.maintView==='history') return maintTopbar('Every service, breakdown and repair for every truck — with the days between repairs and repeated faults.')+maintViewTabs()+renderMaintHistory();
   if(STATE.maintView==='parts') return maintTopbar('Parts bought for each truck — see if, and when, the same part was last bought.')+maintViewTabs()+renderMaintParts();
-  if(STATE.maintView==='predictive') return maintTopbar('Service forecasts, workshop booking order, repeat-failure watch and AI insights.')+maintViewTabs()+renderPredictive();
+  if(STATE.maintView==='predictive') return maintTopbar('Service forecasts and the workshop booking order.')+maintViewTabs()+renderPredictive();
   if(STATE.maintView==='risk') return maintTopbar('Repair analysis, truck risk ratings and recommendations.')+maintViewTabs()+renderMaintRisk();
   if(STATE.maintView==='inspections') return maintTopbar('Component-level inspections by the maintenance team, linked to the Inspections tab.')+maintViewTabs()+periodTabs('maintenance')+maintInspectionBlock('maintenance');
   const period = STATE.periodByDept.maintenance;
@@ -3675,7 +3666,7 @@ function renderMaintenancePage(){
         <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div>
         <div><label>Truck</label><select name="vehicleId" required><option value="">Select truck…</option>${STATE.data.vehicles.map(v=>`<option value="${v.id}">${esc(v.regNo)}</option>`).join('')}</select></div>
         <div><label>Event Type</label><select name="type" required><option value="Scheduled">Scheduled service</option><option value="Breakdown">Breakdown / Repair</option></select></div>
-        <div><label>If breakdown / repair — where?</label><select name="kind"><option value="road">Roadside breakdown (on the road)</option><option value="workshop">Repair (workshop / yard)</option></select></div>
+        <div><label>If breakdown / repair — where?</label><select name="kind"><option value="">Choose — only for breakdown / repair…</option><option value="road">Roadside breakdown (on the road)</option><option value="workshop">Repair (workshop / yard)</option></select></div>
         <div><label>Component</label><select name="component"><option value="">—</option>${REPAIR_COMPONENTS.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></div>
         <div id="other-wrap" style="display:none;"><label>“Other” — what was repaired?</label><input type="text" name="otherDetail" list="dl-other-items" placeholder="e.g. Air compressor, Clutch, Battery" autocomplete="off"></div>
         <div><label>Downtime (hrs)</label><input type="number" name="downtimeHours" step="0.1"></div>
@@ -3764,7 +3755,7 @@ function renderMaintenancePage(){
 
 function maintViewTabs(){
   const v=STATE.maintView||'ops';
-  const T=[['ops','Overview & Log'],['weekly','Last Week vs Before'],['risk','Repairs & Risk'],['history','Truck History'],['parts','Parts'],['inspections','Inspections'],['predictive','Predictive & AI']];
+  const T=[['ops','Overview & Log'],['repairs','Repair report'],['weekly','Last Week vs Before'],['risk','Repairs & Risk'],['history','Truck History'],['parts','Parts'],['inspections','Inspections'],['predictive','Service forecast']];
   return `<div class="tabs" style="margin-bottom:16px;">${T.map(([k,l])=>`<button data-maint-view="${k}" class="${v===k?'active':''}">${l.replace('&','&amp;')}</button>`).join('')}</div>`;
 }
 
@@ -4154,7 +4145,7 @@ async function importBulk(){
   const b=STATE.bulk; if(!b) return; const add=[]; let replaced=0;
   let data=[...STATE.data.transport];
   b.rows.forEach(r=>{
-    if(r.state==='error'||(r.state==='dup'&&!b.replace)) return;
+    if(r.state==='error'||r.archDup||(r.state==='dup'&&!b.replace)) return;
     const rec={id:r.dupId||uid(),date:r.date,vehicleId:r.vehicleId,regNoText:(r.vehicleId?'':r.regNoText),notes:r.notes||'',vessel:r.vessel||'',destination:r.destination||'',driverName:r.driver,route:r.route,material:r.material,tripsTarget:r.tripsTarget,tripsActual:r.tripsActual,tonnageTarget:r.tonnageTarget,tonnageActual:r.tonnageActual,turnaroundTarget:r.turnaroundTarget,turnaroundActual:r.turnaroundActual,transitTarget:r.transitTarget,transitActual:r.transitActual};
     Object.keys(rec).forEach(k=>{ if(typeof rec[k]==='number') rec[k]=String(rec[k]); });
     compactRec(rec);
@@ -5540,7 +5531,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.3 · 31 Oct 2026';
+const APP_VERSION='v13.4 · 3 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -6143,21 +6134,21 @@ function fwAnalyze(rows){
     if(evs){ const hit=evs.events.filter(e=>String(e.a)===String(r.assetId)&&FW_TAMPER_RE.test(evs.names[e.t]||'')); if(hit.length){ const nm=evs.names[hit[0].t]; push(r,'high','tamper','MiX reported a device event: '+nm,`${hit.length} such event${hit.length>1?'s':''} in the last 72 h, latest ${hit[0].ts?new Date(hit.sort((a,b)=>String(b.ts).localeCompare(String(a.ts)))[0].ts).toLocaleString():''}.`,'Treat as a tamper report: confirm with the driver and the installer.'); } }
     // --- route deviation ---
     if(r.asg&&r.asg.route){ const cor=fwCorridor(r.asg.route,r.asg.planId);
-      if(cor){ const day0=Date.parse(r.asg.date+'T00:00:00')/1000, w=pts.filter(p=>p[0]>=Math.max(day0,nowS-72*3600)); let run=[],worst=null;
+      if(cor&&cor.plan){ const day0=Date.parse(r.asg.date+'T00:00:00')/1000, w=pts.filter(p=>p[0]>=Math.max(day0,nowS-72*3600)); let run=[],worst=null;
         const ptsAll=w.slice(); if(cur&&cur.lat!=null&&age!==null&&age<=30&&num(cur.speed)>=5) ptsAll.push([now/1000,cur.lat,cur.lon,cur.speed]);
         ptsAll.forEach(p=>{ const cc=fwCorCheck([p[1],p[2]],cor), d=cc.d; if(cc.off&&num(p[3])>=5){ run.push([p,d]); if(!worst||d>worst[1]) worst=[p,d]; if(run.length>=3&&worst) r._off=worst; } else if(run.length<3) run=[]; });
         if(r._off){ const p=r._off[0]; push(r,'high','route',`Off the ${fwRouteLabel(r.asg.route)} route`,`${Math.round(r._off[1])} km away from the ${cor.plan?'approved route':cor.saved?'saved standard':'expected'} corridor at ${fwTime(p[0])} (${fwMap(p[1],p[2],'see place')}). ${drv} was moving at ${Math.round(num(p[3]))} km/h.${cor.saved?'':' (Corridor is approximate — save a real standard route in Trails & routes to make this exact.)'}`,`Ask ${drvR} for the reason. Check the trip time and diesel used against the route average.`); }
         delete r._off; }
       else if(r.asg.route!=='east'&&r.asg.route!=='other') { /* no corridor yet for this route */ }
     }
-    if(!r.asg&&cur&&age!==null&&age<=30&&num(cur.speed)>=20) push(r,'low','route','Truck is moving with no trip logged',`Moving at ${Math.round(num(cur.speed))} km/h${cur.addr?' near '+esc(cur.addr):''} but there is no Transport Ops entry for it in the last 2 days.`,'Ask dispatch which trip this is, or log it in Transport Ops.');
+    if(!r.asg&&cur&&age!==null&&age<=30&&num(cur.speed)>=20) push(r,'low','trip','Truck is moving with no trip logged',`Moving at ${Math.round(num(cur.speed))} km/h${cur.addr?' near '+esc(cur.addr):''} but there is no Transport Ops entry for it in the last 2 days.`,'Ask dispatch which trip this is, or log it in Transport Ops.');
     if(hasHist&&r.asg){ const parts=jCorridors(r.asg.route,r.asg.planId); if(parts.length){ const idleMin=Math.min(...parts.map(x=>x.plan.idleMin||20)), sp=[]; parts.forEach(x=>(x.plan.stops||[]).forEach(s=>{ if(s.lat!=null&&s.lon!=null) sp.push(s); }));
       const bad=fwStops(recent,idleMin).filter(s=>!sp.some(q=>fwHav(q.lat,q.lon,s.lat,s.lon)<1.2)).sort((a,b)=>b.min-a.min);
       if(bad.length){ const s=bad[0]; push(r,'med','route','Idling away from the approved stops',`Stopped ${fwDur(s.min)} from ${fwTime(s.t0)} at ${fwMap(s.lat,s.lon,'this spot')}, which is not one of the stops on the approved route${bad.length>1?` (${bad.length} such stops in 24 h)`:''}.`,`Ask ${drvR} why the truck stopped there.`); } } }
     // --- driver safety ---
     if(recent.length){ const fast=recent.filter(p=>num(p[3])>FW_SPEED); if(fast.length>=2){ const mx=Math.max(...fast.map(p=>num(p[3]))); push(r,mx>=100?'high':'med','safety','Speeding on the road',`${fast.length} readings above ${FW_SPEED} km/h in the last 24 h, top speed ${Math.round(mx)} km/h.`,`Speak to ${drvR}. Feed this into the weekly HSSE scorecard.`); } }
     // --- stops away from usual places ---
-    if(hasHist&&r.asg&&!jCorridors(r.asg.route,r.asg.planId).length){ fwStops(recent,45).forEach(s=>{ if(places.length&&!places.some(c=>fwHav(c.lat,c.lon,s.lat,s.lon)<0.5)){ if(!r._unplanned) r._unplanned=s; } }); if(r._unplanned){ const s=r._unplanned; push(r,'low','route','Long stop away from the usual places',`Stopped ${fwDur(s.min)} from ${fwTime(s.t0)} at ${fwMap(s.lat,s.lon,'this spot')}, which is not a place trucks normally stop.`,'Ask the driver (rest stop, breakdown, queue or unauthorised stop).'); delete r._unplanned; } }
+    if(hasHist&&r.asg&&!jCorridors(r.asg.route,r.asg.planId).length){ fwStops(recent,45).forEach(s=>{ if(places.length&&!places.some(c=>fwHav(c.lat,c.lon,s.lat,s.lon)<0.5)){ if(!r._unplanned) r._unplanned=s; } }); if(r._unplanned){ const s=r._unplanned; push(r,'low','trip','Long stop away from the usual places',`Stopped ${fwDur(s.min)} from ${fwTime(s.t0)} at ${fwMap(s.lat,s.lon,'this spot')}, which is not a place trucks normally stop.`,'Ask the driver (rest stop, breakdown, queue or unauthorised stop).'); delete r._unplanned; } }
     if(!hasHist) return;
   });
   // fuel hints from the existing route insights
@@ -6678,7 +6669,7 @@ function bestDriversData(P){
   const R=periodRange(P), idx=makeDriverIndex(), D=STATE.data, rec={};
   const get=c=>rec[c.name]||(rec[c.name]={name:c.name,trips:0,viol:0,why:[],bd:0,down:0,tripDays:0,hasMaint:false});
   (D.transport||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(c) get(c).trips+=num(r.tripsActual); });
-  (D.journey||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); const dv=num(r.deviations); if(dv>0){ o.viol+=dv; o.why.push(dv+' route deviation'+(dv>1?'s':'')); } if(r.driverHoursViolation==='Yes'){ o.viol++; o.why.push('driving-hours violation'); } });
+  (D.journey||[]).filter(r=>inPeriod(r.date,P)&&r.driverName).forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); const dv=0; if(r.driverHoursViolation==='Yes'){ o.viol++; o.why.push('driving-hours violation'); } });
   (D.pretrip||[]).filter(r=>inPeriod(r.date,P)&&r.driverName&&r.alcoholTest==='No').forEach(r=>{ const c=idx.ensure(r.driverName); if(!c) return; const o=get(c); o.viol+=2; o.why.push('failed alcohol test'); });
   const wks=(((D.hsseScores||{}).weeks)||[]).filter(w=>{ const s0=(w.start||(typeof startOfOrd==='function'?startOfOrd(w.n):'')); return s0>=R.start&&s0<=R.end; }); const wk=wks[0];
   wks.forEach(wk=>(wk.drivers||[]).forEach(d=>{ if(d.na||!d.n) return; const c=idx.ensure(d.n); if(!c||!rec[c.name]) { if(c&&num(d.t)>0){ const o=get(c); o.viol++; o.why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } return; } if(num(d.t)>0){ rec[c.name].viol++; rec[c.name].why.push('HSSE scorecard '+fmt(num(d.t),1)+' pts'); } }));
@@ -6881,7 +6872,7 @@ const WS_COLLS=['defects','jobcards','breakdowns','rcas','tyres','tyreInsp','jsa
 WS_COLLS.forEach(k=>{ STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
 STORAGE_KEYS.apprCfg='vms:apprCfg'; if(!STATE.data.apprCfg) STATE.data.apprCfg={};
 STATE.wsView=STATE.wsView||'kpi'; STATE.tyreView=STATE.tyreView||'register'; STATE.apprView=STATE.apprView||'pending';
-const WS_ROLES=['Yard Admin','Maintenance Manager','Logistics Manager','General Manager','MD','Viewer'];
+const WS_ROLES=['Yard Admin','Maintenance Manager','Logistics Manager','Safety Manager','General Manager','MD','Viewer'];
 function myRole(){ try{ return localStorage.getItem('fd_role')||'Viewer'; }catch(e){ return 'Viewer'; } }
 function setRole(r){ try{ localStorage.setItem('fd_role',r); }catch(e){} }
 function wsHash(s){ let h=5381; s=String(s)+'|fleetdesk'; for(let i=0;i<s.length;i++) h=((h<<5)+h+s.charCodeAt(i))|0; return String(h); }
@@ -7174,7 +7165,7 @@ function wsInsights(){
   if(!out.length) out.push(['green','No open defects or repeat-failure alerts. Keep to the routine OEM schedule (see OEM Guide).']);
   return out;
 }
-function wsInsightsCard(){ return `<div class="section-title"><span>AI insights &amp; OEM recommendations</span><div class="line"></div></div><div class="card">${wsInsights().map(([c,t])=>`<div class="ws-ins ${c}">${esc(t)}</div>`).join('')}</div>`; }
+function wsInsightsCard(){ return ''; return `<div class="section-title"><span>AI insights &amp; OEM recommendations</span><div class="line"></div></div><div class="card">${wsInsights().map(([c,t])=>`<div class="ws-ins ${c}">${esc(t)}</div>`).join('')}</div>`; }
 
 /* ---------- fault log ---------- */
 function wsFaultLog(){
@@ -7495,7 +7486,7 @@ function wsSettingsCard(){
 async function wsDecide(coll,id,act){
   const r=STATE.data[coll].find(x=>x.id===id); if(!r) return;
   if(coll==='repairReqs') return wsReqDecide(r,act);
-  const roles=(coll==='rcas')?['General Manager']:LOGI;
+  const roles=(coll==='rcas')?['General Manager']:((coll==='pretrip'||coll==='defects')?['Safety Manager'].concat(LOGI):LOGI);
   if(!wsAuth(roles,act==='approve'?'approve this':'reject this')) return;
   let note=''; if(act==='reject'){ note=prompt('Reason for rejecting (shown in history):')||''; if(!note) return; }
   r.appr={status:act==='approve'?'Approved':'Rejected',by:wsWho(),at:new Date().toISOString(),note};
@@ -7509,7 +7500,7 @@ function renderRequestsPage(){
   const comps=WS_SYSTEMS;
   const rows=Array.from({length:6},(_,i)=>`<tr><td><input type="text" name="pn_${i}" placeholder="Part ${i+1}"></td><td><input type="number" name="pq_${i}" min="0" step="any" value="${i?'':1}" style="width:70px;"></td><td><input type="number" name="pp_${i}" min="0" step="any" placeholder="₦ each"></td></tr>`).join('');
   const cnt=s=>all.filter(q=>q.stage===s).length;
-  return wsHead('Repair Requests','Yard Admin raises → Maintenance Manager adds the RCA → General Manager authorizes → MD approves.')+wsRoleBar()+
+  return wsHead('Repair Requests','Yard Admin raises the request with a short RCA → General Manager authorizes → MD approves.')+wsRoleBar()+
   `<div class="grid cols-4" style="margin-bottom:14px;">${kc('Awaiting RCA',cnt('RCA'),'Maintenance Manager')}${kc('Awaiting GM',cnt('GM'),'Authorization')}${kc('Awaiting MD',cnt('MD'),'Final approval')}${kc('Approved',cnt('Approved'),'Cleared to spend','green')}</div>
   <details class="form-card"><summary>New repair request</summary><form data-rq-form="1"><div class="form-grid">
    <div><label>Date</label><input type="date" name="date" value="${todayStr()}" required></div><div><label>Truck no.</label><select name="vehicleId" required>${vehicleOptions()}</select></div>
@@ -7519,6 +7510,7 @@ function renderRequestsPage(){
    <div style="grid-column:1/-1"><label>Nature of work to be done</label><textarea name="work" rows="2" required></textarea></div></div>
    <div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Part</th><th>Qty</th><th>Price each (₦)</th></tr></thead><tbody>${rows}</tbody></table></div>
    <div class="form-grid" style="margin-top:8px;"><div><label>Workmanship / labour (₦)</label><input type="number" name="labour" min="0" step="any"></div><div><label>Estimated total</label><div id="rq-total" style="font-weight:700;font-size:18px;padding-top:6px;">₦0</div></div></div>
+   <div class="card" style="margin-top:12px;border-left:3px solid var(--amber);"><div style="font-weight:600;margin-bottom:6px;">Short RCA — required before the request can be made</div><div class="form-grid"><div style="grid-column:1/-1"><label>What failed, and what was the root cause? (why did it fail)</label><textarea name="rcaWhy" rows="2" required placeholder="e.g. Brake pads worn out — no wear check at the last service, driver did not report the noise"></textarea></div><div><label>Was it preventable?</label><select name="rcaPrev" required><option value="">Choose…</option><option>Yes — missed check / servicing</option><option>Yes — driver handling</option><option>Yes — poor quality part</option><option>No — normal wear</option><option>No — external cause</option></select></div><div><label>What will stop it happening again?</label><input type="text" name="rcaFix" required placeholder="e.g. Add brake check to every pre-trip"></div></div></div>
    <div id="rq-oem" style="margin-top:10px;">${oemCard(comps[0],true)}</div>
    <div class="form-actions" style="margin-top:12px;"><button class="btn primary" type="submit">Submit request</button><span class="dim small">Only the Yard Admin role can raise a request.</span></div></form></details>
   <div class="table-wrap"><table><thead><tr><th>Request</th><th>Date</th><th>Truck</th><th>Work</th><th>Total</th><th>Stage</th><th></th></tr></thead><tbody>${all.length?all.map(q=>{ const s=RQ_STAGE[q.stage]||['',''] ; return `<tr><td><b>${esc(q.ref)}</b></td><td>${esc(fmtDate(q.date))}</td><td>${wsVeh(q.vehicleId)}<div class="dim small">${esc(q.driverName||'')}</div></td><td style="white-space:normal;min-width:200px;">${esc(q.work||'')}</td><td>${naira(num(q.total))}</td><td>${wsTag(s[0],s[1])}${s[2]?`<div class="dim small">${s[2]}</div>`:''}</td><td><div class="row-actions"><button class="btn small primary" data-rq-open="${q.id}">Open</button><button class="btn ghost small" data-delete="repairReqs:${q.id}">Delete</button></div></td></tr>`; }).join(''):'<tr class="empty-row"><td colspan="7">No repair requests yet.</td></tr>'}</tbody></table></div>`;
@@ -7598,8 +7590,8 @@ function wsAttach(){
     rq.addEventListener('submit',async ev=>{ ev.preventDefault(); if(!wsAuth(['Yard Admin'],'raise a repair request')) return;
       const fd=new FormData(rq), g=n=>String(fd.get(n)||'').trim(); const parts=[]; for(let i=0;i<6;i++){ if(g('pn_'+i)) parts.push({n:g('pn_'+i),q:g('pq_'+i)||'1',p:g('pp_'+i)||'0'}); }
       const total=parts.reduce((a,p)=>a+num(p.q)*num(p.p),0)+num(g('labour'));
-      const q={id:uid(),ref:wsRef('repairReqs','RQ'),date:g('date'),vehicleId:g('vehicleId'),driverName:g('driverName'),technician:g('technician'),component:g('component'),defectId:g('defectId'),work:g('work'),parts,labour:g('labour'),total:String(total),stage:'RCA',log:[{at:new Date().toISOString(),what:'Request raised',by:wsWho(),note:''}]};
-      STATE.data.repairReqs=[...STATE.data.repairReqs,q]; wsNotify('New repair request',`${q.ref} · ${vehicleLabel(q.vehicleId)} · ${naira(total)} — Maintenance Manager to add RCA`,3); showToast('Request raised — waiting for the Maintenance Manager’s RCA.'); await persist('repairReqs'); });
+      const q={id:uid(),ref:wsRef('repairReqs','RQ'),date:g('date'),vehicleId:g('vehicleId'),driverName:g('driverName'),technician:g('technician'),component:g('component'),defectId:g('defectId'),work:g('work'),parts,labour:g('labour'),total:String(total),rca:'Root cause: '+g('rcaWhy')+' | Preventable: '+g('rcaPrev')+' | Fix: '+g('rcaFix'),rcaBy:wsWho(),stage:'GM',log:[{at:new Date().toISOString(),what:'Request raised with RCA',by:wsWho(),note:''}]};
+      STATE.data.repairReqs=[...STATE.data.repairReqs,q]; wsNotify('Repair request awaiting GM',`${q.ref} · ${vehicleLabel(q.vehicleId)} · ${naira(total)} — RCA attached`,3); showToast('Request raised with its RCA — waiting for the General Manager.'); await persist('repairReqs'); });
   }
   $$('form[data-ws-form]',form=>form.addEventListener('submit',async ev=>{
     ev.preventDefault(); const coll=form.getAttribute('data-ws-form'), hook=form.getAttribute('data-ws-hook');
@@ -7712,7 +7704,7 @@ STORAGE_KEYS.monthIndex='vms:monthIndex'; if(!STATE.data.monthIndex) STATE.data.
 function obScore(x,target){
   const t=target?Math.min(x.trips/target,1.5):0;
   const clean=x.viol===0?20:0, noBd=(x.bd||0)===0?20:0;
-  return Math.round(t*60+clean+noBd-x.viol*10-(x.bd||0)*8-(x.down||0)*0.5);
+  return Math.round(t*60+clean+noBd-x.viol*10-(x.bd||0)*8-Math.min(x.down||0,48)*0.5);
 }
 function overallTop(P,n){
   const B=bestDriversData(P), tgt=P==='month'||P==='lastmonth'?J_TRUCK_TARGET.month:J_TRUCK_TARGET.week;
@@ -7951,7 +7943,7 @@ const _overallTop0=overallTop;
 overallTop=function(P,n){ const r=_overallTop0(P,n); const B=bestDriversData(P), tgt=r.tgt; r.all=B.list.filter(x=>x.trips>0).map(x=>Object.assign({},x,{score:obScore(x,tgt),pctT:tgt?Math.round(x.trips/tgt*100):null})); return r; };
 function overallWorst(P,n){
   const r=overallTop(P,3); const all=r.all.slice().sort((a,b)=>a.score-b.score||b.viol-a.viol||a.trips-b.trips);
-  const topNames=new Set(r.top.map(x=>x.name)); const pool=all.length>=6?all:all.filter(x=>!topNames.has(x.name));
+  const topNames=new Set(r.top.map(x=>x.name)); const pool=all.filter(x=>!topNames.has(x.name));   // a driver can never be in both lists
   return {R:r.R,worst:pool.slice(0,n||3),count:all.length};
 }
 function owList(w){
@@ -8217,8 +8209,8 @@ const _pkh=portKpiHTML; portKpiHTML=function(){
 /* ============================================================ ws_l.js ============================================================ */
 /* ===== v13.0: Performance tab — KPI board with owners, truck & driver scorecards, actions, cost per trip/km, recognition, early warnings, data quality ===== */
 ['actions','kpiCfg'].forEach(k=>{ if(WS_COLLS.indexOf(k)<0) WS_COLLS.push(k); STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
-const PF_OWNERS=['Yard Admin','Maintenance Manager','Logistics Manager','General Manager','MD'];
-const PF_OWNER_DEF={transport:'Logistics Manager',journey:'Logistics Manager',inspections:'Maintenance Manager',prepost:'Yard Admin',safety:'Yard Admin',maintenance:'Maintenance Manager',clearing:'Logistics Manager',dq:'Yard Admin'};
+const PF_OWNERS=['Yard Admin','Maintenance Manager','Logistics Manager','Safety Manager','General Manager','MD'];
+const PF_OWNER_DEF={transport:'Logistics Manager',journey:'Logistics Manager',inspections:'Maintenance Manager',prepost:'Yard Admin',safety:'Safety Manager',maintenance:'Maintenance Manager',clearing:'Logistics Manager',dq:'Yard Admin'};
 const PF_DEPT={transport:'Transport',journey:'Journey',inspections:'Inspections',prepost:'Pre/Post-trip',safety:'Safety',maintenance:'Maintenance',clearing:'Clearing',dq:'Data quality'};
 const PF_PERIODS=[['lastweek','Last week'],['week','This week'],['lastmonth','Last month'],['month','This month']];
 STATE.pfView=STATE.pfView||'board'; STATE.pfPeriod=STATE.pfPeriod||'lastweek'; STATE.pfWho=STATE.pfWho||'truck'; STATE.pfSel=STATE.pfSel||'';
@@ -8461,8 +8453,8 @@ function odoSync(){
 const _lmc2=lmCapture; lmCapture=async function(){ await _lmc2(); odoSync(); };
 
 /* ---------- 7/8. documents ---------- */
-const DOC_TRUCK=['Insurance','Road worthiness','Vehicle licence','Haulage / hackney permit','CNG cylinder certificate','Fire extinguisher service','Third-party cover'];
-const DOC_DRIVER=['Driver’s licence','Medical fitness','Defensive driving','CNG / hazmat training','Site induction'];
+const DOC_TRUCK=['Heavy duty vehicle permit','Heavy duty vehicle licence','Insurance (comprehensive)','Third-party cover','Road worthiness','Vehicle licence','Vehicle registration / particulars','Proof of ownership / customs papers','Haulage / hackney permit','Trailer road worthiness','CNG cylinder certificate','CNG conversion certificate','Fire extinguisher service','Speed limiter certificate','Tracker subscription','Port access / NPA truck tag','Insurance'];
+const DOC_DRIVER=['Heavy duty driving licence','Driver’s licence','Medical fitness','Defensive driving','CNG / hazmat training','Site induction','Drug & alcohol test','Port access pass','Driver ID / NIN','Guarantor form'];
 function docState(d){ const n=mDays(d.expires); if(n===null) return {k:'grey',t:'No expiry date',n}; if(n<0) return {k:'red',t:'Expired '+(-n)+' day'+(n===-1?'':'s')+' ago',n}; if(n<=30) return {k:'amber',t:'Expires in '+n+' day'+(n===1?'':'s'),n}; return {k:'green',t:'Valid · '+n+' days',n}; }
 function docRef(d){ return d.kind==='Truck'?vehicleLabel(d.ref):d.ref; }
 function ctDocs(){
@@ -8628,8 +8620,8 @@ function adRoles(){
   <div class="note warn" style="margin-top:12px;"><b>Honest limit:</b> a role is chosen on each phone or computer, and a PIN is a simple check, not real login security. It stops accidents and casual changes — deleting asks for the manager PIN — but anyone with the sheet link can still open the Google Sheet itself. The Change history tab shows what was done and by which role.</div>`;
 }
 function renderAdminPage(){
-  const V=STATE.adView, views=[['roles','Roles & access'],['history','Change history'],['backup','Backups']];
-  return wsHead('Admin','Who can do what, what has been changed, and your own copy of the data.')+`<div class="tabs" style="margin-bottom:14px;">${views.map(([k,l])=>`<button data-ad-view="${k}" class="${V===k?'active':''}">${l}</button>`).join('')}</div>`+(V==='history'?adHistory():V==='backup'?adBackup():adRoles());
+  const V=STATE.adView, views=[['roles','Roles & access'],['check','Data check'],['files','Stored files'],['history','Change history'],['backup','Backups']];
+  return wsHead('Admin','Who can do what, what has been changed, and your own copy of the data.')+`<div class="tabs" style="margin-bottom:14px;">${views.map(([k,l])=>`<button data-ad-view="${k}" class="${V===k?'active':''}">${l}</button>`).join('')}</div>`+(V==='history'?adHistory():V==='backup'?adBackup():V==='check'?dcView():V==='files'?vaultView():adRoles());
 }
 
 /* ---------- 9. Monday one-pager ---------- */
@@ -8735,12 +8727,7 @@ async function repLoadArch(yms){
   if(STATE.tab==='reports'||STATE.tab==='monthly') render();
 }
 const REP_COLL={transport:'transport',journey:'journey',inspections:'inspections',pretrip:'pretrip',safety:'safety',maintenance:'maintenance',maintenanceDaily:'maintenanceDaily',maintInspections:'maintInspections',cng:'cngFills',diesel:'dieselTrips'};
-const _repF=repFiltered;
-repFiltered=function(r){
-  const F=_repF(r); try{ repMonths(r).forEach(ym=>{ const a=STATE.repArch[ym]; if(!a||typeof a!=='object') return;
-    Object.keys(REP_COLL).forEach(k=>{ const rows=a[REP_COLL[k]]; if(!Array.isArray(rows)||!rows.length) return; const have=new Set(F[k].map(x=>x.id)); const add=rows.filter(x=>x.date>=r.start&&x.date<=r.end&&!have.has(x.id)); if(add.length) F[k]=F[k].concat(add); }); }); }catch(e){ console.error('repFiltered',e); }
-  return F;
-};
+/* repFiltered needs no archive layer of its own: filterRange reads closed months, removes copies and carries the target */
 const _rprp=renderPeriodReportPage;
 renderPeriodReportPage=function(kind){
   let note=''; try{ const need=repNeedArch(kind,repSelected(kind)); if(need.length){ repLoadArch(need); } const pend=[...repMonths(reportRanges(kind,repSelected(kind)).range),...repMonths(reportRanges(kind,repSelected(kind)).prev)].some(ym=>STATE.repArch[ym]==='loading'); if(pend) note='<div class="note warn" style="margin-bottom:12px;">⏳ Loading the saved month from its folder — the report will fill in a moment.</div>'; }catch(e){ console.error(e); }
@@ -8785,6 +8772,313 @@ const _lmSum9=lmSummaryCard; lmSummaryCard=function(p){ const R=mxRange(p); retu
 function archPreload(){ try{ const cur=monthStartOf(todayStr()); (STATE.data.monthIndex||[]).forEach(m=>{ if(m.ym>=addMonthsStr(cur,-3).slice(0,7)&&m.ym<cur.slice(0,7)) archLoad(m.ym); }); }catch(e){} }
 const _loadAll9=loadAll; loadAll=async function(){ const r=await _loadAll9.apply(this,arguments); archPreload(); return r; };
 setTimeout(archPreload,6000);
+
+/* ============================================================ ws_p.js ============================================================ */
+/* ===== v13.4: fixed trip targets (19 CNG trucks × 2 a day) · duplicate guard + data check · repair report · RCA at request · safety actions to the Safety Manager ·
+          summary cards open the issue · AI insights removed · new port clients · uploaded files kept in the app · more document types ===== */
+['portClientsX','storedFiles'].forEach(k=>{ if(WS_COLLS.indexOf(k)<0) WS_COLLS.push(k); STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
+STATE.rrPeriod=STATE.rrPeriod||'lastmonth'; STATE.dcBusy=false; STATE.pfNewClient=null;
+const dBetween=(a,b)=>Math.round((Date.parse(b+'T00:00:00')-Date.parse(a+'T00:00:00'))/864e5);
+const cngN=()=>num(STATE.targets&&STATE.targets.cngFleetSize)||19;
+const curYm=()=>monthStartOf(todayStr()).slice(0,7);
+
+/* ---------- 1. the trip target is fixed: CNG trucks × 2 trips a day (14 a week, 56 a month) ---------- */
+const RANGE_OF=new WeakMap();
+function fleetTripTarget(rg){
+  const per=(num(STATE.targets.truckTripsPerDayTarget)||2)*cngN(); let tot=0;
+  for(let ms=rg.start.slice(0,7)+'-01'; ms<=rg.end; ms=addMonthsStr(ms,1)){
+    const me=monthEndOf(ms), a=rg.start>ms?rg.start:ms, b=rg.end<me?rg.end:me, days=dBetween(a,b)+1;
+    tot+=(a===ms&&b===me)?28:Math.min(days,28);          // a full month counts as 4 weeks = 56 trips a truck
+  }
+  return Math.round(per*tot);
+}
+const trSig=r=>[r.date,trKey(r),r.route,String(num(r.tripsActual)),String(Math.round(num(r.tonnageActual)*100)),normName(r.driverName)].join('|');
+function dedupeTransport(arr){
+  const seen=new Set(), out=[]; let drop=0;
+  arr.forEach(r=>{ if(!r||!r.date||!trKey(r)){ out.push(r); return; } const k=trSig(r); if(seen.has(k)){ drop++; return; } seen.add(k); out.push(r); });
+  return drop?out:arr;
+}
+function tagRange(recs,out,rg){ try{ if(out&&rg&&archColl(recs)==='transport'){ const o=dedupeTransport(out); RANGE_OF.set(o,rg); return o; } }catch(e){} return out; }
+const _fp10=filterPeriod; filterPeriod=function(recs,period){ const out=_fp10(recs,period); return tagRange(recs,out,periodRange(period)); };
+const _fr10=filterRange; filterRange=function(a,s,e){ const out=_fr10(a,s,e); return tagRange(a,out,{start:s,end:e}); };
+const _fw10=filterWeekRange; filterWeekRange=function(recs,end){ const out=_fw10(recs,end); return tagRange(recs,out,{start:addDays(end,-6),end}); };
+if(typeof applyTransportFilters==='function'){ const _atf10=applyTransportFilters; applyTransportFilters=function(recs){ const out=_atf10(recs); if(out!==recs&&STATE.transportRoute==='ALL'&&STATE.transportMaterial==='ALL'&&RANGE_OF.has(recs)) RANGE_OF.set(out,RANGE_OF.get(recs)); return out; }; }
+const _kt10=kpisTransport;
+kpisTransport=function(recs,period){
+  const k=_kt10(recs); const rg=(period!==undefined&&periodRange(period))||RANGE_OF.get(recs); if(!rg) return k;
+  const T=fleetTripTarget(rg), tpt=num(STATE.targets.tonnagePerTripTarget)||45, tr=k.find(x=>x.key==='trips'), tn=k.find(x=>x.key==='tonnage');
+  if(tr){ tr.target=T; tr.ratio=attainment(tr.actual,T,'higher'); } if(tn){ tn.target=T*tpt; tn.ratio=attainment(tn.actual,tn.target,'higher'); }
+  return k;
+};
+const _kjo10=kpisJourneyOverall;
+kpisJourneyOverall=function(recs,period){ const k=_kjo10(recs,period); try{ const t=k.find(x=>x.key==='trips'); if(t&&period){ t.target=Math.round(perTruckTripTarget(period).target*cngN()); t.ratio=attainment(t.actual,t.target,'higher'); } }catch(e){} return k; };
+function lmDeviationCount(period){ const R=periodRange(period); if(!R) return 0; return filterRange(STATE.data.lmFindings||[],R.start,R.end).filter(x=>x.type==='route').length; }
+
+/* ---------- 2. long repair times are data errors, not repairs ---------- */
+const DT_MAX=720;
+function sanitizeDowntime(list){ let n=0; (list||[]).forEach(r=>{ if(r&&num(r.downtimeHours)>DT_MAX){ r.downtimeRaw=r.downtimeHours; r.downtimeHours=''; r.dtFlag=1; n++; } }); return n; }
+
+/* ---------- 3. archives: patch a month folder safely ---------- */
+async function archPatch(ym,mutator){
+  const key='vms:arch:'+ym, got=await gasGetAllChunked([key]); const obj=JSON.parse(got[key]); obj.data=obj.data||{};
+  const n=mutator(obj.data); if(!n) return 0;
+  await gasSetChunked(key,JSON.stringify(obj)); const back=await gasGetAllChunked([key]); let ok=false;
+  try{ const j=JSON.parse(back[key]); ok=j&&j.ym===ym&&Object.keys(obj.data).every(c=>(j.data[c]||[]).length===obj.data[c].length); }catch(e){}
+  if(!ok) throw new Error('The saved copy of '+mcLabel(ym)+' could not be verified.');
+  STATE.archCache[ym]=obj.data; sanitizeDowntime(obj.data.maintenance);
+  const e=(STATE.data.monthIndex||[]).find(x=>x.ym===ym); if(e){ const counts={}; let tot=0; Object.keys(obj.data).forEach(c=>{ counts[c]=obj.data[c].length; tot+=counts[c]; }); e.counts=counts; e.total=tot; await persist('monthIndex'); }
+  return n;
+}
+function archLoadAll(){ (STATE.data.monthIndex||[]).forEach(m=>{ if(m.ym<curYm()) archLoad(m.ym); }); }
+const archSources=()=>{ const s=[{ym:'live',recs:STATE.data.transport||[],maint:STATE.data.maintenance||[]}]; (STATE.data.monthIndex||[]).forEach(m=>{ const c=STATE.archCache[m.ym]; s.push({ym:m.ym,recs:c?(c.transport||[]):null,maint:c?(c.maintenance||[]):null}); }); return s; };
+
+/* ---------- 4. data check: duplicates, impossible trip counts, odd repair times ---------- */
+function dcAnalyze(){
+  const src=archSources(), vehicles=(STATE.data.vehicles||[]).length||26, pending=src.filter(s=>s.recs===null).length;
+  const all=[]; src.forEach(s=>{ if(s.recs) s.recs.forEach(r=>all.push({r,ym:s.ym})); });
+  const groups={}; all.forEach(x=>{ if(!x.r.date||!trKey(x.r)) return; (groups[trSig(x.r)]=groups[trSig(x.r)]||[]).push(x); });
+  const dupes=[]; Object.keys(groups).forEach(k=>{ const g=groups[k]; if(g.length>1) g.slice(1).forEach(x=>dupes.push(x)); });
+  const dupIds=new Set(dupes.map(x=>x.r.id)); const uniq=all.filter(x=>!dupIds.has(x.r.id));
+  const months={}; const m0=ym=>months[ym]||(months[ym]={ym,rawTrips:0,trips:0,ton:0,dups:0});
+  all.forEach(x=>{ if(x.r.date) m0(x.r.date.slice(0,7)).rawTrips+=num(x.r.tripsActual); });
+  uniq.forEach(x=>{ if(x.r.date){ const o=m0(x.r.date.slice(0,7)); o.trips+=num(x.r.tripsActual); o.ton+=num(x.r.tonnageActual); } });
+  dupes.forEach(x=>{ if(x.r.date) m0(x.r.date.slice(0,7)).dups++; });
+  const td={}; uniq.forEach(x=>{ const k=trKey(x.r)+'|'+x.r.date; td[k]=(td[k]||0)+num(x.r.tripsActual); });
+  const busy=Object.keys(td).filter(k=>td[k]>3).map(k=>({k,n:td[k]})).sort((a,b)=>b.n-a.n);
+  const typed=new Set(); uniq.forEach(x=>{ if(!x.r.vehicleId&&x.r.regNoText) typed.add(String(x.r.regNoText).toUpperCase()); });
+  const maint=[]; src.forEach(s=>{ (s.maint||[]).forEach(r=>{ if(r&&(r.dtFlag||num(r.downtimeHours)>DT_MAX)) maint.push({r,ym:s.ym}); }); });
+  const roadNoKind=[]; src.forEach(s=>{ (s.maint||[]).forEach(r=>{ if(isBd(r)&&isRoadBd(r)&&!r.kind&&!r.srcId) roadNoKind.push({r,ym:s.ym}); }); });
+  return {all,dupes,months:Object.values(months).sort((a,b)=>a.ym<b.ym?1:-1),busy,typed:[...typed],maint,roadNoKind,vehicles,pending,uniq:uniq.length};
+}
+function dcView(){
+  archLoadAll(); const A=dcAnalyze(), n=cngN(), per=num(STATE.targets.truckTripsPerDayTarget)||2;
+  const rows=A.months.slice(0,6).map(m=>{ const days=m.ym===curYm()?Math.max(1,dBetween(m.ym+'-01',todayStr())+1):new Date(+m.ym.slice(0,4),+m.ym.slice(5,7),0).getDate(); const target=n*per*28, ceil=A.vehicles*per*days, bad=m.trips>ceil;
+    return `<tr><td><b>${esc(mcLabel(m.ym))}</b></td><td>${fmt(m.rawTrips)}</td><td>${fmt(m.dups)}</td><td><b>${fmt(m.trips)}</b></td><td>${fmt(m.ton)} MT</td><td>${fmt(target)}</td><td>${fmt(ceil)}</td><td>${bad?wsTag('Still too high','red'):(m.dups?wsTag('Looks right once duplicates go','amber'):wsTag('Possible','green'))}</td></tr>`; }).join('');
+  const busyRows=A.busy.slice(0,8).map(b=>{ const [k,d]=[b.k.slice(0,b.k.lastIndexOf('|')),b.k.slice(b.k.lastIndexOf('|')+1)]; return `<tr><td>${esc(trKeyLabel(k))}</td><td>${esc(fmtDate(d))}</td><td>${fmt(b.n)}</td></tr>`; }).join('');
+  const mRows=A.maint.slice(0,10).map(x=>`<tr><td>${esc(fmtDate(x.r.date))}</td><td>${esc(vehicleLabel(x.r.vehicleId))}</td><td>${fmt(num(x.r.downtimeRaw||x.r.downtimeHours))} h</td></tr>`).join('');
+  return `<div class="dim small" style="margin-bottom:12px;line-height:1.6;">Looks for the things that make the totals wrong. Nothing here is changed until you press a button. Closed months are read from their folders${A.pending?` — <b>${A.pending} still loading, open this page again in a few seconds</b>`:''}.</div>
+  <div class="grid cols-4" style="margin-bottom:14px;">${kc('Exact duplicate entries',A.dupes.length,'same date, truck, route, trips, tonnage and driver',A.dupes.length?'red':'green')}${kc('Truck-days over 3 trips',A.busy.length,'more than 3 trips in a day',A.busy.length?'amber':'green')}${kc('Trucks not in the registry',A.typed.length,'saved as typed',A.typed.length?'amber':'green')}${kc('Repair times over '+DT_MAX+' h',A.maint.length,'ignored in averages',A.maint.length?'amber':'green')}</div>
+  <div class="section-title"><span>Trips by month</span><div class="line"></div></div>
+  <div class="dim small" style="margin-bottom:6px;">Target = ${n} CNG trucks × ${per} trips a day × 28 days = ${fmt(n*per*28)} a month. “Most possible” = every truck in the registry (${A.vehicles}) doing ${per} trips every day.</div>
+  <div class="table-wrap"><table><thead><tr><th>Month</th><th>Trips as stored</th><th>Duplicate entries</th><th>Trips after duplicates</th><th>Tonnage</th><th>Target</th><th>Most possible</th><th></th></tr></thead><tbody>${rows||'<tr class="empty-row"><td colspan="8">No transport entries yet.</td></tr>'}</tbody></table></div>
+  ${A.dupes.length?`<div class="note warn" style="margin:12px 0;line-height:1.6;"><b>${fmt(A.dupes.length)} entries are exact copies of another entry.</b> This usually happens when the same sheet is uploaded twice, or an October sheet is uploaded again after the month was closed. Reports already ignore the copies. Press the button to delete them for good, from the live data and from the month folders.<div style="margin-top:8px;"><button class="btn primary" data-dc-clean="1" ${STATE.dcBusy?'disabled':''}>${STATE.dcBusy?'Working…':'Delete '+fmt(A.dupes.length)+' duplicate entries'}</button></div></div>`:`<div class="note" style="margin:12px 0;">No exact duplicates found${A.pending?' (so far)':''}.</div>`}
+  ${busyRows?`<div class="section-title"><span>Trucks with more than 3 trips in one day</span><div class="line"></div></div><div class="table-wrap"><table><thead><tr><th>Truck</th><th>Date</th><th>Trips</th></tr></thead><tbody>${busyRows}</tbody></table></div><div class="dim small" style="margin-top:6px;">A loaded truck on these routes cannot do that many. Look for a trips figure typed as tonnage, or the same load entered under two trucks.</div>`:''}
+  ${A.typed.length?`<div class="section-title"><span>Trucks not in the registry</span><div class="line"></div></div><div class="dim small" style="margin-bottom:6px;">${esc(A.typed.slice(0,30).join(' · '))}${A.typed.length>30?' …':''}. Add them to the registry (or fix the spelling) so they count under the right truck.</div>`:''}
+  ${mRows?`<div class="section-title"><span>Repair times that cannot be right</span><div class="line"></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>Recorded time</th></tr></thead><tbody>${mRows}</tbody></table></div><div class="dim small" style="margin-top:6px;">Anything over ${DT_MAX} hours (30 days) is left out of the average repair time, the downtime totals and the driver points. Open the entry in the Maintenance log and correct the hours.</div>`:''}
+  ${A.roadNoKind.length?`<div class="note warn" style="margin:12px 0;line-height:1.6;"><b>${fmt(A.roadNoKind.length)} repair entries are counted as roadside breakdowns only because nobody chose “where”.</b> The old form pre-selected “Roadside”. Open Maintenance → Repair report to mark which ones were workshop repairs.</div>`:''}`;
+}
+async function dcClean(){
+  const A=dcAnalyze(); if(!A.dupes.length||STATE.dcBusy) return; if(A.pending){ showToast('Closed months are still loading — try again in a few seconds.'); return; }
+  if(!confirm('Delete '+A.dupes.length+' duplicate transport entries? Only exact copies are removed (same date, truck, route, trips, tonnage and driver). One copy of each stays.')) return;
+  STATE.dcBusy=true; render();
+  try{
+    const kill=new Set(A.dupes.map(x=>x.r.id)); const liveDrop=(STATE.data.transport||[]).filter(r=>kill.has(r.id)).length;
+    const byYm={}; A.dupes.forEach(x=>{ if(x.ym!=='live') byYm[x.ym]=(byYm[x.ym]||0)+1; });
+    for(const ym of Object.keys(byYm)){ await archPatch(ym,d=>{ const before=(d.transport||[]).length; d.transport=(d.transport||[]).filter(r=>!kill.has(r.id)); return before-d.transport.length; }); }
+    if(liveDrop){ STATE.data.transport=STATE.data.transport.filter(r=>!kill.has(r.id)); await persist('transport'); }
+    showToast('Deleted '+A.dupes.length+' duplicate entries.');
+  }catch(e){ console.error(e); showToast('Stopped: '+(e&&e.message||e)+' Nothing was lost.'); }
+  STATE.dcBusy=false; render();
+}
+/* a sheet that was already saved in a closed month is never added a second time */
+const _pbw10=parseBulkWorkbook;
+parseBulkWorkbook=function(wb){
+  const out=_pbw10(wb); try{
+    archLoadAll(); const keys={}; let pend=0;
+    (STATE.data.monthIndex||[]).forEach(m=>{ const c=STATE.archCache[m.ym]; if(!c){ pend++; return; } (c.transport||[]).forEach(r=>{ keys[[r.date,trKey(r),r.route].join('|')]=m.ym; }); });
+    let n=0; (out.rows||[]).forEach(r=>{ if(r.state==='error') return; const k=[r.date,r.vehicleId||('~'+normReg(r.truckTxt)),r.route].join('|'); if(keys[k]){ r.state='dup'; r.dupId=null; r.archDup=true; r.warns=(r.warns||[]).concat(['Already saved in the '+mcLabel(keys[k])+' folder — skipped']); n++; } });
+    if(n) out.summary=(out.summary||'')+`<div class="note warn" style="margin:0 0 10px;">${n} line${n===1?'':'s'} already exist in a closed month folder and will be skipped.</div>`;
+    if(pend) out.summary=(out.summary||'')+`<div class="note" style="margin:0 0 10px;">${pend} closed month${pend===1?' is':'s are'} still loading, so those could not be checked yet. Choose the file again in a few seconds.</div>`;
+  }catch(e){ console.error('archive duplicate check',e); }
+  return out;
+};
+
+/* ---------- 5. repair report: per truck, repeats, categories, top 3 ---------- */
+const rrComp=r=>r.component||'Not recorded';
+function rrCompute(P){
+  const R=periodRange(P), lb=addDays(R.start,-60);
+  return withArch(lb,R.end,()=>{
+    const all=(STATE.data.maintenance||[]).filter(r=>isBd(r)&&r.vehicleId&&r.date&&r.date>=lb&&r.date<=R.end).sort((a,b)=>a.date<b.date?-1:(a.date>b.date?1:(String(a.id)<String(b.id)?-1:1)));
+    const inP=all.filter(r=>r.date>=R.start), T={}, C={};
+    inP.forEach(r=>{
+      const rep=all.some(x=>x!==r&&x.vehicleId===r.vehicleId&&rrComp(x)===rrComp(r)&&(x.date<r.date||(x.date===r.date&&String(x.id)<String(r.id)))&&dBetween(x.date,r.date)<=60);
+      const t=T[r.vehicleId]||(T[r.vehicleId]={vid:r.vehicleId,n:0,rep:0,comps:{},down:0,cost:0,road:0,shop:0,recs:[]});
+      t.n++; if(rep) t.rep++; t.comps[rrComp(r)]=(t.comps[rrComp(r)]||0)+1; t.down+=num(r.downtimeHours); t.cost+=num(r.cost); if(isRoadBd(r)) t.road++; else t.shop++; t.recs.push(r);
+      const c=C[rrComp(r)]||(C[rrComp(r)]={name:rrComp(r),n:0,trucks:new Set(),rep:0}); c.n++; c.trucks.add(r.vehicleId); if(rep) c.rep++;
+    });
+    const trucks=Object.values(T).sort((a,b)=>b.n-a.n||b.down-a.down), cats=Object.values(C).sort((a,b)=>b.n-a.n);
+    return {R,total:inP.length,trucks,cats,repeats:inP.length?trucks.reduce((a,t)=>a+t.rep,0):0,repeatTrucks:trucks.filter(t=>t.rep>0).length,top3:trucks.slice(0,3),topCat:cats[0]||null,down:trucks.reduce((a,t)=>a+t.down,0),cost:trucks.reduce((a,t)=>a+t.cost,0),roadRecs:inP.filter(isRoadBd)};
+  });
+}
+function rrTop3(D,label){
+  return `<div class="card"><div style="font-weight:600;margin-bottom:2px;">3 most repaired trucks — ${esc(label)}</div><div class="dim small mono" style="margin-bottom:8px;">${esc(rangeText(D.R))}</div>${D.top3.length?D.top3.map((t,i)=>`<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;"><span class="rank bad" style="min-width:22px;">${i+1}</span><div><b>${esc(vehicleLabel(t.vid))}</b> <span class="tag red">${t.n} repair${t.n===1?'':'s'}</span>${t.rep?` <span class="tag amber">${t.rep} repeat</span>`:''}<div class="dim small">${Object.entries(t.comps).sort((a,b)=>b[1]-a[1]).map(([c,n])=>esc(c)+' ×'+n).join(' · ')}${t.down?' · '+fmt(t.down,1)+' h down':''}</div></div></div>`).join(''):'<div class="dim small">No repairs logged in this period.</div>'}</div>`;
+}
+function renderRepairsReport(){
+  archLoadAll(); const P=STATE.rrPeriod, D=rrCompute(P), W=rrCompute('lastweek'), M=rrCompute('lastmonth');
+  const tabs=[['lastweek','Last week'],['week','This week'],['lastmonth','Last month'],['month','This month']];
+  const sum=(x,l)=>`<div class="card"><div class="dim small">${l}</div><div style="font-size:26px;font-weight:700;">${x.total}<span class="dim small" style="font-weight:400;"> repairs</span></div><div class="dim small">${x.trucks.length} truck${x.trucks.length===1?'':'s'} · ${x.repeats} repeat · top: ${x.topCat?esc(x.topCat.name)+' ('+x.topCat.n+')':'—'}</div></div>`;
+  const catRows=D.cats.map((c,i)=>`<tr${i===0?' style="background:rgba(255,160,60,.08)"':''}><td>${i===0?'⭐ ':''}<b>${esc(c.name)}</b></td><td>${c.n}</td><td>${D.total?Math.round(c.n/D.total*100):0}%</td><td>${c.trucks.size}</td><td>${c.rep||'—'}</td></tr>`).join('');
+  const truckRows=D.trucks.map(t=>{ const top=Object.entries(t.comps).sort((a,b)=>b[1]-a[1]); return `<tr><td><b>${esc(vehicleLabel(t.vid))}</b></td><td><b>${t.n}</b></td><td>${t.rep?`<span class="tag amber">${t.rep}</span>`:'—'}</td><td style="white-space:normal;min-width:240px;">${top.map(([c,n])=>`<span class="tag grey" style="margin:0 4px 4px 0;">${esc(c)} ×${n}</span>`).join('')}</td><td>${esc(top[0][0])}</td><td>${t.road} / ${t.shop}</td><td>${t.down?fmt(t.down,1)+' h':'—'}</td><td>${t.cost?naira(t.cost):'—'}</td></tr>`; }).join('');
+  const roadRows=D.roadRecs.slice(0,40).map(r=>`<tr><td>${esc(fmtDate(r.date))}</td><td>${esc(vehicleLabel(r.vehicleId))}</td><td style="white-space:normal;">${esc(rrComp(r))}${r.notes?' — '+esc(String(r.notes).slice(0,60)):''}</td><td>${r.kind?'chosen':'<span class="tag amber">not chosen</span>'}</td><td><button class="btn small" data-rr-kind="${esc(r.id)}|${esc(r.date)}|workshop">Workshop repair</button></td></tr>`).join('');
+  return `<div class="grid cols-2" style="margin-bottom:12px;">${sum(W,'Last week — '+rangeText(W.R))}${sum(M,'Last month — '+rangeText(M.R))}</div>
+  <div class="grid cols-2" style="margin-bottom:14px;">${rrTop3(W,'last week')}${rrTop3(M,'last month')}</div>
+  <div class="section-title"><span>Repair detail</span><div class="line"></div></div>
+  <div class="tabs" style="margin-bottom:12px;">${tabs.map(([k,l])=>`<button data-rr-period="${k}" class="${P===k?'active':''}">${l}</button>`).join('')}</div>
+  <div class="dim small" style="margin-bottom:10px;">${esc(rangeText(D.R))} · ${D.total} repair${D.total===1?'':'s'} on ${D.trucks.length} truck${D.trucks.length===1?'':'s'} · total ${D.down?fmt(D.down,1)+' h down':'no downtime recorded'}${D.cost?' · '+naira(D.cost):''}. A <b>repeat repair</b> is the same component on the same truck repaired again within 60 days.</div>
+  <div class="grid cols-4" style="margin-bottom:14px;">${kc('Repairs',D.total,'this period')}${kc('Trucks repaired',D.trucks.length,'of '+((STATE.data.vehicles||[]).length||'—'))}${kc('Repeat repairs',D.repeats,D.repeatTrucks+' truck'+(D.repeatTrucks===1?'':'s'),D.repeats?'amber':'green')}${kc('Highest category',D.topCat?D.topCat.name:'—',D.topCat?D.topCat.n+' repairs':'',D.topCat?'red':'')}</div>
+  <div class="section-title"><span>Repairs by category</span><div class="line"></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Category</th><th>Repairs</th><th>Share</th><th>Trucks</th><th>Repeats</th></tr></thead><tbody>${catRows||'<tr class="empty-row"><td colspan="5">No repairs in this period.</td></tr>'}</tbody></table></div>
+  <div class="section-title"><span>Repairs on each truck</span><div class="line"></div><button class="btn small" data-rr-csv="1">⬇ Download</button></div>
+  <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Repairs</th><th>Repeat</th><th>Categories</th><th>Highest</th><th>Roadside / workshop</th><th>Downtime</th><th>Cost</th></tr></thead><tbody>${truckRows||'<tr class="empty-row"><td colspan="8">No repairs in this period.</td></tr>'}
+   ${D.trucks.length?`<tr style="font-weight:700;"><td>All trucks</td><td>${D.total}</td><td>${D.repeats}</td><td>${D.cats.length} categories</td><td>${D.topCat?esc(D.topCat.name):'—'}</td><td>${D.roadRecs.length} / ${D.total-D.roadRecs.length}</td><td>${D.down?fmt(D.down,1)+' h':'—'}</td><td>${D.cost?naira(D.cost):'—'}</td></tr>`:''}</tbody></table></div>
+  <details class="form-card" style="margin-top:14px;" ${D.roadRecs.length?'open':''}><summary>Check roadside vs workshop (${D.roadRecs.length} counted as roadside breakdowns)</summary>
+   <div class="dim small" style="margin:8px 0;line-height:1.6;">The breakdown rate counts <b>roadside</b> breakdowns only; the repair rate counts <b>workshop</b> repairs. Entries logged without choosing “where” were counted as roadside. Mark the ones that were repaired in the workshop or yard.</div>
+   ${D.roadRecs.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck</th><th>What</th><th>Where chosen?</th><th></th></tr></thead><tbody>${roadRows}</tbody></table></div><div class="form-actions" style="margin-top:10px;"><button class="btn primary" data-rr-kindall="1">Mark all ${D.roadRecs.length} as workshop repairs</button><span class="dim small">${D.roadRecs.length>40?'Only the first 40 are listed; the button changes all of them.':''}</span></div>`:'<div class="dim small">Nothing counted as roadside in this period.</div>'}</details>`;
+}
+async function rrSetKind(items,kind){
+  try{
+    const live=[], byYm={}; items.forEach(([id,date])=>{ if(date.slice(0,7)<curYm()) (byYm[date.slice(0,7)]=byYm[date.slice(0,7)]||[]).push(id); else live.push(id); });
+    for(const ym of Object.keys(byYm)){ const ids=new Set(byYm[ym]); await archPatch(ym,d=>{ let n=0; (d.maintenance||[]).forEach(r=>{ if(ids.has(r.id)){ r.kind=kind; n++; } }); return n; }); }
+    if(live.length){ const s=new Set(live); STATE.data.maintenance.forEach(r=>{ if(s.has(r.id)) r.kind=kind; }); await persist('maintenance'); }
+    showToast('Updated '+items.length+' repair'+(items.length===1?'':'s')+'.');
+  }catch(e){ console.error(e); showToast('Stopped: '+(e&&e.message||e)); }
+  render();
+}
+function rrCsv(){
+  const D=rrCompute(STATE.rrPeriod), q=v=>'"'+String(v).replace(/"/g,'""')+'"';
+  const rows=[['Truck','Repairs','Repeat repairs','Categories','Highest category','Roadside','Workshop','Downtime h','Cost']].concat(D.trucks.map(t=>{ const top=Object.entries(t.comps).sort((a,b)=>b[1]-a[1]); return [vehicleLabel(t.vid),t.n,t.rep,top.map(([c,n])=>c+' x'+n).join('; '),top[0][0],t.road,t.shop,Math.round(t.down*10)/10,t.cost]; }));
+  triggerDownload(new Blob([rows.map(r=>r.map(q).join(',')).join('\n')],{type:'text/csv'}),'FleetDesk-repairs-'+D.R.start+'.csv');
+}
+const _rmp10=renderMaintenancePage;
+renderMaintenancePage=function(){ if(STATE.maintView==='repairs') return maintTopbar('Repairs on each truck, repeat repairs, repair categories and the most repaired trucks.')+maintViewTabs()+renderRepairsReport(); return _rmp10(); };
+const _mwm10=maintWeekMetrics; maintWeekMetrics=function(start,H,P,endOpt){ const end=endOpt||addDays(start,6); return withArch(start,end,()=>_mwm10(start,H,P,endOpt)); };
+
+/* ---------- 6. best / worst drivers of a closed month are worked out from the month folder ---------- */
+function monthRank(ym){
+  const R={start:ym+'-01',end:monthEndOf(ym+'-01')}, tgt=J_TRUCK_TARGET.month;
+  return withArch(R.start,R.end,()=>{ const B=bestDriversData(R), L=B.list.filter(x=>x.trips>0).map(x=>Object.assign({},x,{score:obScore(x,tgt),pctT:tgt?Math.round(x.trips/tgt*100):null}));
+    const top=L.slice().sort((a,b)=>b.score-a.score||b.trips-a.trips||a.viol-b.viol).slice(0,3), names=new Set(top.map(x=>x.name));
+    const worst=L.filter(x=>!names.has(x.name)).sort((a,b)=>a.score-b.score||b.viol-a.viol||a.trips-b.trips).slice(0,3);
+    const cut=x=>({name:x.name,trips:x.trips,viol:x.viol,bd:x.bd||0,score:x.score,pctT:x.pctT,why:(x.why||[]).slice(0,3)}); return {top:top.map(cut),worst:worst.map(cut)}; });
+}
+function refreshFinal(){ try{ (STATE.data.monthIndex||[]).forEach(m=>{ if(m.ym<curYm()&&STATE.archCache[m.ym]&&!m._fresh){ const r=monthRank(m.ym); m.top3=r.top; m.worst3=r.worst; m._fresh=1; } }); }catch(e){ console.error('refreshFinal',e); } }
+const _rob10=renderOverallBest; renderOverallBest=function(){ archLoadAll(); refreshFinal(); return _rob10(); };
+
+/* ---------- 7. safety is actioned by the Safety Manager ---------- */
+const SAFETY_RE=/incident|safety|violation|speeding|off[- ]route|alcohol|deviation|wheel[- ]off|hsse|\bppe\b|near[- ]miss|brake defect|critical brake/i;
+const _pa10=pfAlerts; pfAlerts=function(){ return _pa10().map(a=>{ if(SAFETY_RE.test((a.title||'')+' '+(a.detail||'')+' '+(a.key||''))) a.owner='Safety Manager'; return a; }); };
+const _ai10=apprItems; apprItems=function(){ return _ai10().map(i=>{ if(i.kind==='Failed alcohol test'||i.kind==='Restricted use') i.roles=['Safety Manager'].concat(i.roles.filter(r=>r!=='Safety Manager')); return i; }); };
+async function safetyMigrate(){
+  try{
+    if(!GAS_CONFIGURED||STATE.loading||STATE.safMig) return; STATE.safMig=1; if((STATE.data.kpiCfg||[]).some(x=>x.key==='safetyOwnerMigrated')) return;
+    let n=0; (STATE.data.actions||[]).forEach(a=>{ if(a.owner!=='Safety Manager'&&SAFETY_RE.test(String(a.title||''))){ a.owner='Safety Manager'; n++; } });
+    if(n) await persist('actions');
+    try{ for(const P of ['lastweek','lastmonth']){ for(const k of pfKpis(P)){ if(SAFETY_RE.test(k.label||'')&&!((pfCfg(k.id)||{}).owner)) await pfSetCfg(k.id,{owner:'Safety Manager'}); } } }catch(e){}
+    await pfSetCfg('safetyOwnerMigrated',{at:todayStr(),moved:n});
+  }catch(e){ console.error('safetyMigrate',e); }
+}
+
+/* ---------- 8. summary: every card and line opens the place where the issue is ---------- */
+const SUM_KPI_GO=[
+  [/breakdown|repair rate|repair time|mttr/i,{tab:'maintenance',maintView:'repairs',rrPeriod:'lastweek'}],[/repair|risk/i,{tab:'maintenance',maintView:'repairs',rrPeriod:'lastweek'}],[/predictive|service/i,{tab:'maintenance',maintView:'predictive'}],[/inspected|inspection/i,{tab:'maintenance',maintView:'inspections'}],[/pm compliance|toolbox/i,{tab:'maintenance',maintView:'ops'}],
+  [/incident|near.?miss/i,{tab:'safety',safetyView:'kpi'}],[/deviation|violation|hours/i,{tab:'journey'}],[/compliance|defect/i,{tab:'inspections'}],[/trips|tonnage|turnaround|transit|load/i,{tab:'transport'}]];
+const SUM_DEPT={'Transport Operations':'transport','Journey Management':'journey','Vehicle Inspections':'inspections','Safety (HSE)':'safety','Maintenance':'maintenance'};
+function sumRecGo(dept,text){
+  const d=String(dept||''), t=String(text||'').replace(/<[^>]+>/g,'');
+  if(/^Maintenance/i.test(d)){ if(/repeat|chronic/i.test(t)) return {tab:'maintenance',maintView:'repairs',rrPeriod:'lastweek'}; if(/overdue|approaching|service/i.test(t)) return {tab:'maintenance',maintView:'predictive'}; if(/risk|critical/i.test(t)) return {tab:'maintenance',maintView:'risk'}; return {tab:'maintenance',maintView:'repairs',rrPeriod:'lastweek'}; }
+  if(/^Journey/i.test(d)) return {tab:'journey'}; if(/^Inspection/i.test(d)) return {tab:'inspections'}; if(/^Safety/i.test(d)) return {tab:'safety',safetyView:'kpi'}; if(/^Transport/i.test(d)) return {tab:'transport'}; if(/^Port/i.test(d)) return {tab:'port'};
+  return null;
+}
+function sumGo(g){ if(!g) return; STATE.moreOpen=false; STATE.tab=g.tab; if(g.maintView) STATE.maintView=g.maintView; if(g.rrPeriod) STATE.rrPeriod=g.rrPeriod; if(g.safetyView) STATE.safetyView=g.safetyView; try{ if(STATE.periodByDept&&STATE.periodByDept[g.tab]!==undefined) STATE.periodByDept[g.tab]='lastweek'; }catch(e){} window.scrollTo(0,0); render(); }
+function sumWire(){
+  const root=document.getElementById('app')||document.body; if(STATE.tab!=='summary') return;
+  let dept=null; root.querySelectorAll('.section-title, .card.kpi, .rec-item').forEach(el=>{
+    if(el.classList.contains('section-title')){ const sp=el.querySelector('span'); dept=SUM_DEPT[(sp&&sp.textContent||'').trim()]||null; return; }
+    let g=null; if(el.classList.contains('rec-item')){ const dp=el.querySelector('.dept'), tx=el.querySelector('.txt'); g=sumRecGo(dp&&dp.textContent,tx&&tx.textContent); }
+    else if(dept){ const lb=(el.querySelector('.label span')||{}).textContent||''; g={tab:dept}; if(dept==='maintenance'){ const m=SUM_KPI_GO.find(x=>x[0].test(lb)); if(m) g=m[1]; } else if(dept==='safety') g={tab:'safety',safetyView:'kpi'}; }
+    if(!g||el.getAttribute('data-sumgo')) return; el.setAttribute('data-sumgo','1'); el.style.cursor='pointer'; el.title='Open where this is';
+    el.addEventListener('click',ev=>{ if(ev.target.closest('button,a,[data-goto]')) return; sumGo(g); });
+  });
+}
+const _rs11=renderSummary; renderSummary=function(){ return _rs11().replace('<div class="section-title"><span>What needs attention</span>','<div class="section-title"><span>What needs attention — tap a line to open it</span>'); };
+
+/* ---------- 9. port files: add a new client ---------- */
+function registerPortClients(){ (STATE.data.portClientsX||[]).forEach(c=>{ if(!c||!c.name) return; if(PORT_CLIENTS.indexOf(c.name)<0) PORT_CLIENTS.push(c.name); PORT_PREFIX[c.name]=c.prefix||''; if(c.export) PORT_EXPORT.add(c.name); }); }
+function portNewClientModal(){
+  if(!STATE.pfNewClient) return '';
+  return `<div class="modal-bg" data-pfnc-close="1"><div class="modal" style="max-width:520px;" onclick="event.stopPropagation()"><h3>Add a new client</h3>
+   <form id="pfnc-form"><div class="form-grid"><div style="grid-column:1/-1"><label>Client name</label><input type="text" name="name" required placeholder="e.g. DANGOTE"></div>
+   <div><label>File reference prefix</label><input type="text" name="prefix" placeholder="e.g. DNG (files become DNG 001)"></div>
+   <div><label>Type of files</label><select name="kind"><option value="std">Import / clearing</option><option value="exp">Export (containers)</option></select></div></div>
+   <div class="dim small" style="margin-top:8px;">The client appears on the Port Files board and in the add-file form straight away.</div>
+   <div class="form-actions"><button type="submit" class="btn primary">Add client</button><button type="button" class="btn ghost" data-pfnc-close="1">Cancel</button></div></form></div></div>`;
+}
+const _rpp10=renderPortPage;
+renderPortPage=function(){
+  let h=_rpp10();
+  h=h.replace('</div><div class="board">','<button type="button" class="pf-chip" data-pf-newclient="1">＋ New client</button></div><div class="board">');
+  h=h.replace(/(id="pf-addclient">[\s\S]*?<\/select>)/,'$1<button type="button" class="btn small" data-pf-newclient="1" style="margin-top:6px;">＋ New client</button>');
+  return h+portNewClientModal();
+};
+
+/* ---------- 10. every uploaded sheet or report is kept in the app ---------- */
+const VAULT_MAX=1.2*1024*1024;
+function vaultKind(t){ const d=Object.keys(t.dataset||{}).join(' ')+' '+(t.id||''); return /hsse/i.test(d)?'HSSE report':/bulk/i.test(d)?'Transport / route-tab sheet':/cng/i.test(d)?'CNG fill sheet':/jb|journey/i.test(d)?'Journey trips sheet':/mix/i.test(d)?'MiX report':'Upload'; }
+async function vaultStore(file,src){
+  try{
+    if(!file||!GAS_CONFIGURED||file.size>VAULT_MAX||/^image\//.test(file.type||'')) return;
+    const L=STATE.data.storedFiles||(STATE.data.storedFiles=[]); if(L.some(x=>x.name===file.name&&x.size===file.size&&x.mod===file.lastModified)) return;
+    const buf=new Uint8Array(await file.arrayBuffer()); let bin=''; for(let i=0;i<buf.length;i+=0x8000) bin+=String.fromCharCode.apply(null,buf.subarray(i,i+0x8000));
+    const id=uid(); await gasSetChunked('vms:file:'+id,btoa(bin));
+    L.push({id,name:file.name,size:file.size,mod:file.lastModified,type:file.type||'',src,at:new Date().toISOString(),by:(typeof wsWho==='function'?wsWho():'')}); await persist('storedFiles');
+  }catch(e){ console.error('vaultStore',e); }
+}
+document.addEventListener('change',e=>{ const t=e.target; if(t&&t.tagName==='INPUT'&&t.type==='file'&&t.files&&t.files[0]&&!/pod|photo|image/i.test(Object.keys(t.dataset||{}).join(' ')+t.id)){ const f=t.files[0], s=vaultKind(t); vaultStore(f,s); } },true);
+function vaultView(){
+  const L=(STATE.data.storedFiles||[]).slice().sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  return `<div class="dim small" style="margin-bottom:10px;line-height:1.6;">Every spreadsheet or report you upload (transport sheets, HSSE reports, CNG sheets and so on) is copied here, so you always have the original file. Files over 1 MB and photos are not kept.</div>
+  <div class="table-wrap"><table><thead><tr><th>File</th><th>What it was</th><th>Uploaded</th><th>By</th><th>Size</th><th></th></tr></thead><tbody>${L.length?L.map(f=>`<tr><td style="white-space:normal;"><b>${esc(f.name)}</b></td><td>${esc(f.src||'')}</td><td>${esc(fmtDate((f.at||'').slice(0,10)))} ${esc((f.at||'').slice(11,16))}</td><td>${esc(f.by||'')}</td><td>${f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.max(1,Math.round(f.size/1024))+' KB'}</td><td><div class="row-actions"><button class="btn small" data-vault-dl="${f.id}">Download</button><button class="btn small danger" data-vault-del="${f.id}">Delete</button></div></td></tr>`).join(''):'<tr class="empty-row"><td colspan="6">Nothing stored yet. The next file you upload will appear here.</td></tr>'}</tbody></table></div>`;
+}
+async function vaultDownload(id){
+  try{ const f=(STATE.data.storedFiles||[]).find(x=>x.id===id); if(!f) return; const got=await gasGetAllChunked(['vms:file:'+id]); const bin=atob(got['vms:file:'+id]||''); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); triggerDownload(new Blob([u],{type:f.type||'application/octet-stream'}),f.name); }catch(e){ showToast('Could not download that file.'); }
+}
+async function vaultDelete(id){ const f=(STATE.data.storedFiles||[]).find(x=>x.id===id); if(!f||!confirm('Delete “'+f.name+'” from the stored files?')) return; try{ await gasSetChunked('vms:file:'+id,''); }catch(e){} STATE.data.storedFiles=STATE.data.storedFiles.filter(x=>x.id!==id); await persist('storedFiles'); }
+
+/* ---------- events ---------- */
+function pAttach(){
+  const q=(sel,fn)=>document.querySelectorAll(sel).forEach(fn);
+  q('[data-rr-period]',e=>e.addEventListener('click',()=>{ STATE.rrPeriod=e.getAttribute('data-rr-period'); render(); }));
+  q('[data-rr-kind]',e=>e.addEventListener('click',()=>{ const [id,date,kind]=e.getAttribute('data-rr-kind').split('|'); rrSetKind([[id,date]],kind); }));
+  q('[data-rr-kindall]',e=>e.addEventListener('click',()=>{ const D=rrCompute(STATE.rrPeriod); if(!D.roadRecs.length||!confirm('Mark all '+D.roadRecs.length+' roadside entries in this period as workshop repairs?')) return; rrSetKind(D.roadRecs.map(r=>[r.id,r.date]),'workshop'); }));
+  q('[data-rr-csv]',e=>e.addEventListener('click',rrCsv));
+  q('[data-dc-clean]',e=>e.addEventListener('click',dcClean));
+  q('[data-vault-dl]',e=>e.addEventListener('click',()=>vaultDownload(e.getAttribute('data-vault-dl'))));
+  q('[data-vault-del]',e=>e.addEventListener('click',()=>vaultDelete(e.getAttribute('data-vault-del'))));
+  q('[data-pf-newclient]',e=>e.addEventListener('click',ev=>{ ev.stopPropagation(); STATE.pfNewClient={}; render(); }));
+  q('[data-pfnc-close]',e=>e.addEventListener('click',ev=>{ if(ev.target===e||e.tagName==='BUTTON'){ STATE.pfNewClient=null; render(); } }));
+  const f=document.getElementById('pfnc-form'); if(f) f.addEventListener('submit',async ev=>{
+    ev.preventDefault(); const name=String(f.elements.name.value||'').trim().toUpperCase().replace(/\s+/g,' '); if(!name) return;
+    if(PORT_CLIENTS.indexOf(name)>=0){ showToast(name+' already exists.'); return; }
+    const prefix=String(f.elements.prefix.value||'').trim().toUpperCase().replace(/\s+/g,' ');
+    STATE.data.portClientsX=(STATE.data.portClientsX||[]).concat([{id:uid(),name,prefix,export:f.elements.kind.value==='exp',at:todayStr()}]); registerPortClients();
+    STATE.pfNewClient=null; STATE.portClient=name; if(STATE.portAdd) STATE.portAdd.client=name; await persist('portClientsX'); showToast(name+' added.');
+  });
+  sumWire();
+}
+const _att11=attachEvents; attachEvents=function(){ _att11(); try{ pAttach(); }catch(e){ console.error('pAttach',e); } };
+/* a breakdown or repair must say where it was done */
+document.addEventListener('submit',e=>{ const f=e.target; if(f&&f.matches&&f.matches('form[data-log-form="maintenance"]')&&f.elements.type&&f.elements.type.value==='Breakdown'&&f.elements.kind&&!f.elements.kind.value){ e.preventDefault(); e.stopImmediatePropagation(); showToast('Choose where it happened: roadside breakdown or workshop repair.'); } },true);
+
+/* ---------- start-up ---------- */
+function p13Settle(){
+  try{ registerPortClients(); }catch(e){}
+  try{ sanitizeDowntime(STATE.data.maintenance); }catch(e){}
+  try{ Object.keys(STATE.archCache||{}).forEach(ym=>sanitizeDowntime((STATE.archCache[ym]||{}).maintenance)); }catch(e){}
+  try{ ['inspectionComplianceTarget','pmComplianceTarget','prePostPassRateTarget','checkCoverageTarget','onTimeTarget','riskAssessmentTarget'].forEach(k=>{ const v=num(STATE.targets[k]); if(v>1) STATE.targets[k]=(v<=100&&v>=50)?v/100:(k==='pmComplianceTarget'?0.95:1.0); }); if(!STATE.targets.cngFleetSize) STATE.targets.cngFleetSize=19; }catch(e){}
+}
+const _la11=loadAll; loadAll=async function(){ const r=await _la11.apply(this,arguments); p13Settle(); archLoadAll(); setTimeout(safetyMigrate,4000); return r; };
+const _al11=archLoad; archLoad=async function(ym){ const r=await _al11(ym); try{ sanitizeDowntime((STATE.archCache[ym]||{}).maintenance); }catch(e){} return r; };
+p13Settle();
 
 loadAll();
 </script>
