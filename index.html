@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.6 · 4 Nov 2026';
+const APP_VERSION='v13.7 · 4 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -9142,11 +9142,11 @@ function tcData(ym){
   return withArch(s,e,()=>{
     const raw=(STATE.data.transport||[]).filter(r=>r.date>=s&&r.date<=e), recs=dedupeTransport(raw);
     const R={}, D={}; let uploads=0, other=0;
-    recs.forEach(r=>{ const k=routeKey(r)||'other', x=R[k]||(R[k]={k,n:0,trips:0,ton:0,up:0,ot:0}); x.n++; x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); if(/^Imported from route tab/i.test(r.notes||'')){ x.up++; uploads++; } else { x.ot++; other++; }
+    recs.forEach(r=>{ const k=routeKey(r)||'other', x=R[k]||(R[k]={k,n:0,trips:0,ton:0,up:0,ot:0,d0:'',d1:''}); if(!x.d0||r.date<x.d0) x.d0=r.date; if(!x.d1||r.date>x.d1) x.d1=r.date; x.n++; x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); if(/^Imported from route tab/i.test(r.notes||'')){ x.up++; uploads++; } else { x.ot++; other++; }
       const d=D[r.date]||(D[r.date]={date:r.date,n:0,trips:0,ton:0,trucks:new Set()}); d.n++; d.trips+=num(r.tripsActual); d.ton+=num(r.tonnageActual); d.trucks.add(trKey(r)); });
     const big=recs.slice().sort((a,b)=>num(b.tonnageActual)-num(a.tonnageActual)).slice(0,8);
     const odd=recs.filter(r=>num(r.tripsActual)>0&&num(r.tonnageActual)/num(r.tripsActual)>70).length;
-    return {recs,raw:raw.length,dropped:raw.length-recs.length,R,D:Object.values(D).sort((a,b)=>a.date<b.date?-1:1),big,odd,uploads,other};
+    const lastDay=recs.reduce((m,r)=>r.date>m?r.date:m,''); return {recs,raw:raw.length,dropped:raw.length-recs.length,lastDay,R,D:Object.values(D).sort((a,b)=>a.date<b.date?-1:1),big,odd,uploads,other};
   });
 }
 function tcView(){
@@ -9157,11 +9157,11 @@ function tcView(){
   const fig=(pfCfg('tonCheck:'+ym)||{}), order=['clinker','itori_sagamu','gypsum_ewekoro','gypsum_sagamu','gypsum_adumbu','gypsum_adumbu_sagamu','east','other'].filter(k=>A.R[k]||fig[k]!==undefined||['clinker','itori_sagamu','gypsum_ewekoro','gypsum_sagamu','gypsum_adumbu'].indexOf(k)>=0);
   const inp=(k,v)=>`<input type="number" step="0.01" data-tc-fig="${k}" value="${v===undefined||v===null?'':v}" placeholder="type yours" style="width:130px;">`;
   const diff=(a,b)=>{ if(b===undefined||b===null||b==='') return '<span class="dim">—</span>'; const d=Math.round((a-num(b))*100)/100; return Math.abs(d)<0.5?wsTag('matches','green'):`<span class="tag ${d>0?'red':'amber'}">${d>0?'+':''}${fmt(d,2)}</span>`; };
-  let sT=0,sM=0,sY=0; const rows=order.map(k=>{ const x=A.R[k]||{n:0,trips:0,ton:0,up:0,ot:0}; sT+=x.trips; sM+=x.ton; if(fig[k]!==undefined&&fig[k]!=='') sY+=num(fig[k]);
-    return `<tr><td><b>${esc(TC_LABEL[k]||k)}</b></td><td>${x.n}</td><td>${x.up} / ${x.ot}</td><td>${fmt(x.trips)}</td><td><b>${fmt(x.ton,2)}</b></td><td>${inp(k,fig[k])}</td><td>${diff(x.ton,fig[k])}</td></tr>`; }).join('');
-  const rrow=`<tr><td><b>RAIL (${fmt(railW)} wagons × ${RAIL_T})</b></td><td>${rails.length}</td><td>—</td><td>—</td><td><b>${fmt(railMT,2)}</b></td><td>${inp('rail',fig.rail)}</td><td>${diff(railMT,fig.rail)}</td></tr>`;
+  let sT=0,sM=0,sY=0; const rows=order.map(k=>{ const x=A.R[k]||{n:0,trips:0,ton:0,up:0,ot:0,d0:'',d1:''}; sT+=x.trips; sM+=x.ton; if(fig[k]!==undefined&&fig[k]!=='') sY+=num(fig[k]);
+    return `<tr><td><b>${esc(TC_LABEL[k]||k)}</b></td><td>${x.n}</td><td>${x.up} / ${x.ot}</td><td>${x.d1?esc(fmtDate(x.d0)+' → '+fmtDate(x.d1)):'—'}</td><td>${fmt(x.trips)}</td><td><b>${fmt(x.ton,2)}</b></td><td>${inp(k,fig[k])}</td><td>${diff(x.ton,fig[k])}</td></tr>`; }).join('');
+  const rrow=`<tr><td><b>RAIL (${fmt(railW)} wagons × ${RAIL_T})</b></td><td>${rails.length}</td><td>—</td><td>${rails.length?esc(fmtDate(rails.map(x=>x.date).sort()[0])):'—'}</td><td>—</td><td><b>${fmt(railMT,2)}</b></td><td>${inp('rail',fig.rail)}</td><td>${diff(railMT,fig.rail)}</td></tr>`;
   sY+=(fig.rail!==undefined&&fig.rail!=='')?num(fig.rail):0;
-  const totalRow=`<tr style="font-weight:700;"><td>TOTAL tonnage moved</td><td>${A.recs.length}</td><td>${A.uploads} / ${A.other}</td><td>${fmt(sT)}</td><td>${fmt(sM+railMT,2)}</td><td>${sY?fmt(sY,2):'—'}</td><td>${sY?diff(sM+railMT,sY):'—'}</td></tr>`;
+  const totalRow=`<tr style="font-weight:700;"><td>TOTAL tonnage moved</td><td>${A.recs.length}</td><td>${A.uploads} / ${A.other}</td><td>${A.lastDay?'last entry '+esc(fmtDate(A.lastDay)):'—'}</td><td>${fmt(sT)}</td><td>${fmt(sM+railMT,2)}</td><td>${sY?fmt(sY,2):'—'}</td><td>${sY?diff(sM+railMT,sY):'—'}</td></tr>`;
   const veh=(STATE.data.vehicles||[]).length||26, ceil=veh*2;
   const dayRows=A.D.map(d=>{ const bad=d.trips>ceil; return `<tr><td>${esc(fmtDate(d.date))}</td><td>${d.n}</td><td>${d.trucks.size}</td><td>${fmt(d.trips)}</td><td>${fmt(d.ton,1)}</td><td>${bad?wsTag('more than the fleet can do','red'):(d.trips>d.trucks.size*2?wsTag('trucks over 2 trips','amber'):'')}</td></tr>`; }).join('');
   const bigRows=A.big.map(r=>`<tr><td>${esc(fmtDate(r.date))}</td><td>${esc(vehicleLabel(r.vehicleId)||r.regNoText||'')}</td><td>${esc(TC_LABEL[routeKey(r)]||routeKey(r))}</td><td>${fmt(num(r.tripsActual))}</td><td>${fmt(num(r.tonnageActual),2)}</td></tr>`).join('');
@@ -9169,7 +9169,8 @@ function tcView(){
   return `<div class="section-title" style="margin-top:0;"><span>Tonnage check — compare with your own totals</span><div class="line"></div></div>
   <div class="dim small" style="margin-bottom:10px;line-height:1.6;">Pick the month, type your own total for each route, and the last column shows the difference from what the app holds. “Uploads / other” counts entries that came from a route-tab upload against everything else (typed, or from another sheet) — if the same trips arrived both ways they are counted twice. Exact copies are already left out${A.dropped?` (<b>${A.dropped}</b> removed here)`:''}.</div>
   <div class="tabs" style="margin-bottom:12px;">${ms.slice(0,6).map(m=>`<button data-tc-ym="${m}" class="${m===ym?'active':''}">${esc(mcLabel(m))}</button>`).join('')}</div>
-  <div class="table-wrap"><table><thead><tr><th>Route</th><th>Entries</th><th>Uploads / other</th><th>Trips</th><th>Tonnage in the app (MT)</th><th>Your figure (MT)</th><th>Difference</th></tr></thead><tbody>${rows}${rrow}${totalRow}</tbody></table></div>
+  <div class="table-wrap"><table><thead><tr><th>Route</th><th>Entries</th><th>Uploads / other</th><th>Dates covered</th><th>Trips</th><th>Tonnage in the app (MT)</th><th>Your figure (MT)</th><th>Difference</th></tr></thead><tbody>${rows}${rrow}${totalRow}</tbody></table></div>
+  ${(A.lastDay&&A.lastDay<addDays(rg.end,-2)&&rg.end<todayStr())?`<div class="note warn" style="margin:10px 0;line-height:1.6;"><b>Nothing is saved after ${esc(fmtDate(A.lastDay))}.</b> The days from then to ${esc(fmtDate(rg.end))} are missing, so the month total is short by those days. Upload the sheet again — the upload now adds only the dates that are missing.</div>`:''}
   ${A.odd?`<div class="note warn" style="margin:10px 0;">${A.odd} entr${A.odd===1?'y has':'ies have'} more than 70 MT per trip — a typed total or a wrong column.</div>`:''}
   <div class="section-title"><span>Rail wagons</span><div class="line"></div></div>
   <form id="tc-rail-form" class="form-card" style="margin-bottom:10px;"><div class="form-grid"><div><label>Date</label><input type="date" name="date" value="${esc(rg.end<todayStr()?rg.end:todayStr())}" required></div><div><label>Wagons</label><input type="number" name="wagons" min="1" required placeholder="322"></div><div><label>MT per wagon</label><input type="number" name="perWagon" value="${RAIL_T}" step="0.1"></div><div><label>Note</label><input type="text" name="note" placeholder="optional"></div></div><div class="form-actions"><button class="btn primary" type="submit">Add rail wagons</button><span class="dim small">Rail counts in tonnage moved and the monthly tonnage breakdown, never in truck trips.</span></div></form>
