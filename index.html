@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.8 · 4 Nov 2026';
+const APP_VERSION='v13.9 · 4 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -5680,7 +5680,7 @@ function tabLayout(sp){
   idx.n=heads.length; return {heads,idx};
 }
 function colL(i){ return xlCol(i); }
-function vesselNames(){ const s={}; (STATE.data.rail||[]).forEach(r=>{ const v=String(r.vessel||'MV OSLO').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); (STATE.data.transport||[]).forEach(r=>{ const v=String(r.vessel||'').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); return Object.values(s).sort(); }
+function vesselNames(){ const s={}; (RAIL_ON?(STATE.data.rail||[]):[]).forEach(r=>{ const v=String(r.vessel||'MV OSLO').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); (STATE.data.transport||[]).forEach(r=>{ const v=String(r.vessel||'').trim(); if(v&&!s[v.toUpperCase()]) s[v.toUpperCase()]=v; }); return Object.values(s).sort(); }
 function vesselDatalist(){ return `<datalist id="dl-vessels">${vesselNames().map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`; }
 function uniqTrucks(){ const s={}; (STATE.data.vehicles||[]).forEach(v=>{ const k=normReg(v.regNo); if(k&&!s[k]) s[k]=v.regNo; }); return Object.values(s).sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true})); }
 
@@ -5819,7 +5819,7 @@ function matRouteCard(){
   const gy=T[4].find(x=>x.kind==='gypsum');
   return `<div class="section-sub" style="margin:18px 0 8px;">Tonnage by material &amp; route — weekly and monthly</div>
   <div class="table-wrap"><table><thead><tr><th>Material / route</th>${heads}</tr></thead><tbody>${T[0].map((x,i)=>{ const st=x.kind==='gypsum'?' style="font-weight:700;background:rgba(232,163,61,.12);"':(x.kind==='total'?' style="font-weight:700;"':''); return `<tr${st}><td style="white-space:normal;">${esc(x.label)}</td>${T.map(t=>`<td>${cell(t[i])}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>
-  <div class="card" style="margin:10px 0 4px;border-left:3px solid var(--amber);"><span class="dim small">Total gypsum delivered so far</span><div style="font-size:22px;font-weight:700;">${fmt(gy.ton,1)} MT <span class="dim small" style="font-weight:400;">· ${fmt(gy.trips)} trip${gy.trips===1?'':'s'} across the four gypsum routes, plus rail</span></div></div>
+  <div class="card" style="margin:10px 0 4px;border-left:3px solid var(--amber);"><span class="dim small">Total gypsum delivered so far</span><div style="font-size:22px;font-weight:700;">${fmt(gy.ton,1)} MT <span class="dim small" style="font-weight:400;">· ${fmt(gy.trips)} trip${gy.trips===1?'':'s'} across the four gypsum routes${RAIL_ON?', plus rail':''}</span></div></div>
   <div class="dim small" style="margin:6px 0 14px;">Weeks run Monday–Sunday. “This month” is the calendar month so far; the filters above do not apply to this table.</div>`;
 }
 function destOf(r){ return String(r.destination||'').trim()||((String(r.notes||'').match(/ — to (.+)$/)||[])[1]||'').trim(); }
@@ -5834,10 +5834,10 @@ const GYP_ROUTE_KEYS=['gypsum_adumbu','gypsum_adumbu_sagamu','gypsum_ewekoro','g
 function vesselCard(){
   const G=(STATE.data.transport||[]).filter(r=>GYP_ROUTE_KEYS.indexOf(r.route)>=0); if(!G.length&&!vesselNames().length) return '';
   const by={}; G.forEach(r=>{ const v=String(r.vessel||'').trim(); const k=v?v.toUpperCase():'~'; const x=by[k]||(by[k]={v:v||'No vessel recorded',none:!v,trips:0,ton:0,R:{},first:r.date,last:r.date}); x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); x.R[r.route]=(x.R[r.route]||0)+num(r.tonnageActual); if(r.date<x.first) x.first=r.date; if(r.date>x.last) x.last=r.date; });
-  (STATE.data.rail||[]).forEach(x=>{ const v=String(x.vessel||'MV OSLO').trim(), k=v.toUpperCase(), t=num(x.wagons)*(num(x.perWagon)||RAIL_T); const o=by[k]||(by[k]={v,none:false,trips:0,ton:0,R:{},first:x.date,last:x.date}); o.ton+=t; o.R.rail=(o.R.rail||0)+t; if(x.date<o.first) o.first=x.date; if(x.date>o.last) o.last=x.date; });
+  (RAIL_ON?(STATE.data.rail||[]):[]).forEach(x=>{ const v=String(x.vessel||'MV OSLO').trim(), k=v.toUpperCase(), t=num(x.wagons)*(num(x.perWagon)||RAIL_T); const o=by[k]||(by[k]={v,none:false,trips:0,ton:0,R:{},first:x.date,last:x.date}); o.ton+=t; o.R.rail=(o.R.rail||0)+t; if(x.date<o.first) o.first=x.date; if(x.date>o.last) o.last=x.date; });
   const rows=Object.values(by).sort((a,b)=>(a.none?1:0)-(b.none?1:0)||b.ton-a.ton);
-  return `<div class="section-sub" style="margin:18px 0 8px;">Gypsum delivered by vessel — all time, trucks and rail</div>
-  <div class="table-wrap"><table><thead><tr><th>Vessel</th><th>Adumbu → Ewekoro</th><th>Adumbu → Sagamu</th><th>Apapa → Ewekoro</th><th>Apapa → Sagamu</th><th>Rail</th><th>Total (MT)</th><th>Trips</th><th>First – last delivery</th></tr></thead><tbody>${rows.map(x=>`<tr${x.none?' style="opacity:.8;"':''}><td><b>${esc(x.v)}</b></td>${GYP_ROUTE_KEYS.map(k=>`<td>${x.R[k]?fmt(x.R[k],1):'<span class="dim">—</span>'}</td>`).join('')}<td>${x.R.rail?fmt(x.R.rail,1):'<span class="dim">—</span>'}</td><td><b>${fmt(x.ton,1)}</b></td><td>${fmt(x.trips)}</td><td>${esc(fmtDate(x.first)+(x.last!==x.first?' – '+fmtDate(x.last):''))}</td></tr>`).join('')}</tbody></table></div>
+  return `<div class="section-sub" style="margin:18px 0 8px;">Gypsum delivered by vessel${RAIL_ON?' — all time, trucks and rail':''}</div>
+  <div class="table-wrap"><table><thead><tr><th>Vessel</th><th>Adumbu → Ewekoro</th><th>Adumbu → Sagamu</th><th>Apapa → Ewekoro</th><th>Apapa → Sagamu</th>${RAIL_ON?'<th>Rail</th>':''}<th>Total (MT)</th><th>Trips</th><th>First – last delivery</th></tr></thead><tbody>${rows.map(x=>`<tr${x.none?' style="opacity:.8;"':''}><td><b>${esc(x.v)}</b></td>${GYP_ROUTE_KEYS.map(k=>`<td>${x.R[k]?fmt(x.R[k],1):'<span class="dim">—</span>'}</td>`).join('')}${RAIL_ON?`<td>${x.R.rail?fmt(x.R.rail,1):'<span class="dim">—</span>'}</td>`:''}<td><b>${fmt(x.ton,1)}</b></td><td>${fmt(x.trips)}</td><td>${esc(fmtDate(x.first)+(x.last!==x.first?' – '+fmtDate(x.last):''))}</td></tr>`).join('')}</tbody></table></div>
   <div class="dim small" style="margin:6px 0 14px;">Type the vessel name in the “Vessel Name” field when you log a gypsum delivery, or in the Vessel Name column of the route tabs. Entries without one are grouped under “No vessel recorded” — edit them to link them to a vessel.</div>`;
 }
 
@@ -9124,7 +9124,8 @@ var TB_RANGE=null;
 const RAIL_T=60;
 STATE.tcYm=STATE.tcYm||null;
 function routeKey(r){ return (r&&r.route==='clinker'&&/itori/i.test(String(r.notes||'')+' '+String(r.destination||'')))?'itori_sagamu':(r&&r.route); }
-function railIn(rg){ return (STATE.data.rail||[]).filter(x=>x&&x.date>=rg.start&&x.date<=rg.end); }
+var RAIL_ON=false;   // rail is switched off until its figures are right
+function railIn(rg){ if(!RAIL_ON) return []; return (STATE.data.rail||[]).filter(x=>x&&x.date>=rg.start&&x.date<=rg.end); }
 function railTon(rg){ return railIn(rg).reduce((s,x)=>s+num(x.wagons)*(num(x.perWagon)||RAIL_T),0); }
 function railTonCtx(w){ const rg=TB_RANGE&&TB_RANGE[w]; return rg?railTon(rg):0; }
 function railWagonsCtx(){ const rg=TB_RANGE&&TB_RANGE.r; return rg?railIn(rg).reduce((s,x)=>s+num(x.wagons),0):0; }
@@ -9161,8 +9162,8 @@ function tcView(){
   const diff=(a,b)=>{ if(b===undefined||b===null||b==='') return '<span class="dim">—</span>'; const d=Math.round((a-num(b))*100)/100; return Math.abs(d)<0.5?wsTag('matches','green'):`<span class="tag ${d>0?'red':'amber'}">${d>0?'+':''}${fmt(d,2)}</span>`; };
   let sT=0,sM=0,sY=0; const rows=order.map(k=>{ const x=A.R[k]||{n:0,trips:0,ton:0,up:0,ot:0,d0:'',d1:''}; sT+=x.trips; sM+=x.ton; if(fig[k]!==undefined&&fig[k]!=='') sY+=num(fig[k]);
     return `<tr><td><b>${esc(TC_LABEL[k]||k)}</b></td><td>${x.n}</td><td>${x.up} / ${x.ot}</td><td>${x.d1?esc(fmtDate(x.d0)+' → '+fmtDate(x.d1)):'—'}</td><td>${fmt(x.trips)}</td><td><b>${fmt(x.ton,2)}</b></td><td>${inp(k,fig[k])}</td><td>${diff(x.ton,fig[k])}</td></tr>`; }).join('');
-  const rrow=`<tr><td><b>RAIL — gypsum, MV OSLO (${fmt(railW)} wagons × ${RAIL_T})</b></td><td>${rails.length}</td><td>—</td><td>${rails.length?esc(fmtDate(rails.map(x=>x.date).sort()[0])):'—'}</td><td>—</td><td><b>${fmt(railMT,2)}</b></td><td>${inp('rail',fig.rail)}</td><td>${diff(railMT,fig.rail)}</td></tr>`;
-  sY+=(fig.rail!==undefined&&fig.rail!=='')?num(fig.rail):0;
+  const rrow=!RAIL_ON?'':`<tr><td><b>RAIL — gypsum, MV OSLO (${fmt(railW)} wagons × ${RAIL_T})</b></td><td>${rails.length}</td><td>—</td><td>${rails.length?esc(fmtDate(rails.map(x=>x.date).sort()[0])):'—'}</td><td>—</td><td><b>${fmt(railMT,2)}</b></td><td>${inp('rail',fig.rail)}</td><td>${diff(railMT,fig.rail)}</td></tr>`;
+  sY+=(RAIL_ON&&fig.rail!==undefined&&fig.rail!=='')?num(fig.rail):0;
   const totalRow=`<tr style="font-weight:700;"><td>TOTAL tonnage moved</td><td>${A.recs.length}</td><td>${A.uploads} / ${A.other}</td><td>${A.lastDay?'last entry '+esc(fmtDate(A.lastDay)):'—'}</td><td>${fmt(sT)}</td><td>${fmt(sM+railMT,2)}</td><td>${sY?fmt(sY,2):'—'}</td><td>${sY?diff(sM+railMT,sY):'—'}</td></tr>`;
   const veh=(STATE.data.vehicles||[]).length||26, ceil=veh*2;
   const dayRows=A.D.map(d=>{ const bad=d.trips>ceil; return `<tr><td>${esc(fmtDate(d.date))}</td><td>${d.n}</td><td>${d.trucks.size}</td><td>${fmt(d.trips)}</td><td>${fmt(d.ton,1)}</td><td>${bad?wsTag('more than the fleet can do','red'):(d.trips>d.trucks.size*2?wsTag('trucks over 2 trips','amber'):'')}</td></tr>`; }).join('');
@@ -9174,9 +9175,9 @@ function tcView(){
   <div class="table-wrap"><table><thead><tr><th>Route</th><th>Entries</th><th>Uploads / other</th><th>Dates covered</th><th>Trips</th><th>Tonnage in the app (MT)</th><th>Your figure (MT)</th><th>Difference</th></tr></thead><tbody>${rows}${rrow}${totalRow}</tbody></table></div>
   ${(A.lastDay&&A.lastDay<addDays(rg.end,-2)&&rg.end<todayStr())?`<div class="note warn" style="margin:10px 0;line-height:1.6;"><b>Nothing is saved after ${esc(fmtDate(A.lastDay))}.</b> The days from then to ${esc(fmtDate(rg.end))} are missing, so the month total is short by those days. Upload the sheet again — the upload now adds only the dates that are missing.</div>`:''}
   ${A.odd?`<div class="note warn" style="margin:10px 0;">${A.odd} entr${A.odd===1?'y has':'ies have'} more than 70 MT per trip — a typed total or a wrong column.</div>`:''}
-  <div class="section-title"><span>Rail wagons</span><div class="line"></div></div>
+  ${RAIL_ON?`<div class="section-title"><span>Rail wagons</span><div class="line"></div></div>
   <form id="tc-rail-form" class="form-card" style="margin-bottom:10px;"><div class="form-grid"><div><label>Date</label><input type="date" name="date" value="${esc(rg.end<todayStr()?rg.end:todayStr())}" required></div><div><label>Wagons</label><input type="number" name="wagons" min="1" required placeholder="322"></div><div><label>MT per wagon</label><input type="number" name="perWagon" value="${RAIL_T}" step="0.1"></div><div><label>Vessel (gypsum)</label><input type="text" name="vessel" list="dl-vessels" value="MV OSLO"></div><div><label>Note</label><input type="text" name="note" placeholder="optional"></div></div><div class="form-actions"><button class="btn primary" type="submit">Add rail wagons</button><span class="dim small">Rail is gypsum for its vessel: it counts in tonnage moved, in the gypsum totals (so far and by month) and under the vessel — never in truck trips.</span></div></form>
-  ${rails.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Wagons</th><th>Per wagon</th><th>Tonnage</th><th>Note</th><th></th></tr></thead><tbody>${railRows}</tbody></table></div>`:''}
+  ${rails.length?`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Wagons</th><th>Per wagon</th><th>Tonnage</th><th>Note</th><th></th></tr></thead><tbody>${railRows}</tbody></table></div>`:''}`:''}
   <div class="section-title"><span>Day by day</span><div class="line"></div></div>
   <div class="dim small" style="margin-bottom:6px;">A day is flagged when trips are more than the whole registry (${veh} trucks) could do at 2 trips each (${ceil}). Look for the days where the numbers jump.</div>
   <div class="table-wrap"><table><thead><tr><th>Date</th><th>Entries</th><th>Trucks</th><th>Trips</th><th>Tonnage (MT)</th><th></th></tr></thead><tbody>${dayRows||'<tr class="empty-row"><td colspan="6">No entries.</td></tr>'}</tbody></table></div>
@@ -9198,8 +9199,7 @@ async function qSeedOct(){
   try{
     if(!GAS_CONFIGURED||STATE.loading||STATE.qSeeded) return; STATE.qSeeded=1;
     if((STATE.data.kpiCfg||[]).some(x=>x.key==='tonCheck:2026-10')) return;
-    await pfSetCfg('tonCheck:2026-10',{clinker:1112.92,gypsum_ewekoro:2635.54,gypsum_sagamu:1005.08,gypsum_adumbu:4392.28,itori_sagamu:7323.76,rail:19320});
-    if(!railIn({start:'2026-10-01',end:'2026-10-31'}).length){ STATE.data.rail=(STATE.data.rail||[]).concat([{id:uid(),date:'2026-10-31',wagons:'322',perWagon:'60',vessel:'MV OSLO',material:'Gypsum',note:'October rail total (322 wagons x 60 MT)'}]); await persist('rail'); }
+    await pfSetCfg('tonCheck:2026-10',{clinker:1112.92,gypsum_ewekoro:2635.54,gypsum_sagamu:1005.08,gypsum_adumbu:4392.28,itori_sagamu:7323.76});
     render();
   }catch(e){ console.error('qSeedOct',e); }
 }
@@ -9257,6 +9257,92 @@ document.addEventListener('submit',e=>{ const f=e.target; if(f&&f.matches&&f.mat
 
 /* keep the upload tick-box in step after a redraw */
 const _att14=attachEvents; attachEvents=function(){ _att14(); try{ document.querySelectorAll('[data-bulk-alldates]').forEach(e=>{ e.checked=!!(STATE.bulk&&STATE.bulk.allDates); }); }catch(e){} };
+
+/* ============================================================ ws_s.js ============================================================ */
+/* ===== v13.9: rail removed (switch RAIL_ON back on later) · re-upload a finished month in full, then close it ===== */
+
+/* the rail entry and figure that were pre-filled earlier are taken out once */
+async function railCleanup(){
+  try{
+    if(!GAS_CONFIGURED||STATE.loading||STATE.rcDone) return; STATE.rcDone=1;
+    const R=STATE.data.rail||[]; const keep=R.filter(x=>!/^October rail total/i.test(String(x&&x.note||'')));
+    if(keep.length!==R.length){ STATE.data.rail=keep; await persist('rail'); }
+    const c=pfCfg('tonCheck:2026-10'); if(c&&c.rail!==undefined&&c.rail!==''){ await pfSetCfg('tonCheck:2026-10',{rail:''}); }
+    render();
+  }catch(e){ console.error('railCleanup',e); }
+}
+const _la15=loadAll; loadAll=async function(){ const r=await _la15.apply(this,arguments); setTimeout(railCleanup,3000); return r; };
+
+/* ---------- a month can be closed (locked) once its figures are right ---------- */
+const lockedYms=()=>((pfCfg('monthLock')||{}).yms)||[];
+const isLockedDate=d=>!!d&&lockedYms().indexOf(String(d).slice(0,7))>=0;
+async function setLock(ym,on){ const L=lockedYms().filter(x=>x!==ym); if(on) L.push(ym); await pfSetCfg('monthLock',{yms:L}); render(); }
+
+const _rdp15=renderDeptPage;
+renderDeptPage=function(k){
+  const h=_rdp15.apply(this,arguments); if(k!=='transport'||STATE.periodByDept.transport!=='lastmonth') return h;
+  const R=periodRange('lastmonth'), ym=R.start.slice(0,7), lab=mcLabel(ym), lk=isLockedDate(R.start);
+  const card=`<div class="card" style="margin:0 0 16px;border-left:3px solid ${lk?'var(--green)':'var(--amber)'};"><div class="flex between" style="gap:14px;flex-wrap:wrap;align-items:center;"><div style="max-width:760px;"><div style="font-weight:600;font-size:14px;">${esc(lab)} — ${lk?'<span class="tag green">Closed</span>':'<span class="tag amber">Open</span>'}</div>
+    <div class="dim small" style="margin-top:4px;line-height:1.6;">${lk?`${esc(lab)} is closed and its figures are final. Uploads and new or edited transport entries dated in ${esc(lab)} are blocked. Nothing is cleared from the screen.`:`To put ${esc(lab)} right: press <b>Upload filled template</b>, choose the complete ${esc(lab)} file (all routes), and tick <b>Replace everything saved for ${esc(lab)} with this file</b> in the preview. A copy of what was replaced is kept in Admin → Stored files. When the totals are right, close the month.`}</div></div>
+    <div>${lk?`<button class="btn" data-ml-unlock="${ym}">Reopen ${esc(lab)}</button>`:`<button class="btn primary" data-ml-lock="${ym}">Close ${esc(lab)}</button>`}</div></div></div>`;
+  const anchor='<div class="card" style="margin:0 0 16px;border-left:3px solid var(--teal);">';
+  return h.indexOf(anchor)>=0?h.replace(anchor,card+anchor):card+h;
+};
+
+/* locked months: uploads skip them, manual entries and edits are refused */
+const _pbw15=parseBulkWorkbook;
+parseBulkWorkbook=function(wb){
+  const out=_pbw15(wb);
+  try{
+    let nl=0; (out.rows||[]).forEach(r=>{ if(r.state!=='error'&&isLockedDate(r.date)){ r.state='dup'; r.dupId=null; r.locked=true; r.warns=(r.warns||[]).concat([mcLabel(r.date.slice(0,7))+' is closed — skipped']); nl++; } });
+    if(nl) out.summary=(out.summary||'')+`<div class="note warn" style="margin:0 0 10px;"><b>${nl} line${nl===1?'':'s'}</b> are dated in a closed month and will be skipped. Reopen the month first if they need to change.</div>`;
+    const yms=[...new Set((out.rows||[]).filter(r=>r.state!=='error'&&r.date).map(r=>r.date.slice(0,7)))];
+    if(yms.length===1&&!isLockedDate(yms[0]+'-01')){
+      const ym=yms[0], live=(STATE.data.transport||[]).filter(r=>r.date&&r.date.slice(0,7)===ym), ids=new Set(live.map(r=>r.id)), ex=((STATE.archCache[ym]||{}).transport||[]).filter(r=>!ids.has(r.id));
+      const have=live.concat(ex), ton=have.reduce((a,r)=>a+num(r.tonnageActual),0);
+      out.rows.forEach(r=>{ r._o={state:r.state,dupId:r.dupId,before:r.before,archDup:r.archDup}; });
+      out.summary=(out.summary||'')+`<div class="note" style="margin:0 0 10px;line-height:1.6;"><label style="display:flex;gap:8px;align-items:flex-start;text-transform:none;font-size:12.5px;"><input type="checkbox" data-bulk-replacem="${ym}" style="width:auto;margin-top:3px;"><span><b>Replace everything saved for ${esc(mcLabel(ym))} with this file.</b> The app now holds ${fmt(have.length)} entries (${fmt(ton,1)} MT) for ${esc(mcLabel(ym))}; they are removed and the file's lines are imported instead. Use this when you are uploading the complete month. A copy of the old entries is kept in Stored files.</span></label></div>`;
+    }
+  }catch(e){ console.error('locked months / replace',e); }
+  return out;
+};
+document.addEventListener('change',e=>{
+  const t=e.target; if(!t||!t.matches||!t.matches('[data-bulk-replacem]')||!STATE.bulk) return;
+  const ym=t.getAttribute('data-bulk-replacem'), on=t.checked; STATE.bulk.replaceMonth=on?ym:null;
+  (STATE.bulk.rows||[]).forEach(r=>{ if(!r._o||r.state==='error') return; if(on){ r.state='ok'; r.dupId=null; r.before=false; r.archDup=false; } else { r.state=r._o.state; r.dupId=r._o.dupId; r.before=r._o.before; r.archDup=r._o.archDup; } });
+  render();
+});
+async function vaultPutText(name,text){
+  const id=uid(); await gasSetChunked('vms:file:'+id,btoa(unescape(encodeURIComponent(text))));
+  const L=STATE.data.storedFiles||(STATE.data.storedFiles=[]); L.push({id,name,size:text.length,mod:Date.now(),type:'application/json',src:'Copy kept before replacing a month',at:new Date().toISOString(),by:(typeof wsWho==='function'?wsWho():'')}); await persist('storedFiles');
+}
+const _ib15=importBulk;
+importBulk=async function(){
+  const b=STATE.bulk, ym=b&&b.replaceMonth;
+  if(ym){
+    const inM=r=>r&&r.date&&r.date.slice(0,7)===ym, old=(STATE.data.transport||[]).filter(inM), arch=((STATE.archCache[ym]||{}).transport||[]), nNew=(b.rows||[]).filter(r=>r.state==='ok').length;
+    if(!confirm('Replace all saved '+mcLabel(ym)+' transport entries ('+old.length+' now) with the '+nNew+' lines in this file?\n\nThe old entries are copied to Stored files first.')) return;
+    try{ await vaultPutText('Transport entries replaced — '+mcLabel(ym)+'.json',JSON.stringify({ym,at:new Date().toISOString(),live:old,folder:arch})); }
+    catch(e){ console.error(e); if(!confirm('A copy of the old entries could not be saved. Replace anyway?')) return; }
+    STATE.data.transport=(STATE.data.transport||[]).filter(r=>!inM(r)); await persist('transport');
+    if((STATE.data.monthIndex||[]).some(m=>m.ym===ym)){ try{ await archLoad(ym); await archPatch(ym,d=>{ const n=(d.transport||[]).length; d.transport=[]; return n; }); }catch(e){ console.error('clear folder copy',e); } }
+    b.replaceMonth=null;
+  }
+  return _ib15.apply(this,arguments);
+};
+document.addEventListener('submit',e=>{ const f=e.target; if(f&&f.matches&&f.matches('form[data-log-form="transport"]')&&f.elements.date&&isLockedDate(f.elements.date.value)){ e.preventDefault(); e.stopImmediatePropagation(); showToast(mcLabel(f.elements.date.value.slice(0,7))+' is closed. Reopen the month to add entries.'); } },true);
+document.addEventListener('submit',e=>{ const f=e.target; if(f&&f.matches&&f.matches('form[data-edit-form]')&&STATE.editing&&STATE.editing.coll==='transport'&&f.elements.date&&isLockedDate(f.elements.date.value)){ e.preventDefault(); e.stopImmediatePropagation(); showToast('That month is closed. Reopen it to change entries.'); } },true);
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-delete^="transport:"],[data-edit^="transport:"]'); if(!b) return; const id=(b.getAttribute('data-delete')||b.getAttribute('data-edit')).split(':')[1], r=(STATE.data.transport||[]).find(x=>x.id===id); if(r&&isLockedDate(r.date)){ e.preventDefault(); e.stopImmediatePropagation(); showToast(mcLabel(r.date.slice(0,7))+' is closed. Reopen the month to change its entries.'); } },true);
+
+const _att15=attachEvents;
+attachEvents=function(){
+  _att15();
+  try{
+    document.querySelectorAll('[data-bulk-replacem]').forEach(e=>{ e.checked=!!(STATE.bulk&&STATE.bulk.replaceMonth===e.getAttribute('data-bulk-replacem')); });
+    document.querySelectorAll('[data-ml-lock]').forEach(e=>e.addEventListener('click',()=>{ const ym=e.getAttribute('data-ml-lock'); if(!wsAuth(['General Manager','MD'],'close the month')) return; if(confirm('Close '+mcLabel(ym)+'? Uploads and entries dated in it will be blocked until it is reopened.')) setLock(ym,true); }));
+    document.querySelectorAll('[data-ml-unlock]').forEach(e=>e.addEventListener('click',()=>{ const ym=e.getAttribute('data-ml-unlock'); if(!wsAuth(['General Manager','MD'],'reopen the month')) return; if(confirm('Reopen '+mcLabel(ym)+' for changes?')) setLock(ym,false); }));
+  }catch(err){ console.error('month lock',err); }
+};
 
 loadAll();
 </script>
