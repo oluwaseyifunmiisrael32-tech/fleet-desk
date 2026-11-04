@@ -1204,7 +1204,7 @@ function renderDeptPage(deptKey){
   const kpis = cfg.kpis(recs);
   const cmp = prevPeriodOf(period); let pkpis = null;
   if(cmp){ let pr = filterPeriod(STATE.data[deptKey], cmp); if(deptKey==='transport') pr = applyTransportFilters(pr); pkpis = deptKey==='safety' ? kpisSafety(pr,cmp) : cfg.kpis(pr); }
-  let allRecs = [...STATE.data[deptKey]].sort((a,b)=> (a.date<b.date?1:-1));
+  let allRecs = [...(STATE.logAll?STATE.data[deptKey]:filterPeriod(STATE.data[deptKey],period))].sort((a,b)=> (a.date<b.date?1:-1));   // the log follows the period tab; “show all months” widens it
   if(deptKey==='transport') allRecs = applyTransportFilters(allRecs);
   const kpiChart = deptKey==='transport'
     ? kpiPeriodSection(p=>{ const r=applyTransportFilters(filterPeriod(STATE.data.transport,p)); return {kpis:kpisTransport(r),hasData:r.length>0}; },'Transport entries'+(STATE.transportRoute!=='ALL'||STATE.transportMaterial!=='ALL'?' (filtered).':'.'))
@@ -1233,7 +1233,7 @@ function renderDeptPage(deptKey){
       <div class="form-actions"><button type="submit" class="btn primary">Save Entry</button><span class="dim small">Visible to the whole team instantly.</span></div>
     </form>
   </details>
-  <div class="section-title"><span>Entry Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records</span></div>
+  <div class="section-title"><span>Entry Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records${STATE.logAll?' · all months':' · '+esc(rangeText(periodRange(period)))}</span><button class="btn small" data-log-all="1">${STATE.logAll?'Show only this period':'Show all months'}</button></div>
   <div class="table-wrap"><table>
     <thead><tr>${cfg.tableCols.map(c=>`<th>${c[1]}</th>`).join('')}<th></th></tr></thead>
     <tbody>${allRecs.length? allRecs.map(r=>`<tr>${cfg.tableCols.map(c=>`<td${c[2]?' style="white-space:normal;"':''}>${transportCell(c,r)}</td>`).join('')}<td>${actionButtons(deptKey,r.id)}</td></tr>`).join('') : `<tr class="empty-row"><td colspan="${cfg.tableCols.length+1}">No entries yet — log the first one above.</td></tr>`}</tbody>
@@ -1249,7 +1249,7 @@ function renderJourneyPageCore(){
   const jcmp = prevPeriodOf(period), joverallPrev = jcmp ? kpisJourneyOverall(filterPeriod(STATE.data.journey,jcmp), jcmp) : null;
   const byRoute = kpisJourneyByRoute(recs, period);
   const byTruck = kpisJourneyByTruck(recs);
-  const allRecs = [...STATE.data.journey].sort((a,b)=> (a.date<b.date?1:-1));
+  const allRecs = [...(STATE.logAll?STATE.data.journey:filterPeriod(STATE.data.journey,period))].sort((a,b)=> (a.date<b.date?1:-1));
 
   return `
   <div class="topbar">
@@ -1302,7 +1302,7 @@ function renderJourneyPageCore(){
     </form>
   </details>
 
-  <div class="section-title"><span>Trip Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records</span></div>
+  <div class="section-title"><span>Trip Log</span><div class="line"></div><span class="dim small mono">${allRecs.length} records${STATE.logAll?' · all months':' · '+esc(rangeText(periodRange(period)))}</span><button class="btn small" data-log-all="1">${STATE.logAll?'Show only this period':'Show all months'}</button></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Date</th><th>Truck No.</th><th>Driver</th><th>Route</th><th>Material</th><th>Transit</th><th>Timings</th><th>Delay</th><th>Deviations</th><th>On-Time</th><th>Risk Ass.</th><th>Hrs Viol.</th><th>Pre-Trip</th><th>Post-Trip</th><th></th></tr></thead>
     <tbody>${allRecs.length? allRecs.map(r=>`<tr><td>${r.date}</td><td>${vehicleLabel(r.vehicleId)}</td><td>${r.driverName||'—'}</td><td style="white-space:normal;">${ROUTES[r.route]?ROUTES[r.route].label:r.route}</td><td>${esc(r.material||'—')}</td><td>${jDurCell(r)}</td><td><button class="btn ghost small" data-jt-times="${r.id}">⏱ ${jStampCount(r)}/9</button></td><td>${fmt(num(r.delayHrs),1)} h</td><td>${num(r.deviations)}</td><td>${r.onTime}</td><td>${r.riskAssessment}</td><td>${r.driverHoursViolation}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Pre-Trip'))}</td><td>${checkTag(checkStatus(r.vehicleId,r.date,'Post-Trip'))}</td><td><button class="btn ghost small" data-delete="journey:${r.id}">Delete</button></td></tr>`).join('') : `<tr class="empty-row"><td colspan="15">No trips logged yet — log the first one above.</td></tr>`}</tbody>
@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v13.9 · 4 Nov 2026';
+const APP_VERSION='v14.0 · 4 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -9338,6 +9338,7 @@ const _att15=attachEvents;
 attachEvents=function(){
   _att15();
   try{
+    document.querySelectorAll('[data-log-all]').forEach(e=>e.addEventListener('click',()=>{ STATE.logAll=!STATE.logAll; render(); }));
     document.querySelectorAll('[data-bulk-replacem]').forEach(e=>{ e.checked=!!(STATE.bulk&&STATE.bulk.replaceMonth===e.getAttribute('data-bulk-replacem')); });
     document.querySelectorAll('[data-ml-lock]').forEach(e=>e.addEventListener('click',()=>{ const ym=e.getAttribute('data-ml-lock'); if(!wsAuth(['General Manager','MD'],'close the month')) return; if(confirm('Close '+mcLabel(ym)+'? Uploads and entries dated in it will be blocked until it is reopened.')) setLock(ym,true); }));
     document.querySelectorAll('[data-ml-unlock]').forEach(e=>e.addEventListener('click',()=>{ const ym=e.getAttribute('data-ml-unlock'); if(!wsAuth(['General Manager','MD'],'reopen the month')) return; if(confirm('Reopen '+mcLabel(ym)+' for changes?')) setLock(ym,false); }));
