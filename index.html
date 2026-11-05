@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v14.1 · 4 Nov 2026';
+const APP_VERSION='v14.2 · 5 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -9392,6 +9392,73 @@ async function octFix(){
   STATE.ofBusy=0;
 }
 const _la16=loadAll; loadAll=async function(){ const r=await _la16.apply(this,arguments); setTimeout(octFix,9000); return r; };
+
+/* ============================================================ ws_u.js ============================================================ */
+/* ===== v14.2: the October correction retries until it has run · stray entries outside Oct–today are taken out · "so far" shows its months ===== */
+const TX_START='2026-10-01';
+const _stray=r=>!!r&&!!r.date&&(r.date<TX_START||r.date>addDays(todayStr(),1));
+async function octFix2(){
+  try{
+    if(!GAS_CONFIGURED||STATE.loading||STATE.ofBusy||STATE.mcBusy||STATE.rsBusy) return false;
+    if(!(pfCfg('octFix1')||{}).done) return false;
+    if((pfCfg('octFix2')||{}).done) return true;
+    STATE.ofBusy=1;
+    const idx=(STATE.data.monthIndex||[]).map(m=>m.ym).filter(ym=>ym<TX_START.slice(0,7));
+    for(const ym of idx){ archLoad(ym); let w=0; while(STATE.archLoading[ym]&&w++<60) await sleepMs(500); }
+    const live=(STATE.data.transport||[]).filter(_stray), folderRm={};
+    idx.forEach(ym=>{ const t=((STATE.archCache[ym]||{}).transport||[]).filter(_stray); if(t.length) folderRm[ym]=t; });
+    if(live.length||Object.keys(folderRm).length){
+      await vaultPutText('Transport entries removed — dated before 1 Oct 2026 or in the future.json',JSON.stringify({at:new Date().toISOString(),live,folder:folderRm}));
+      STATE.data.transport=(STATE.data.transport||[]).filter(r=>!_stray(r)); await persist('transport');
+      for(const ym of Object.keys(folderRm)) await archPatch(ym,d=>{ const n=(d.transport||[]).length; d.transport=(d.transport||[]).filter(r=>!_stray(r)); return n-d.transport.length; });
+    }
+    await pfSetCfg('octFix2',{done:true,at:new Date().toISOString(),removed:live.length});
+    if(live.length) showToast(live.length+' transport entries dated before October 2026 were taken out of the totals (a copy is in Stored files).');
+    STATE.ofBusy=0; render(); return true;
+  }catch(e){ console.error('octFix2',e); STATE.ofBusy=0; return false; }
+}
+let OCT_TRIES=0;
+async function octKick(){
+  try{
+    if(GAS_CONFIGURED&&!STATE.loading){
+      if(!(pfCfg('octFix1')||{}).done) await octFix();
+      if((pfCfg('octFix1')||{}).done&&await octFix2()) return;
+    }
+  }catch(e){ console.error('octKick',e); }
+  if(++OCT_TRIES<40) setTimeout(octKick,12000);
+}
+/* the earlier single 9-second attempt is replaced by the retrying one */
+const _la17=loadAll; loadAll=async function(){ const r=await _la17.apply(this,arguments); OCT_TRIES=0; setTimeout(octKick,4000); return r; };
+
+/* "so far" now shows which months it is made of */
+const _mrc17=matRouteCard;
+matRouteCard=function(){
+  let h=_mrc17.apply(this,arguments);
+  try{
+    const by={}; (STATE.data.transport||[]).forEach(r=>{ if(GYP_ROUTE_KEYS.indexOf(r.route)<0||!r.date) return; const m=r.date.slice(0,7); by[m]=(by[m]||0)+num(r.tonnageActual); });
+    const ms=Object.keys(by).sort(); const stray=ms.filter(m=>m<TX_START.slice(0,7));
+    const line=`<div class="dim small" style="margin:0 0 6px;line-height:1.7;">Made up of: ${ms.map(m=>`<b>${esc(mcLabel(m))}</b> ${fmt(by[m],1)} MT`).join(' · ')||'nothing yet'}${stray.length?` <span class="tag red">entries before Oct 2026 found — they are taken out automatically</span>`:''}</div>`;
+    h=h.replace('<div class="dim small" style="margin:6px 0 14px;">Weeks run',line+'<div class="dim small" style="margin:6px 0 14px;">Weeks run');
+  }catch(e){ console.error('so far months',e); }
+  return h;
+};
+
+/* October correction: status + a button to run it now */
+const _dcv17=dcView;
+dcView=function(){
+  let st='';
+  try{
+    const a=pfCfg('octFix1')||{}, b=pfCfg('octFix2')||{};
+    st=`<div class="card" style="margin:0 0 12px;border-left:3px solid ${a.done&&b.done?'var(--green)':'var(--amber)'};"><div style="font-weight:600;">October correction</div>
+    <div class="dim small" style="margin:4px 0 8px;line-height:1.6;">${a.done?'Applied '+esc(fmtDate(String(a.at||'').slice(0,10)))+' — October holds your own totals and is closed.':'Not applied yet on this app. It runs by itself a few seconds after the app opens, or you can run it now.'} ${b.done?'Entries dated before October 2026 are out of the totals.':'The check for entries dated before October 2026 has not run yet.'}</div>
+    ${a.done&&b.done?'':'<button class="btn small primary" data-oct-run="1">Apply the correction now</button>'}</div>`;
+  }catch(e){ console.error('oct status',e); }
+  return st+_dcv17.apply(this,arguments);
+};
+const _att17=attachEvents; attachEvents=function(){ _att17(); try{
+  document.querySelectorAll('[data-oct-run]').forEach(e=>e.addEventListener('click',async()=>{ e.disabled=true; STATE.ofBusy=0; OCT_TRIES=0; showToast('Applying the October correction…'); await octKick(); render(); }));
+}catch(err){ console.error('oct run',err); } };
+
 
 loadAll();
 </script>
