@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.0 · 5 Nov 2026';
+const APP_VERSION='v15.1 · 5 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -9830,6 +9830,346 @@ document.addEventListener('click',async ev=>{
   else if(has('data-vs-print')){ const r=await vsFetch(g('data-vs-print')); if(!r){ showToast('Could not open that file.'); return; } const u=URL.createObjectURL(r.blob); printHtmlDoc(/pdf/i.test(r.s.type)?`<!doctype html><html><body style="margin:0"><iframe src="${u}" style="width:100vw;height:100vh;border:0"></iframe></body></html>`:`<!doctype html><html><body style="margin:0"><img src="${u}" style="max-width:100%;"></body></html>`); }
   else if(has('data-vs-del')){ if(!wsAuth(FIN_ALL,'delete a stored voucher')) return; const s=(STATE.data.voucherScans||[]).find(x=>x.id===g('data-vs-del')); if(!s||!confirm('Delete “'+s.name+'”?')) return; try{ await gasSetChunked('vms:file:'+s.id,''); }catch(e){} STATE.data.voucherScans=STATE.data.voucherScans.filter(x=>x.id!==s.id); await persist('voucherScans'); }
 });
+
+/* ============================================================ ws_w.js ============================================================ */
+/* ===== v15.1: Accounts (calculator · postings · cash book · profit & loss · budget) · Monday Meeting walk-through · friendlier, tidier menu ===== */
+['journals'].forEach(k=>{ if(WS_COLLS.indexOf(k)<0) WS_COLLS.push(k); STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
+const ACC_ALL=[['1010','Cash in hand'],['1020','Bank'],['1100','Receivables — customers'],['2010','Payables — suppliers'],['3010','Owner’s equity / opening balance'],['4010','Freight income'],['4090','Other income']].concat(VCH_ACCTS);
+const accName=c=>(ACC_ALL.find(x=>x[0]===c)||['',c])[1];
+const ACC_MGR=['Head of Finance','General Manager','MD'];
+const ACC_LOGMAP={'5110':'diesel','5120':'gas','5130':'allow','5140':'levy'};
+Object.assign(STATE,{acView:STATE.acView||'cash',acCash:'1010',acCashP:'month',acPlP:'month',acPlG:'truck',acPlV:true,acPlW:true,acBudP:'month',acPost:'receipt'});
+STATE.acDraft=STATE.acDraft||{receipt:{date:todayStr(),from:'',amount:'',into:'1010',income:'4010',truck:'',narr:''},transfer:{date:todayStr(),from:'1010',to:'1020',amount:'',narr:''},journal:{date:todayStr(),narr:'',lines:[{account:'5990',debit:'',credit:'',truck:''},{account:'1010',debit:'',credit:'',truck:''}]}};
+const accOpen=()=>pfCfg('openBal')||{};
+function accBal(code,upto){ const o=accOpen(), asAt=o.asAt||'0000-00-00'; let b=num(o[code]); (STATE.data.ledger||[]).forEach(e=>{ if(e.account===code&&e.date>=asAt&&(!upto||e.date<=upto)) b+=num(e.debit)-num(e.credit); }); return Math.round(b*100)/100; }
+const acNeg=v=>`<b style="color:var(${v<0?'--red':'--text'});">${naira(v,2)}</b>`;
+
+/* ---------- posting entries by hand: receipt · transfer · journal ---------- */
+function acEntry(j,account,debit,credit,line){ const t=teMatch(line&&line.truck); return {id:uid(),voucherId:j.id,ref:j.ref,date:j.date,postedAt:isoNow(),rev:false,account,accountName:accName(account),debit:Math.round(num(debit)*100)/100,credit:Math.round(num(credit)*100)/100,vehicleId:t?t.id:'',regNoText:(!t&&line&&line.truck)?String(line.truck).trim().toUpperCase():'',narr:(line&&line.narr)||j.narr||''}; }
+async function acSavePost(kind){
+  if(!wsAuth(ACC_MGR,'post accounting entries')) return;
+  const D=STATE.acDraft[kind], j={id:uid(),ref:wsRef('journals','JNL'),date:D.date,type:kind,narr:String(D.narr||'').trim(),by:wsWho(),at:isoNow(),status:'Posted',lines:[]}; let ents=[];
+  if(!D.date){ showToast('Pick the date.'); return; }
+  if(kind==='receipt'){ const a=num(D.amount); if(a<=0||!String(D.from).trim()){ showToast('Add who paid and the amount.'); return; } j.narr=j.narr||('Received from '+D.from.trim()); j.payer=D.from.trim();
+    ents=[acEntry(j,D.into,a,0,{narr:'Received from '+D.from.trim()+(D.narr?' — '+D.narr:'')}),acEntry(j,D.income,0,a,{truck:D.truck,narr:'Received from '+D.from.trim()+(D.narr?' — '+D.narr:'')})]; }
+  else if(kind==='transfer'){ const a=num(D.amount); if(a<=0||D.from===D.to){ showToast('Pick two different accounts and an amount.'); return; } j.narr=j.narr||('Transfer '+accName(D.from)+' → '+accName(D.to));
+    ents=[acEntry(j,D.to,a,0,{narr:j.narr}),acEntry(j,D.from,0,a,{narr:j.narr})]; }
+  else{ const L=D.lines.filter(l=>num(l.debit)||num(l.credit)); const dr=L.reduce((s,l)=>s+num(l.debit),0), cr=L.reduce((s,l)=>s+num(l.credit),0);
+    if(L.length<2){ showToast('A journal needs at least two lines.'); return; } if(Math.abs(dr-cr)>0.005){ showToast('Debits ('+fmt(dr,2)+') and credits ('+fmt(cr,2)+') must be equal.'); return; } if(!j.narr){ showToast('Add a narration.'); return; }
+    ents=L.map(l=>acEntry(j,l.account,l.debit,l.credit,l)); }
+  j.amount=Math.round(ents.reduce((s,e)=>s+e.debit,0)*100)/100;
+  STATE.data.journals=(STATE.data.journals||[]).concat([j]); STATE.data.ledger=(STATE.data.ledger||[]).concat(ents);
+  const nd={date:D.date,narr:''}; if(kind==='receipt') STATE.acDraft.receipt=Object.assign({},STATE.acDraft.receipt,{from:'',amount:'',truck:'',narr:''}); else if(kind==='transfer') STATE.acDraft.transfer=Object.assign({},STATE.acDraft.transfer,{amount:'',narr:''}); else STATE.acDraft.journal={date:D.date,narr:'',lines:[{account:'5990',debit:'',credit:'',truck:''},{account:'1010',debit:'',credit:'',truck:''}]};
+  await persist('ledger'); await persist('journals'); showToast(j.ref+' posted.');
+}
+async function acReverse(id){
+  const j=(STATE.data.journals||[]).find(x=>x.id===id); if(!j||j.status!=='Posted') return; if(!wsAuth(ACC_MGR,'reverse an entry')) return; const note=prompt('Reason for reversing:')||''; if(!note) return;
+  const orig=(STATE.data.ledger||[]).filter(e=>e.voucherId===j.id&&!e.rev);
+  STATE.data.ledger=STATE.data.ledger.concat(orig.map(e=>Object.assign({},e,{id:uid(),debit:e.credit,credit:e.debit,rev:true,postedAt:isoNow(),narr:'Reversal — '+(e.narr||'')})));
+  j.status='Reversed'; j.revNote=note; j.revBy=wsWho(); await persist('ledger'); await persist('journals'); showToast(j.ref+' reversed.');
+}
+const acSel=(path,v,list)=>`<select data-ac="${path}">${list.map(a=>`<option value="${a[0]}" ${v===a[0]?'selected':''}>${esc(a[1])}</option>`).join('')}</select>`;
+const AC_MONEY=[['1010','Cash in hand'],['1020','Bank']];
+function acPostHtml(){
+  const k=STATE.acPost, D=STATE.acDraft, J=(STATE.data.journals||[]).slice().sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,40);
+  const tabs=[['receipt','Receive money'],['transfer','Move cash ↔ bank'],['journal','Free journal']];
+  let form='';
+  if(k==='receipt'){ const r=D.receipt; form=`<div class="form-grid"><div><label>Date</label><input type="date" data-ac="receipt.date" value="${esc(r.date)}"></div><div><label>Received from</label><input type="text" data-ac="receipt.from" value="${esc(r.from)}" placeholder="Customer / payer"></div><div><label>Amount (₦)</label><input type="number" step="0.01" min="0" data-ac="receipt.amount" value="${esc(r.amount)}"></div><div><label>Paid into</label>${acSel('receipt.into',r.into,AC_MONEY)}</div><div><label>Income account</label>${acSel('receipt.income',r.income,[['4010','Freight income'],['4090','Other income'],['1100','Receivables — customers (clearing an invoice)']])}</div><div><label>Truck (optional)</label><input type="text" list="dl-te-trucks" data-ac="receipt.truck" value="${esc(r.truck)}" placeholder="credit this truck"></div><div style="grid-column:1/-1;"><label>Narration</label><input type="text" data-ac="receipt.narr" value="${esc(r.narr)}" placeholder="e.g. Part payment for October gypsum haulage"></div></div><div class="dim small" style="margin-top:8px;">Posts: <b>debit</b> cash/bank, <b>credit</b> the income account.</div>`; }
+  else if(k==='transfer'){ const r=D.transfer; form=`<div class="form-grid"><div><label>Date</label><input type="date" data-ac="transfer.date" value="${esc(r.date)}"></div><div><label>From</label>${acSel('transfer.from',r.from,AC_MONEY)}</div><div><label>To</label>${acSel('transfer.to',r.to,AC_MONEY)}</div><div><label>Amount (₦)</label><input type="number" step="0.01" min="0" data-ac="transfer.amount" value="${esc(r.amount)}"></div><div style="grid-column:1/-1;"><label>Narration</label><input type="text" data-ac="transfer.narr" value="${esc(r.narr)}" placeholder="e.g. Cash withdrawn for trip allowances"></div></div><div class="dim small" style="margin-top:8px;">Posts: <b>debit</b> the account receiving, <b>credit</b> the account paying.</div>`; }
+  else{ const r=D.journal, dr=r.lines.reduce((s,l)=>s+num(l.debit),0), cr=r.lines.reduce((s,l)=>s+num(l.credit),0);
+    form=`<div class="form-grid"><div><label>Date</label><input type="date" data-ac="journal.date" value="${esc(r.date)}"></div><div style="grid-column:span 2;"><label>Narration</label><input type="text" data-ac="journal.narr" value="${esc(r.narr)}" placeholder="Why this entry is needed"></div></div>
+    <div class="table-wrap" style="margin-top:8px;"><table><thead><tr><th>Account</th><th>Debit (₦)</th><th>Credit (₦)</th><th>Truck (optional)</th><th></th></tr></thead><tbody>${r.lines.map((l,i)=>`<tr><td><select data-acl="account" data-i="${i}">${ACC_ALL.map(a=>`<option value="${a[0]}" ${l.account===a[0]?'selected':''}>${a[0]} · ${esc(a[1])}</option>`).join('')}</select></td><td><input type="number" step="0.01" min="0" data-acl="debit" data-i="${i}" value="${esc(l.debit)}" style="width:120px;"></td><td><input type="number" step="0.01" min="0" data-acl="credit" data-i="${i}" value="${esc(l.credit)}" style="width:120px;"></td><td><input type="text" list="dl-te-trucks" data-acl="truck" data-i="${i}" value="${esc(l.truck)}" style="width:120px;"></td><td>${r.lines.length>2?`<button type="button" class="btn small danger" data-ac-ldel="${i}">✕</button>`:''}</td></tr>`).join('')}
+    <tr style="font-weight:700;"><td style="text-align:right;">Totals</td><td id="ac-jdr">${fmt(dr,2)}</td><td id="ac-jcr">${fmt(cr,2)}</td><td colspan="2" id="ac-jdiff">${Math.abs(dr-cr)<0.005?wsTag('balanced','green'):wsTag('out by '+fmt(Math.abs(dr-cr),2),'red')}</td></tr></tbody></table></div><div class="form-actions" style="margin-top:6px;"><button type="button" class="btn small" data-ac-ladd="1">+ Add a line</button></div>`; }
+  return `<div class="flex gap8" style="flex-wrap:wrap;margin-bottom:10px;">${tabs.map(([x,l])=>`<button class="btn small ${k===x?'primary':''}" data-ac-post="${x}">${l}</button>`).join('')}</div>
+  <form data-ac-form="${k}" class="form-card" style="margin-bottom:14px;">${form}<div class="form-actions" style="margin-top:10px;"><button type="submit" class="btn primary">Post entry</button><span class="dim small">Only the Head of Finance, GM or MD can post. Posted entries can be reversed, not deleted.</span></div></form>
+  <div class="section-title"><span>Recent manual postings</span><div class="line"></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Ref</th><th>Date</th><th>Type</th><th>Narration</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${J.length?J.map(j=>`<tr><td><b>${esc(j.ref)}</b></td><td>${esc(fmtDate(j.date))}</td><td>${esc({receipt:'Receipt',transfer:'Transfer',journal:'Journal'}[j.type]||j.type)}</td><td style="white-space:normal;max-width:300px;">${esc(j.narr)}</td><td>${naira(num(j.amount),2)}</td><td>${wsTag(j.status,j.status==='Posted'?'green':'grey')}</td><td>${j.status==='Posted'?`<button class="btn small danger" data-ac-rev="${esc(j.id)}">Reverse</button>`:''}</td></tr>`).join(''):'<tr class="empty-row"><td colspan="7">Nothing posted by hand yet.</td></tr>'}</tbody></table></div>`;
+}
+
+/* ---------- cash book ---------- */
+function acCashHtml(){
+  const code=STATE.acCash, P=STATE.acCashP, o=accOpen(), asAt=o.asAt||'0000-00-00', rg=P==='all'?{start:asAt==='0000-00-00'?'0000-00-00':asAt,end:'9999-12-31'}:periodRange(P);
+  const opening=(P==='all'||rg.start<=asAt)?num(o[code]):accBal(code,addDays(rg.start,-1));
+  const from=rg.start<asAt?asAt:rg.start;
+  const rows=(STATE.data.ledger||[]).filter(e=>e.account===code&&e.date>=from&&e.date<=rg.end).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:String(a.postedAt).localeCompare(String(b.postedAt)));
+  let run=opening, rin=0, rout=0; const body=rows.map(e=>{ const d=num(e.debit), c=num(e.credit); run+=d-c; rin+=d; rout+=c; return `<tr><td>${esc(fmtDate(e.date))}</td><td>${esc(e.ref)}</td><td style="white-space:normal;max-width:340px;">${esc(e.narr||'')}</td><td>${d?fmt(d,2):'—'}</td><td>${c?fmt(c,2):'—'}</td><td>${acNeg(Math.round(run*100)/100)}</td></tr>`; }).join('');
+  const per=[['month','This month'],['lastmonth','Last month'],['prevmonth','Month before'],['all','All time']];
+  const needs=!o.asAt;
+  return `${needs?`<div class="note" style="margin-bottom:10px;line-height:1.6;"><b>Start here:</b> type the cash and bank balances you had on the day you start using the app, then press Save. After that, every approved voucher, receipt and transfer updates the balances for you.</div>`:''}
+  <form data-ac-open="1" class="form-card" style="margin-bottom:12px;"><div class="form-grid"><div><label>Balances as at</label><input type="date" name="asAt" value="${esc(o.asAt||todayStr())}"></div><div><label>Cash in hand (₦)</label><input type="number" step="0.01" name="c1010" value="${esc(o['1010']===undefined?'':o['1010'])}"></div><div><label>Bank (₦)</label><input type="number" step="0.01" name="c1020" value="${esc(o['1020']===undefined?'':o['1020'])}"></div></div><div class="form-actions" style="margin-top:8px;"><button class="btn small primary" type="submit">Save opening balances</button></div></form>
+  <div class="flex gap8" style="flex-wrap:wrap;margin-bottom:10px;align-items:center;">${AC_MONEY.map(a=>`<button class="btn small ${code===a[0]?'primary':''}" data-ac-cash="${a[0]}">${a[1]}</button>`).join('')}<span class="dim">|</span>${per.map(([k,l])=>`<button class="btn small ${P===k?'primary':''}" data-ac-cashp="${k}">${l}</button>`).join('')}</div>
+  <div class="grid cols-4" style="margin-bottom:12px;">${kc('Opening',naira(opening,2),P==='all'?'Opening balance':'Start of period')}${kc('Money in',naira(rin,2),rows.filter(e=>num(e.debit)).length+' postings','green')}${kc('Money out',naira(rout,2),rows.filter(e=>num(e.credit)).length+' postings')}${kc('Closing',naira(Math.round(run*100)/100,2),accName(code)+(Math.round(run)<0?' — overdrawn':''),run<0?'red':'')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Ref</th><th>Details</th><th>In (₦)</th><th>Out (₦)</th><th>Balance (₦)</th></tr></thead><tbody>${body||'<tr class="empty-row"><td colspan="6">No movements in this period.</td></tr>'}</tbody></table></div>`;
+}
+
+/* ---------- profit & loss per truck / route ---------- */
+function plTruck(range,optV,optW){
+  const by={}, get=(k,l)=>by[k]||(by[k]={label:l,n:0,inc:0,logc:0,vch:0,work:0});
+  (STATE.data.tripEarnings||[]).filter(r=>r.date>=range.start&&r.date<=range.end).forEach(r=>{ const x=get(teKey(r),teLabel(r)); x.n++; x.inc+=num(r.rate); x.logc+=teExp(r); });
+  let over=0, overInc=0;
+  (STATE.data.ledger||[]).filter(e=>e.date>=range.start&&e.date<=range.end).forEach(e=>{
+    const inc=/^4/.test(e.account), exp=/^5/.test(e.account); if(!inc&&!exp) return;
+    const k=e.vehicleId||(e.regNoText?('~'+normReg(e.regNoText)):''), lab=e.vehicleId?vehicleLabel(e.vehicleId):(e.regNoText||'');
+    if(inc){ const a=num(e.credit)-num(e.debit); if(k) get(k,lab).inc+=a; else overInc+=a; return; }
+    if(ACC_LOGMAP[e.account]||!optV) return;
+    const a=num(e.debit)-num(e.credit); if(k) get(k,lab).vch+=a; else over+=a;
+  });
+  if(optW) (STATE.data.vehicles||[]).forEach(v=>{ try{ const c=pfCostFor(v.id,range), w=c.maint+c.req+c.rec+c.tyre; if(w>0) get(v.id,v.regNo).work+=w; }catch(e){} });
+  return {rows:Object.values(by).map(x=>Object.assign(x,{net:x.inc-x.logc-x.vch-x.work})).sort((a,b)=>b.net-a.net),over,overInc};
+}
+function plRoute(range){
+  const by={}; (STATE.data.tripEarnings||[]).filter(r=>r.date>=range.start&&r.date<=range.end).forEach(r=>{ const l=(r.loading||'?')+' → '+(r.offloading||'?'), x=by[l]||(by[l]={label:l,n:0,inc:0,logc:0,vch:0,work:0}); x.n++; x.inc+=num(r.rate); x.logc+=teExp(r); });
+  return Object.values(by).map(x=>Object.assign(x,{net:x.inc-x.logc})).sort((a,b)=>b.net-a.net);
+}
+function acPlHtml(){
+  const P=STATE.acPlP, G=STATE.acPlG, rg=periodRange(P), per=[['lastweek','Last week'],['prevweek','Week before'],['week','This week'],['month','This month'],['lastmonth','Last month'],['prevmonth','Month before']];
+  const T=G==='truck'?plTruck(rg,STATE.acPlV,STATE.acPlW):{rows:plRoute(rg),over:0,overInc:0}, rows=T.rows;
+  const S=rows.reduce((a,x)=>{ ['n','inc','logc','vch','work','net'].forEach(k=>a[k]+=x[k]); return a; },{n:0,inc:0,logc:0,vch:0,work:0,net:0});
+  const co=S.net-T.over+T.overInc;
+  const row=(x,tot)=>`<tr${tot?' style="font-weight:700;background:rgba(232,163,61,.10);"':''}><td>${tot?'All '+(G==='truck'?'trucks':'routes'):esc(x.label)}</td><td>${fmt(x.n)}</td><td>${naira(x.inc)}</td><td>${naira(x.logc)}</td>${G==='truck'?`<td>${naira(x.vch)}</td><td>${naira(x.work)}</td>`:''}<td>${teNet(x.net)}</td><td>${x.n?naira(x.net/x.n):'—'}</td><td>${x.inc?Math.round(x.net/x.inc*100)+'%':'—'}</td></tr>`;
+  return `<div class="flex gap8" style="flex-wrap:wrap;margin-bottom:8px;align-items:center;">${per.map(([k,l])=>`<button class="btn small ${P===k?'primary':''}" data-ac-plp="${k}">${l}</button>`).join('')}<span class="dim small mono">${esc(rangeText(rg))}</span></div>
+  <div class="flex gap8" style="flex-wrap:wrap;margin-bottom:10px;align-items:center;"><button class="btn small ${G==='truck'?'primary':''}" data-ac-plg="truck">Per truck</button><button class="btn small ${G==='route'?'primary':''}" data-ac-plg="route">Per route</button>
+    ${G==='truck'?`<label style="display:flex;gap:6px;align-items:center;text-transform:none;font-size:12.5px;"><input type="checkbox" data-ac-plv="1" ${STATE.acPlV?'checked':''} style="width:auto;"> Count voucher &amp; journal costs</label><label style="display:flex;gap:6px;align-items:center;text-transform:none;font-size:12.5px;"><input type="checkbox" data-ac-plw="1" ${STATE.acPlW?'checked':''} style="width:auto;"> Count workshop costs from Maintenance</label>`:''}</div>
+  <div class="grid cols-4" style="margin-bottom:12px;">${kc('Income',naira(S.inc+(G==='truck'?T.overInc:0)),fmt(S.n)+' trips')}${kc('Trip costs',naira(S.logc),'Allowance, levy, gas, diesel')}${kc('Net from trips',teNet(S.net),S.inc?Math.round(S.net/S.inc*100)+'% margin':'')}${kc(G==='truck'?'Company result':'Per trip',G==='truck'?teNet(co):(S.n?naira(S.net/S.n):'—'),G==='truck'?'After overheads not linked to a truck':'Average net')}</div>
+  <div class="table-wrap"><table><thead><tr><th>${G==='truck'?'Truck':'Route (loading → offloading)'}</th><th>Trips</th><th>Income</th><th>Trip costs</th>${G==='truck'?'<th>Vouchers &amp; journals</th><th>Workshop (Maintenance)</th>':''}<th>Net</th><th>Net / trip</th><th>Margin</th></tr></thead><tbody>${rows.length?rows.map(x=>row(x)).join('')+row(S,true):`<tr class="empty-row"><td colspan="${G==='truck'?9:7}">No trips or postings in this period.</td></tr>`}</tbody></table></div>
+  ${G==='truck'&&(T.over||T.overInc)?`<div class="dim small" style="margin-top:8px;">Overheads not linked to a truck: costs ${naira(T.over)}${T.overInc?' · income '+naira(T.overInc):''}. Pick a truck on voucher lines to charge them to a truck.</div>`:''}
+  <div class="dim small" style="margin-top:8px;line-height:1.6;">How it is worked out: <b>income</b> = trip rates from the Trip earnings log (plus income you post to a truck). <b>Trip costs</b> = allowance, levy, gas and diesel from the same log. Voucher lines for fuel, allowance and levy are left out so they are not counted twice. The per-route view uses the trip log only.</div>`;
+}
+
+/* ---------- budget vs actual ---------- */
+function acBudgetHtml(){
+  const P=STATE.acBudP, rg=periodRange(P), ym=rg.start.slice(0,7), B=pfCfg('budget:'+ym)||{}, per=[['month','This month'],['lastmonth','Last month'],['prevmonth','Month before']];
+  const act={}, logA={}; VCH_ACCTS.forEach(a=>{ act[a[0]]=0; logA[a[0]]=0; });
+  (STATE.data.ledger||[]).filter(e=>e.date>=rg.start&&e.date<=rg.end&&/^5/.test(e.account)).forEach(e=>{ act[e.account]=(act[e.account]||0)+num(e.debit)-num(e.credit); });
+  (STATE.data.tripEarnings||[]).filter(r=>r.date>=rg.start&&r.date<=rg.end).forEach(r=>{ Object.keys(ACC_LOGMAP).forEach(c=>{ logA[c]+=num(r[ACC_LOGMAP[c]]); }); });
+  let tb=0,ta=0; const rows=VCH_ACCTS.map(([c,n])=>{ const b=num(B[c]), a=act[c]+logA[c], v=b-a, u=b?a/b:null; tb+=b; ta+=a; const st=!b?(a?wsTag('no budget','grey'):''):(a>b?wsTag('over by '+naira(a-b),'red'):u>=.9?wsTag('nearly used','amber'):wsTag('within budget','green'));
+    return `<tr><td>${c} · ${esc(n)}</td><td><input type="number" step="0.01" min="0" data-ac-bud="${c}" value="${B[c]===undefined?'':esc(B[c])}" style="width:130px;" placeholder="set"></td><td>${naira(act[c])}</td><td>${logA[c]?naira(logA[c]):'—'}</td><td><b>${naira(a)}</b></td><td>${b?`<b style="color:var(${v<0?'--red':'--green'});">${naira(v)}</b>`:'—'}</td><td>${u===null?'—':Math.round(u*100)+'%'}</td><td>${st}</td></tr>`; }).join('');
+  const over=VCH_ACCTS.filter(([c])=>num(B[c])&&(act[c]+logA[c])>num(B[c])).length;
+  return `<div class="flex gap8" style="flex-wrap:wrap;margin-bottom:10px;align-items:center;">${per.map(([k,l])=>`<button class="btn small ${P===k?'primary':''}" data-ac-budp="${k}">${l}</button>`).join('')}<span class="dim small mono">${esc(mcLabel(ym))}</span><button class="btn small ghost" data-ac-budcopy="1">Copy last month's budget</button></div>
+  <div class="grid cols-4" style="margin-bottom:12px;">${kc('Budget',naira(tb),'All accounts')}${kc('Spent so far',naira(ta),'Vouchers, journals and trip log')}${kc('Left',`<b style="color:var(${tb-ta<0?'--red':'--green'});">${naira(tb-ta)}</b>`,tb?Math.round(ta/tb*100)+'% used':'Set a budget below')}${kc('Over budget',over,over?'accounts to discuss':'None',over?'red':'green')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Account</th><th>Budget (₦)</th><th>Vouchers &amp; journals</th><th>Trip log</th><th>Actual</th><th>Left</th><th>Used</th><th></th></tr></thead><tbody>${rows}<tr style="font-weight:700;"><td>Total</td><td>${naira(tb)}</td><td colspan="2"></td><td>${naira(ta)}</td><td>${naira(tb-ta)}</td><td>${tb?Math.round(ta/tb*100)+'%':'—'}</td><td></td></tr></tbody></table></div>
+  <div class="dim small" style="margin-top:8px;line-height:1.6;">Actual = approved vouchers and journals + the matching columns of the Trip earnings log (diesel, gas, allowance, levy). If the same payment is in both, count it once — either enter it in the trip log or raise a voucher for it.</div>`;
+}
+
+/* ---------- calculator ---------- */
+const AC_CALCS={
+  trip:{t:'Trip profit check',h:'Is a trip worth doing at this rate? Also shows the rate you need for the margin you want.',f:[['rate','Rate (₦)'],['allow','Trip allowance'],['levy','Community levy'],['gas','Gas'],['diesel','Diesel'],['other','Other costs'],['margin','Margin wanted (%)',20]],
+    run:v=>{ const e=num(v.allow)+num(v.levy)+num(v.gas)+num(v.diesel)+num(v.other), n=num(v.rate)-e, m=num(v.rate)?n/num(v.rate)*100:0, need=num(v.margin)<100?e/(1-num(v.margin)/100):0; return [['Total expenses',naira(e,2)],['Net — what the trip makes',naira(n,2)],['Margin',fmt(m,1)+'%'],['Break-even rate',naira(e,2)],['Rate needed for '+fmt(num(v.margin),0)+'% margin',naira(need,2)]]; }},
+  perkm:{t:'Cost per km & fuel use',h:'Works out cost per km and km per litre for a journey or a week.',f:[['dist','Distance (km)'],['litres','Fuel used (litres or kg gas)'],['price','Price per litre / kg (₦)'],['other','Other costs (₦)']],
+    run:v=>{ const f=num(v.litres)*num(v.price), tot=f+num(v.other), d=num(v.dist); return [['Fuel cost',naira(f,2)],['Total cost',naira(tot,2)],['Cost per km',d?naira(tot/d,2):'—'],['Fuel per km',d?naira(f/d,2):'—'],['km per litre',num(v.litres)?fmt(d/num(v.litres),2):'—'],['Litres per 100 km',d?fmt(num(v.litres)/d*100,1):'—']]; }},
+  tax:{t:'VAT & withholding tax',h:'VAT and WHT on an invoice. Check the rates with your accountant — they differ by type of service.',f:[['amt','Amount (₦)'],['vat','VAT (%)',7.5],['wht','WHT (%)',5]],sel:['mode','Amount already includes VAT?',[['excl','No — add VAT'],['incl','Yes — take VAT out']]],
+    run:v=>{ const A=num(v.amt), r=num(v.vat)/100; let net,vat,gross; if(v.mode==='incl'){ gross=A; net=A/(1+r); vat=gross-net; } else { net=A; vat=A*r; gross=A+vat; } const w=net*num(v.wht)/100; return [['Amount before VAT',naira(net,2)],['VAT',naira(vat,2)],['Invoice total',naira(gross,2)],['WHT to deduct',naira(w,2)],['Pay the supplier',naira(gross-w,2)]]; }},
+  change:{t:'Change between two numbers',h:'How much did something go up or down, and by what percentage?',f:[['a','Earlier value'],['b','Later value']],
+    run:v=>{ const a=num(v.a), b=num(v.b), d=b-a; return [['Difference',fmt(d,2)],['Change',a?(d>=0?'+':'')+fmt(d/a*100,1)+'%':'—']]; }},
+  share:{t:'Share a cost',h:'Spread a cost across trucks or trips.',f:[['total','Total cost (₦)'],['n','Number of trucks / trips',1]],run:v=>[['Each one pays',num(v.n)?naira(num(v.total)/num(v.n),2):'—']]}
+};
+function acCalcHtml(){
+  return `<div class="dim small" style="margin-bottom:10px;">Type numbers and the answers appear straight away. Nothing here is saved.</div><div class="grid cols-2">${Object.keys(AC_CALCS).map(k=>{ const c=AC_CALCS[k], d={}; c.f.forEach(f=>{ d[f[0]]=f[2]!==undefined?f[2]:''; }); if(c.sel) d[c.sel[0]]=c.sel[2][0][0];
+    return `<div class="card" data-calc-box="${k}" style="padding:14px;"><div style="font-weight:700;">${esc(c.t)}</div><div class="dim small" style="margin:2px 0 10px;line-height:1.5;">${esc(c.h)}</div><div class="form-grid" style="grid-template-columns:repeat(2,1fr);">${c.f.map(f=>`<div><label>${esc(f[1])}</label><input type="number" step="any" data-calc="${f[0]}" value="${f[2]!==undefined?f[2]:''}"></div>`).join('')}${c.sel?`<div style="grid-column:1/-1;"><label>${esc(c.sel[1])}</label><select data-calc="${c.sel[0]}">${c.sel[2].map(o=>`<option value="${o[0]}">${esc(o[1])}</option>`).join('')}</select></div>`:''}</div>
+      <div class="calc-out" style="margin-top:10px;">${calcOut(c.run(d))}</div></div>`; }).join('')}</div>`;
+}
+const calcOut=rows=>rows.map(r=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid var(--border);"><span class="dim">${esc(r[0])}</span><b>${esc(r[1])}</b></div>`).join('');
+
+/* ---------- Accounts page ---------- */
+function renderAccountsPage(){
+  const V=STATE.acView, mo=periodRange('month'), pl=plTruck(mo,STATE.acPlV,STATE.acPlW), net=pl.rows.reduce((s,x)=>s+x.net,0)-pl.over+pl.overInc;
+  const body=V==='calc'?acCalcHtml():V==='post'?acPostHtml():V==='pl'?acPlHtml():V==='budget'?acBudgetHtml():acCashHtml();
+  const tabs=[['cash','Cash book'],['post','Post an entry'],['pl','Profit & loss'],['budget','Budget vs actual'],['calc','Calculators']];
+  return wsHead('Accounts','Cash, bank, postings, profit per truck and route, and budgets — fed by your vouchers and the trip earnings log.')+wsRoleBar()+
+  `<datalist id="dl-te-trucks">${(STATE.data.vehicles||[]).map(v=>`<option value="${esc(v.regNo)}">`).join('')}</datalist>
+  <div class="grid cols-4" style="margin-bottom:14px;">${kc('Cash in hand',acNeg(accBal('1010')),'Balance today')}${kc('Bank',acNeg(accBal('1020')),'Balance today')}${kc('Result this month',teNet(net),'Income less costs, all trucks')}${kc('Vouchers waiting',(STATE.data.vouchers||[]).filter(v=>v.status===VCH_ST.AUTH||v.status===VCH_ST.APPR).length,'Authorize / approve','amber')}</div>`+
+  wsTabs('ac-view',V,tabs)+body;
+}
+WS_TABS.accounts=renderAccountsPage;
+
+/* ---------- events: accounts ---------- */
+document.addEventListener('input',ev=>{
+  const t=ev.target; if(!t||!t.dataset) return;
+  if(t.dataset.ac!==undefined){ const [k,f]=t.dataset.ac.split('.'); if(STATE.acDraft[k]) STATE.acDraft[k][f]=t.value; }
+  else if(t.dataset.acl!==undefined){ const l=STATE.acDraft.journal.lines[+t.dataset.i]; if(!l) return; l[t.dataset.acl]=t.value; const L=STATE.acDraft.journal.lines, dr=L.reduce((s,x)=>s+num(x.debit),0), cr=L.reduce((s,x)=>s+num(x.credit),0); const a=document.getElementById('ac-jdr'),b=document.getElementById('ac-jcr'),c=document.getElementById('ac-jdiff'); if(a) a.textContent=fmt(dr,2); if(b) b.textContent=fmt(cr,2); if(c) c.innerHTML=Math.abs(dr-cr)<0.005?wsTag('balanced','green'):wsTag('out by '+fmt(Math.abs(dr-cr),2),'red'); }
+  else if(t.dataset.calc!==undefined){ const box=t.closest('[data-calc-box]'); if(!box) return; const c=AC_CALCS[box.getAttribute('data-calc-box')], v={}; box.querySelectorAll('[data-calc]').forEach(i=>{ v[i.getAttribute('data-calc')]=i.value; }); box.querySelector('.calc-out').innerHTML=calcOut(c.run(v)); }
+});
+document.addEventListener('change',async ev=>{
+  const t=ev.target; if(!t||!t.dataset) return;
+  if(t.dataset.ac!==undefined||t.dataset.acl!==undefined||t.dataset.calc!==undefined) t.dispatchEvent(new Event('input',{bubbles:true}));
+  if(t.hasAttribute('data-ac-plv')){ STATE.acPlV=t.checked; render(); } else if(t.hasAttribute('data-ac-plw')){ STATE.acPlW=t.checked; render(); }
+  else if(t.dataset.acBud!==undefined){ if(!wsAuth(ACC_MGR,'change the budget')){ render(); return; } const ym=periodRange(STATE.acBudP).start.slice(0,7), o={}; o[t.dataset.acBud]=t.value===''?'':num(t.value); await pfSetCfg('budget:'+ym,o); render(); }
+});
+document.addEventListener('submit',async ev=>{
+  const f=ev.target; if(!f||!f.matches) return;
+  if(f.matches('[data-ac-form]')){ ev.preventDefault(); acSavePost(f.getAttribute('data-ac-form')); }
+  else if(f.matches('[data-ac-open]')){ ev.preventDefault(); if(!wsAuth(ACC_MGR,'set opening balances')) return; const fd=new FormData(f); await pfSetCfg('openBal',{asAt:fd.get('asAt')||todayStr(),'1010':num(fd.get('c1010')),'1020':num(fd.get('c1020'))}); showToast('Opening balances saved.'); }
+});
+document.addEventListener('click',async ev=>{
+  const b=ev.target.closest&&ev.target.closest('[data-ac-view],[data-ac-post],[data-ac-ladd],[data-ac-ldel],[data-ac-rev],[data-ac-cash],[data-ac-cashp],[data-ac-plp],[data-ac-plg],[data-ac-budp],[data-ac-budcopy]');
+  if(!b||!document.getElementById('app')) return; const g=n=>b.getAttribute(n), has=n=>b.hasAttribute(n), J=STATE.acDraft.journal;
+  if(has('data-ac-view')){ STATE.acView=g('data-ac-view'); render(); } else if(has('data-ac-post')){ STATE.acPost=g('data-ac-post'); render(); }
+  else if(has('data-ac-ladd')){ J.lines.push({account:'5990',debit:'',credit:'',truck:''}); render(); } else if(has('data-ac-ldel')){ J.lines.splice(+g('data-ac-ldel'),1); render(); }
+  else if(has('data-ac-rev')) acReverse(g('data-ac-rev'));
+  else if(has('data-ac-cash')){ STATE.acCash=g('data-ac-cash'); render(); } else if(has('data-ac-cashp')){ STATE.acCashP=g('data-ac-cashp'); render(); }
+  else if(has('data-ac-plp')){ STATE.acPlP=g('data-ac-plp'); render(); } else if(has('data-ac-plg')){ STATE.acPlG=g('data-ac-plg'); render(); }
+  else if(has('data-ac-budp')){ STATE.acBudP=g('data-ac-budp'); render(); }
+  else if(has('data-ac-budcopy')){ if(!wsAuth(ACC_MGR,'change the budget')) return; const cur=periodRange(STATE.acBudP).start, prev=addMonthsStr(cur,-1).slice(0,7), src=pfCfg('budget:'+prev); if(!src){ showToast('There is no budget for the month before.'); return; } const o={}; VCH_ACCTS.forEach(([c])=>{ if(src[c]!==undefined) o[c]=src[c]; }); await pfSetCfg('budget:'+cur.slice(0,7),o); showToast('Copied.'); }
+});
+(function(){ const at=NAV.findIndex(n=>n[0]==='vouchers')+1; NAV.splice(at,0,['accounts','Accounts']); NAV_ICON.accounts='📒'; NAV_LABEL.accounts='Accounts'; NAV_GROUP.accounts='Money'; })();
+
+/* ================= MONDAY MEETING ================= */
+Object.assign(STATE,{mtOpen:false,mtI:0,mtDraft:null,mtCache:null});
+const MT_ME=()=>myRole();
+function mtData(){
+  const c=STATE.mtCache; if(c&&Date.now()-c.at<12000) return c;
+  let K1=[],K0=[]; try{ K1=pfKpis('lastweek'); }catch(e){ console.error('mt K1',e); } try{ K0=pfKpis('prevweek'); }catch(e){ console.error('mt K0',e); }
+  const prev={}; K0.forEach(k=>{ prev[k.id]=k; });
+  return STATE.mtCache={at:Date.now(),K1,K0,prev,R1:periodRange('lastweek'),R0:periodRange('prevweek')};
+}
+const mtCnt=K=>{ const c={red:0,amber:0,green:0}; K.forEach(k=>{ if(c[k.st]!==undefined) c[k.st]++; }); return c; };
+function mtDelta(k,p){
+  if(!p||p.actual===undefined||p.actual===null||k.actual===undefined||k.actual===null) return '<span class="dim">—</span>';
+  const d=k.actual-p.actual; if(Math.abs(d)<1e-9) return '<span class="dim">no change</span>';
+  const better=(k.good==='lower')?d<0:d>0; const txt=k.fmt==='pct'?(d>0?'+':'')+(d*100).toFixed(1)+' pts':(d>0?'+':'')+fmt(d,k.fmt===undefined?0:Math.min(2,k.fmt));
+  return `<b style="color:var(${better?'--green':'--red'});">${d>0?'▲':'▼'} ${esc(txt)}</b>`;
+}
+function mtKpiTable(depts){
+  const D=mtData(), rows=D.K1.filter(k=>depts.indexOf(k.dept)>=0), ord={red:0,amber:1,green:2,grey:3}; rows.sort((a,b)=>ord[a.st]-ord[b.st]);
+  if(!rows.length) return '<div class="dim">No KPIs recorded for this area yet.</div>';
+  const has=id=>(STATE.data.actions||[]).some(a=>a.status!=='Done'&&a.key&&a.key.indexOf('kpi|'+id+'|')===0);
+  return `<div class="table-wrap"><table><thead><tr><th>KPI</th><th>Last week</th><th>Week before</th><th>Change</th><th>Target</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${rows.map(k=>{ const p=D.prev[k.id]; return `<tr><td style="white-space:normal;min-width:200px;"><b>${esc(k.label)}</b></td><td><b>${esc(pfVal(k,k.actual))}</b></td><td>${p?esc(pfVal(k,p.actual)):'—'}</td><td>${mtDelta(k,p)}</td><td>${k.target===null||k.target===undefined?'—':esc(pfVal(k,k.target))}</td><td>${wsTag(statusLabel(k.st),k.st)}</td><td>${esc(k.owner||'')}</td><td>${(k.st==='red'||k.st==='amber')?(has(k.id)?'<span class="dim small">action open</span>':`<button class="btn small" data-mt-kdec="${esc(k.id)}">Decide</button>`):''}</td></tr>`; }).join('')}</tbody></table></div>`;
+}
+const mtAsk=(...q)=>`<div class="card" style="margin-top:14px;padding:12px 14px;border-left:3px solid var(--amber);"><div style="font-weight:600;margin-bottom:4px;">Questions for the room</div>${q.map(x=>`<div style="margin:3px 0;">• ${esc(x)}</div>`).join('')}</div>`;
+function mtTonRows(){
+  const rec=STATE.data.transport||[], A=matGroupTotals(rec.filter(r=>inPeriod(r.date,'lastweek'))), B=matGroupTotals(rec.filter(r=>inPeriod(r.date,'prevweek')));
+  const rows=A.map((x,i)=>({x,y:B[i]})).filter(o=>o.x.trips||o.x.ton||o.y.trips||o.y.ton);
+  return `<div class="table-wrap"><table><thead><tr><th>Material / route</th><th>Last week</th><th>Week before</th><th>Change</th></tr></thead><tbody>${rows.map(({x,y})=>{ const d=x.ton-y.ton; return `<tr${x.kind==='gypsum'||x.kind==='total'?' style="font-weight:700;"':''}><td style="white-space:normal;">${esc(x.label)}</td><td>${fmt(x.ton,1)} MT <span class="dim small">· ${fmt(x.trips)} trips</span></td><td>${fmt(y.ton,1)} MT <span class="dim small">· ${fmt(y.trips)} trips</span></td><td><b style="color:var(${d>=0?'--green':'--red'});">${d>=0?'▲':'▼'} ${fmt(Math.abs(d),1)} MT</b></td></tr>`; }).join('')||'<tr class="empty-row"><td colspan="4">No tonnage entered for these weeks.</td></tr>'}</tbody></table></div>`;
+}
+function mtOverdue(){ return (STATE.data.actions||[]).filter(a=>a.status!=='Done'&&a.due&&a.due<todayStr()); }
+function mtDecisionItems(){
+  const D=mtData(), items=[]; const has=id=>(STATE.data.actions||[]).some(a=>a.status!=='Done'&&a.key&&a.key.indexOf('kpi|'+id+'|')===0);
+  D.K1.filter(k=>k.st==='red'&&!has(k.id)).slice(0,8).forEach(k=>items.push({kind:'KPI in red',text:`${k.label}: ${pfVal(k,k.actual)} against ${k.target===null?'no target':pfVal(k,k.target)}`,owner:k.owner,seed:`Fix: ${k.label}`,key:'kpi|'+k.id+'|'+D.R1.start}));
+  const vw=(STATE.data.vouchers||[]).filter(v=>v.status===VCH_ST.AUTH||v.status===VCH_ST.APPR); if(vw.length) items.push({kind:'Vouchers waiting',text:`${vw.length} voucher${vw.length>1?'s':''} (${naira(vw.reduce((s,v)=>s+vTot(v.lines),0))}) waiting for authorization or approval`,owner:'Head of Finance',seed:'Clear the vouchers waiting for authorization / approval',go:'vouchers'});
+  let ap=[]; try{ ap=apprItems().filter(i=>i.status==='Pending'); }catch(e){} if(ap.length) items.push({kind:'Approvals waiting',text:`${ap.length} item${ap.length>1?'s':''} waiting in Approvals (trips, plans, repair requests)`,owner:'General Manager',seed:'Clear the approvals waiting',go:'approvals'});
+  mtOverdue().slice(0,6).forEach(a=>items.push({kind:'Overdue action',text:`${a.title} — ${a.owner}, due ${fmtDate(a.due)}`,owner:a.owner,aid:a.id}));
+  return items;
+}
+async function mtAddAction(d){
+  const title=String(d.title||'').trim(); if(!title){ showToast('Type the decision first.'); return; }
+  STATE.data.actions.push({id:uid(),date:todayStr(),title,owner:d.owner,due:d.due,status:'Open',source:'meeting',decision:true,meetDate:todayStr(),key:d.key||'',note:''});
+  STATE.mtDraft=null; await persist('actions'); showToast('Decision recorded for '+d.owner+', due '+fmtDate(d.due)+'.');
+}
+function mtDecForm(){
+  const d=STATE.mtDraft||{title:'',owner:'General Manager',due:addDays(todayStr(),7),key:''};
+  return `<form data-mt-form="1" class="form-card" style="margin-top:14px;"><div style="font-weight:600;margin-bottom:6px;">Record a decision</div><div class="form-grid"><div style="grid-column:span 2;"><label>What was decided</label><input type="text" data-mt="title" value="${esc(d.title)}" placeholder="e.g. Replace the worn brake pads on all trucks over 80,000 km"></div><div><label>Who owns it</label><select data-mt="owner">${PF_OWNERS.map(o=>`<option${o===d.owner?' selected':''}>${esc(o)}</option>`).join('')}</select></div><div><label>Due</label><input type="date" data-mt="due" value="${esc(d.due)}"></div></div><div class="form-actions" style="margin-top:8px;"><button class="btn primary" type="submit">Save decision</button></div></form>`;
+}
+function mtActionRow(a){ const od=a.status!=='Done'&&a.due&&a.due<todayStr(); return `<tr><td style="white-space:normal;min-width:220px;"><b>${esc(a.title)}</b>${a.decision?` <span class="dim small">· decided ${esc(fmtDate(a.meetDate))}</span>`:''}</td><td><select data-mt-aowner="${esc(a.id)}">${PF_OWNERS.map(o=>`<option${o===a.owner?' selected':''}>${esc(o)}</option>`).join('')}</select></td><td>${esc(fmtDate(a.due))}</td><td>${a.status==='Done'?wsTag('Done','green'):(od?wsTag('Overdue','red'):wsTag('Open','amber'))}</td><td><div class="row-actions">${a.status==='Done'?'':`<button class="btn small primary" data-mt-adone="${esc(a.id)}">Done</button><button class="btn small" data-mt-aext="${esc(a.id)}">+7 days</button>`}</div></td></tr>`; }
+function mtMinutesHtml(){
+  const t=todayStr(), dec=(STATE.data.actions||[]).filter(a=>a.decision&&a.meetDate===t), open=(STATE.data.actions||[]).filter(a=>a.status!=='Done'), D=mtData(), c=mtCnt(D.K1), c0=mtCnt(D.K0);
+  const tb=(h,rows)=>`<table style="width:100%;border-collapse:collapse;margin:6px 0 14px;"><thead><tr>${h.map(x=>`<th style="text-align:left;border:1px solid #bbb;padding:5px 8px;background:#eef0f3;">${x}</th>`).join('')}</tr></thead><tbody>${rows||`<tr><td colspan="${h.length}" style="border:1px solid #bbb;padding:5px 8px;color:#666;">None</td></tr>`}</tbody></table>`;
+  const td=x=>`<td style="border:1px solid #bbb;padding:5px 8px;">${x}</td>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Monday review ${esc(t)}</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:24px;color:#111;font-size:13px;} h1{font-size:20px;margin:0 0 4px;} h2{font-size:14px;margin:18px 0 4px;} @page{margin:14mm;}</style></head><body><h1>SKB Logistics Ltd — Monday review minutes</h1><div>Meeting date: <b>${esc(fmtDate(t))}</b> · Week reviewed: <b>${esc(rangeText(D.R1))}</b></div>
+  <h2>Headline</h2><div>KPIs in red: <b>${c.red}</b> (week before: ${c0.red}) · amber: <b>${c.amber}</b> (${c0.amber}) · green: <b>${c.green}</b> (${c0.green})</div>
+  <h2>Decisions taken today</h2>${tb(['Decision','Owner','Due'],dec.map(a=>`<tr>${td(esc(a.title))}${td(esc(a.owner))}${td(esc(fmtDate(a.due)))}</tr>`).join(''))}
+  <h2>All open actions (${open.length})</h2>${tb(['Action','Owner','Due','Status'],open.map(a=>`<tr>${td(esc(a.title))}${td(esc(a.owner))}${td(esc(fmtDate(a.due)))}${td(a.due&&a.due<t?'Overdue':'Open')}</tr>`).join(''))}
+  <div style="margin-top:36px;display:flex;gap:40px;"><div style="flex:1;border-top:1px solid #111;padding-top:4px;">Chaired by</div><div style="flex:1;border-top:1px solid #111;padding-top:4px;">Minutes taken by</div></div></body></html>`;
+}
+function mtSlides(){
+  const D=mtData(), c1=mtCnt(D.K1), c0=mtCnt(D.K0), te1=teSum('lastweek').T, te0=teSum('prevweek').T, od=mtOverdue().length, open=pfOpenActions().length;
+  const S=[];
+  S.push({t:'Good morning — let’s review last week',s:'Week of '+rangeText(D.R1)+' compared with '+rangeText(D.R0),b:()=>`<div class="grid cols-4" style="margin-bottom:14px;">${kc('KPIs in red',c1.red,'Week before: '+c0.red,c1.red?'red':'green')}${kc('On watch (amber)',c1.amber,'Week before: '+c0.amber,c1.amber?'amber':'green')}${kc('On target (green)',c1.green,'Week before: '+c0.green,'green')}${kc('Open actions',open,od?od+' overdue':'None overdue',od?'red':'green')}</div>
+    <div class="card" style="padding:14px;"><div style="font-weight:600;margin-bottom:6px;">Today’s agenda</div><ol style="margin:0;padding-left:20px;line-height:1.9;"><li>Where each department stands</li><li>Transport &amp; journeys</li><li>Safety, inspections &amp; pre-trip</li><li>Maintenance</li><li>Money — trips, vouchers, cash, budget</li><li>Drivers</li><li>Warnings &amp; documents</li><li>Decisions we must take</li><li>Actions carried over</li><li>Wrap-up &amp; minutes</li></ol></div>${mtAsk('What is the one thing that must be better by next Monday?')}`});
+  S.push({t:'Where each department stands',s:'Counts of KPIs by status — last week and the week before',b:()=>{ const depts=[...new Set(D.K1.map(k=>k.dept))]; return `<div class="table-wrap"><table><thead><tr><th>Department</th><th>Red</th><th>Amber</th><th>Green</th><th>Week before (red)</th><th>Trend</th></tr></thead><tbody>${depts.map(d=>{ const a=mtCnt(D.K1.filter(k=>k.dept===d)), b=mtCnt(D.K0.filter(k=>k.dept===d)), t=a.red-b.red; return `<tr><td><b>${esc(PF_DEPT[d]||d)}</b></td><td>${a.red?wsTag(String(a.red),'red'):'0'}</td><td>${a.amber?wsTag(String(a.amber),'amber'):'0'}</td><td>${a.green?wsTag(String(a.green),'green'):'0'}</td><td>${b.red}</td><td>${t===0?'<span class="dim">same</span>':`<b style="color:var(${t<0?'--green':'--red'});">${t<0?'▼ better':'▲ worse'}</b>`}</td></tr>`; }).join('')||'<tr class="empty-row"><td colspan="6">No KPIs yet.</td></tr>'}</tbody></table></div>${mtAsk('Which department is getting worse two weeks running?','Who owns the biggest red?')}`; }});
+  S.push({t:'Transport & journeys',s:'Tonnage and trips by route, and the transport and journey KPIs',b:()=>`<div class="section-sub" style="margin:0 0 6px;">Tonnage by route</div>${mtTonRows()}<div class="section-sub" style="margin:16px 0 6px;">KPIs</div>${mtKpiTable(['transport','journey'])}${mtAsk('Which trucks missed their 14 trips and why?','Are loading and offloading delays at the same place every week?')}`});
+  S.push({t:'Safety, inspections & pre-trip',s:'Zero high-risk is the target',b:()=>`${mtKpiTable(['safety','inspections','prepost'])}${mtAsk('Is every incident actioned by the Safety Manager?','Which drivers keep appearing in findings?')}`});
+  S.push({t:'Maintenance',s:'Breakdown and repair rates, inspection compliance',b:()=>{ let ap=0; try{ ap=apprItems().filter(i=>i.status==='Pending'&&i.kind==='Repair request').length; }catch(e){} return `${mtKpiTable(['maintenance'])}<div class="dim" style="margin-top:8px;">Repair requests waiting for approval: <b>${ap}</b></div>${mtAsk('Which trucks are repeat repairs?','Which component keeps failing — do we need an RCA?')}`; }});
+  S.push({t:'Money',s:'Trip earnings, vouchers, cash and budget',b:()=>{
+    const A=teSum('lastweek'), B=teSum('prevweek'); const top=A.rows.slice(0,3), low=A.rows.slice(-3).reverse().filter(x=>top.indexOf(x)<0);
+    const vOk=(STATE.data.vouchers||[]).filter(v=>v.status===VCH_ST.OK&&v.date>=D.R1.start&&v.date<=D.R1.end).reduce((s,v)=>s+vTot(v.lines),0), vw=(STATE.data.vouchers||[]).filter(v=>v.status===VCH_ST.AUTH||v.status===VCH_ST.APPR).length;
+    const bud=pfCfg('budget:'+todayStr().slice(0,7))||{}, over=VCH_ACCTS.filter(([c])=>{ if(!num(bud[c])) return false; const mo=periodRange('month'); let a=0; (STATE.data.ledger||[]).filter(e=>e.account===c&&e.date>=mo.start&&e.date<=mo.end).forEach(e=>{ a+=num(e.debit)-num(e.credit); }); (STATE.data.tripEarnings||[]).filter(r=>r.date>=mo.start&&r.date<=mo.end).forEach(r=>{ if(ACC_LOGMAP[c]) a+=num(r[ACC_LOGMAP[c]]); }); return a>num(bud[c]); }).map(x=>x[1]);
+    return `<div class="grid cols-4" style="margin-bottom:12px;">${kc('Net from trips — last week',teNet(A.T.net),'Week before '+naira(B.T.net))}${kc('Trip costs — last week',naira(A.T.exp),'Week before '+naira(B.T.exp))}${kc('Vouchers approved — last week',naira(vOk),vw+' waiting',vw?'amber':'green')}${kc('Cash + bank today',acNeg(accBal('1010')+accBal('1020')),'Cash '+naira(accBal('1010'))+' · Bank '+naira(accBal('1020')))}</div>
+    <div class="grid cols-2"><div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">Best earning trucks — last week</div>${top.length?top.map(x=>`<div style="margin:4px 0;"><b>${esc(x.label)}</b> <span class="dim small">${fmt(x.n)} trip${x.n===1?'':'s'} · net</span> ${teNet(x.net)}</div>`).join(''):'<div class="dim small">No trips entered.</div>'}</div>
+    <div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">Lowest earning trucks — last week</div>${low.length?low.map(x=>`<div style="margin:4px 0;"><b>${esc(x.label)}</b> <span class="dim small">${fmt(x.n)} trip${x.n===1?'':'s'} · net</span> ${teNet(x.net)}</div>`).join(''):'<div class="dim small">—</div>'}</div></div>
+    <div class="card" style="margin-top:12px;padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">Over budget this month</div>${over.length?over.map(x=>`<div style="margin:3px 0;">${wsTag('over','red')} ${esc(x)}</div>`).join(''):'<div class="dim small">Nothing over budget (or no budget set yet — Accounts → Budget vs actual).</div>'}</div>${mtAsk('Does any truck earn less than it costs?','Is any budget line running ahead of the month?')}`; }});
+  S.push({t:'Drivers',s:'Best and the ones to coach — last week',b:()=>{ let L=[]; try{ L=pfRank('lastweek').L; }catch(e){} const top=L.slice(0,3), bot=L.slice(-3).reverse().filter(x=>top.indexOf(x)<0);
+    return `<div class="grid cols-2"><div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">Top drivers</div>${top.length?top.map((o,i)=>`<div style="margin:5px 0;">${wsTag('Top '+(i+1),'green')} <b>${esc(o.name)}</b> <span class="dim small">${Math.round(o.score)} · ${fmt(o.trips,0)} trips</span></div>`).join(''):'<div class="dim small">Not enough trips yet.</div>'}</div>
+    <div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">To coach</div>${bot.length?bot.map(o=>`<div style="margin:5px 0;">${wsTag('Coach','amber')} <b>${esc(o.name)}</b> <span class="dim small">${Math.round(o.score)} · ${esc((o.why||[]).slice(0,2).join(' · ')||o.viol+' violations')}</span></div>`).join(''):'<div class="dim small">—</div>'}</div></div>${mtAsk('Who gets recognised today?','Who needs a conversation this week?')}`; }});
+  S.push({t:'Warnings & documents',s:'Things that will become next week’s problem',b:()=>{ let W=[]; try{ W=pfAlerts().slice(0,10); }catch(e){} const docs=(STATE.data.docs||[]).map(d=>({d,s:docState(d)})).filter(x=>x.s.k==='red'||x.s.k==='amber').slice(0,8);
+    return `<div class="grid cols-2"><div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">Early warnings</div>${W.length?W.map(a=>`<div style="margin:5px 0;">${wsTag(a.sev==='high'?'Act now':'Watch',a.sev==='high'?'red':'amber')} <b>${esc(a.title)}</b></div>`).join(''):'<div class="dim small">Nothing flagged. 🎉</div>'}</div>
+    <div class="card" style="padding:12px 14px;"><div style="font-weight:600;margin-bottom:6px;">Documents expiring or expired</div>${docs.length?docs.map(x=>`<div style="margin:5px 0;">${wsTag(x.s.t,x.s.k)} <b>${esc(docRef(x.d))}</b> <span class="dim small">${esc(x.d.type)}</span></div>`).join(''):'<div class="dim small">All documents are in date.</div>'}</div></div>`; }});
+  S.push({t:'Decisions we must take',s:'Pick one, decide, give it an owner and a date',b:()=>{ const I=mtDecisionItems(); return `<div class="table-wrap"><table><thead><tr><th>Type</th><th>What needs deciding</th><th>Suggested owner</th><th></th></tr></thead><tbody>${I.length?I.map((x,i)=>`<tr><td>${wsTag(x.kind,x.kind==='Overdue action'?'red':'amber')}</td><td style="white-space:normal;min-width:260px;">${esc(x.text)}</td><td>${esc(x.owner||'')}</td><td><div class="row-actions">${x.go?`<button class="btn small" data-mt-go="${x.go}">Open</button>`:''}${x.aid?`<button class="btn small" data-mt-aext="${esc(x.aid)}">+7 days</button><button class="btn small primary" data-mt-adone="${esc(x.aid)}">Done</button>`:`<button class="btn small primary" data-mt-item="${i}">Decide</button>`}</div></td></tr>`).join(''):'<tr class="empty-row"><td colspan="4">Nothing is waiting for a decision. 🎉</td></tr>'}</tbody></table></div>${mtDecForm()}`; }});
+  S.push({t:'Actions carried over',s:'Everything still open from earlier meetings',b:()=>{ const A=(STATE.data.actions||[]).filter(a=>a.status!=='Done').sort((a,b)=>String(a.due||'9').localeCompare(String(b.due||'9'))); return `<div class="table-wrap"><table><thead><tr><th>Action</th><th>Owner</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>${A.length?A.map(mtActionRow).join(''):'<tr class="empty-row"><td colspan="5">No open actions. 🎉</td></tr>'}</tbody></table></div>${mtAsk('Which of these should be closed today?','Which keeps slipping — does it need a different owner?')}`; }});
+  S.push({t:'Wrap-up',s:'What we decided today',b:()=>{ const dec=(STATE.data.actions||[]).filter(a=>a.decision&&a.meetDate===todayStr()); return `<div class="card" style="padding:14px;margin-bottom:12px;"><div style="font-weight:600;margin-bottom:6px;">Decisions taken today (${dec.length})</div>${dec.length?dec.map(a=>`<div style="margin:5px 0;">✔ <b>${esc(a.title)}</b> <span class="dim small">— ${esc(a.owner)}, due ${esc(fmtDate(a.due))}</span></div>`).join(''):'<div class="dim">No decisions recorded yet — go back to “Decisions we must take”.</div>'}</div>
+    <div class="flex gap8" style="flex-wrap:wrap;"><button class="btn primary" data-mt-print="1">🖨 Print / save the minutes</button><button class="btn" data-mt-send="1">📲 Send the summary to my phone</button><button class="btn ghost" data-mt-exit="1">Finish meeting</button></div>`; }});
+  return S;
+}
+function mtOverlay(){
+  const S=mtSlides(), n=S.length, i=Math.max(0,Math.min(STATE.mtI,n-1)), sl=S[i];
+  return `<div class="mt-ov" id="mt-ov"><div class="mt-top"><div><b>Monday review</b> <span class="dim small">· ${esc(fmtDate(todayStr()))}</span></div><div class="mt-dots">${S.map((x,j)=>`<button data-mt-go-i="${j}" title="${esc(x.t)}" class="${j===i?'on':''}"></button>`).join('')}</div><button class="btn small" data-mt-exit="1">✕ Close</button></div>
+  <div class="mt-body"><div class="dim small mono">Slide ${i+1} of ${n}</div><h2>${esc(sl.t)}</h2><div class="dim" style="margin-bottom:14px;">${esc(sl.s||'')}</div>${sl.b()}</div>
+  <div class="mt-nav"><button class="btn" data-mt-prev="1" ${i===0?'disabled':''}>◀ Back</button><span class="dim small">Use ← → keys or swipe</span><button class="btn primary" data-mt-next="1" ${i===n-1?'disabled':''}>Next ▶</button></div></div>`;
+}
+function renderMondayPage(){
+  const D=mtData(), c=mtCnt(D.K1), I=mtDecisionItems(), last=(STATE.data.actions||[]).filter(a=>a.decision).sort((a,b)=>String(b.meetDate).localeCompare(String(a.meetDate))).slice(0,8);
+  return wsHead('Monday Meeting','A slide-by-slide walk-through of last week against the week before — with decisions and actions recorded as you go.')+
+  `<div class="card" style="padding:18px;margin-bottom:14px;"><div style="font-size:18px;font-weight:700;margin-bottom:4px;">Ready for the Monday review?</div><div class="dim" style="margin-bottom:12px;line-height:1.6;">Everything is pulled from the app for the week of <b>${esc(rangeText(D.R1))}</b>. Press start, step through the slides on the big screen, and record decisions right on the slide — they become actions with an owner and a due date, and come back next Monday.</div><button class="btn primary" data-mt-start="1" style="font-size:15px;padding:10px 18px;">▶ Start the meeting</button></div>
+  <div class="grid cols-4" style="margin-bottom:14px;">${kc('KPIs in red',c.red,'Last week',c.red?'red':'green')}${kc('Waiting for a decision',I.length,'Auto-detected',I.length?'amber':'green')}${kc('Open actions',pfOpenActions().length,mtOverdue().length+' overdue',mtOverdue().length?'red':'green')}${kc('Vouchers waiting',(STATE.data.vouchers||[]).filter(v=>v.status===VCH_ST.AUTH||v.status===VCH_ST.APPR).length,'Authorize / approve')}</div>
+  <div class="section-title"><span>Recent decisions</span><div class="line"></div></div><div class="table-wrap"><table><thead><tr><th>Decided</th><th>Decision</th><th>Owner</th><th>Due</th><th>Status</th></tr></thead><tbody>${last.length?last.map(a=>`<tr><td>${esc(fmtDate(a.meetDate))}</td><td style="white-space:normal;">${esc(a.title)}</td><td>${esc(a.owner)}</td><td>${esc(fmtDate(a.due))}</td><td>${a.status==='Done'?wsTag('Done','green'):(a.due&&a.due<todayStr()?wsTag('Overdue','red'):wsTag('Open','amber'))}</td></tr>`).join(''):'<tr class="empty-row"><td colspan="5">No decisions recorded yet.</td></tr>'}</tbody></table></div>`+(STATE.mtOpen?mtOverlay():'');
+}
+WS_TABS.monday=renderMondayPage;
+(function(){ const at=NAV.findIndex(n=>n[0]==='summary')+1; NAV.splice(at,0,['monday','Monday Meeting']); NAV_ICON.monday='🗓️'; NAV_LABEL.monday='Monday Meeting'; NAV_GROUP.monday='Overview'; })();
+/* ---------- events: meeting ---------- */
+const mtGo=i=>{ STATE.mtI=i; render(); const b=document.querySelector('.mt-body'); if(b) b.scrollTop=0; };
+document.addEventListener('input',ev=>{ const t=ev.target; if(t&&t.dataset&&t.dataset.mt!==undefined){ STATE.mtDraft=STATE.mtDraft||{title:'',owner:'General Manager',due:addDays(todayStr(),7),key:''}; STATE.mtDraft[t.dataset.mt]=t.value; } });
+document.addEventListener('change',async ev=>{ const t=ev.target; if(!t||!t.dataset) return; if(t.dataset.mt!==undefined) t.dispatchEvent(new Event('input',{bubbles:true})); if(t.dataset.mtAowner!==undefined){ const a=STATE.data.actions.find(x=>x.id===t.dataset.mtAowner); if(a){ a.owner=t.value; await persist('actions'); } } });
+document.addEventListener('submit',ev=>{ const f=ev.target; if(f&&f.matches&&f.matches('[data-mt-form]')){ ev.preventDefault(); mtAddAction(STATE.mtDraft||{title:'',owner:'General Manager',due:addDays(todayStr(),7)}); } });
+document.addEventListener('keydown',ev=>{ if(!STATE.mtOpen) return; const tg=(ev.target&&ev.target.tagName)||''; if(/INPUT|TEXTAREA|SELECT/.test(tg)) return; if(ev.key==='ArrowRight'){ mtGo(STATE.mtI+1); } else if(ev.key==='ArrowLeft'){ mtGo(Math.max(0,STATE.mtI-1)); } else if(ev.key==='Escape'){ STATE.mtOpen=false; render(); } });
+let _mtX=null; document.addEventListener('touchstart',e=>{ if(STATE.mtOpen&&e.target.closest&&e.target.closest('.mt-body')&&!e.target.closest('.table-wrap')) _mtX=e.touches[0].clientX; else _mtX=null; },{passive:true});
+document.addEventListener('touchend',e=>{ if(_mtX===null||!STATE.mtOpen) return; const dx=e.changedTouches[0].clientX-_mtX; _mtX=null; if(Math.abs(dx)>70) mtGo(dx<0?STATE.mtI+1:Math.max(0,STATE.mtI-1)); },{passive:true});
+document.addEventListener('click',async ev=>{
+  const b=ev.target.closest&&ev.target.closest('[data-mt-start],[data-mt-exit],[data-mt-prev],[data-mt-next],[data-mt-go-i],[data-mt-go],[data-mt-kdec],[data-mt-item],[data-mt-adone],[data-mt-aext],[data-mt-print],[data-mt-send]');
+  if(!b||!document.getElementById('app')) return; const g=n=>b.getAttribute(n), has=n=>b.hasAttribute(n);
+  if(has('data-mt-start')){ STATE.mtOpen=true; STATE.mtI=0; STATE.mtCache=null; render(); }
+  else if(has('data-mt-exit')){ STATE.mtOpen=false; render(); }
+  else if(has('data-mt-prev')) mtGo(Math.max(0,STATE.mtI-1)); else if(has('data-mt-next')) mtGo(STATE.mtI+1);
+  else if(has('data-mt-go-i')) mtGo(+g('data-mt-go-i'));
+  else if(has('data-mt-go')){ STATE.mtOpen=false; STATE.tab=g('data-mt-go'); render(); window.scrollTo(0,0); }
+  else if(has('data-mt-kdec')){ const k=mtData().K1.find(x=>x.id===g('data-mt-kdec')); if(k){ STATE.mtDraft={title:`Fix: ${k.label} (${pfVal(k,k.actual)} against ${k.target===null?'no target':pfVal(k,k.target)})`,owner:k.owner||'General Manager',due:addDays(todayStr(),7),key:'kpi|'+k.id+'|'+mtData().R1.start}; const sl=mtSlides(); STATE.mtI=sl.findIndex(x=>x.t==='Decisions we must take'); render(); } }
+  else if(has('data-mt-item')){ const x=mtDecisionItems()[+g('data-mt-item')]; if(x){ STATE.mtDraft={title:x.seed||x.text,owner:x.owner||'General Manager',due:addDays(todayStr(),7),key:x.key||''}; render(); } }
+  else if(has('data-mt-adone')){ const a=STATE.data.actions.find(x=>x.id===g('data-mt-adone')); if(a){ a.status='Done'; a.closedAt=todayStr(); await persist('actions'); } }
+  else if(has('data-mt-aext')){ const a=STATE.data.actions.find(x=>x.id===g('data-mt-aext')); if(a){ a.due=addDays(a.due&&a.due>todayStr()?a.due:todayStr(),7); await persist('actions'); } }
+  else if(has('data-mt-print')) printHtmlDoc(mtMinutesHtml());
+  else if(has('data-mt-send')){ try{ wsNotify('Monday review — decisions',((STATE.data.actions||[]).filter(a=>a.decision&&a.meetDate===todayStr()).map(a=>a.title+' ('+a.owner+', '+fmtDate(a.due)+')').join('; '))||pfMondayText(),3); showToast('Sent to the phone topic.'); }catch(e){ showToast('Could not send.'); } }
+});
+
+/* ================= TIDY & FRIENDLY ================= */
+const NAV_GROUP_NEW={summary:'Overview',monday:'Overview',performance:'Overview',daily:'Overview',transport:'Operations',journey:'Operations',live:'Operations',port:'Operations',inspections:'Operations',safety:'Safety & Workshop',maintenance:'Safety & Workshop',workshop:'Safety & Workshop',requests:'Safety & Workshop',rca:'Safety & Workshop',tyres:'Safety & Workshop',approvals:'Safety & Workshop',costkm:'Money',fuel:'Money',vouchers:'Money',accounts:'Money',reports:'Reports',monthly:'Reports',archive:'Reports',controls:'Controls & Admin',admin:'Controls & Admin'};
+Object.assign(NAV_GROUP,NAV_GROUP_NEW);
+(function(){ const order=['Overview','Operations','Safety & Workshop','Money','Reports','Controls & Admin'], idx=k=>{ const o=order.indexOf(NAV_GROUP[k]||''); return o<0?99:o; }; const withI=NAV.map((n,i)=>({n,i})); withI.sort((a,b)=>idx(a.n[0])-idx(b.n[0])||a.i-b.i); NAV.length=0; withI.forEach(x=>NAV.push(x.n)); const nl={costkm:'Cost & Earnings'}; NAV.forEach(n=>{ if(nl[n[0]]){ n[1]=nl[n[0]]; NAV_LABEL[n[0]]=nl[n[0]]; } }); })();
+/* a friendly start to the Summary page */
+const _sum18=renderSummary;
+renderSummary=function(){
+  let hello=''; try{
+    const h=new Date().getHours(), g=h<12?'Good morning':h<17?'Good afternoon':'Good evening'; let nm=''; try{ nm=localStorage.getItem('fd_name')||''; }catch(e){} if(!nm){ const nn=(STATE.data.apprCfg||{}).names||{}; nm=nn[myRole()]||''; }
+    const w=[]; const vw=vchWaiting(); if(vw) w.push(`<button class="btn small" data-goto="vouchers">${vw} voucher${vw>1?'s':''} waiting for you</button>`);
+    let ap=0; try{ ap=apprItems().filter(i=>i.status==='Pending'&&i.roles.indexOf(myRole())>-1).length; }catch(e){} if(ap) w.push(`<button class="btn small" data-goto="approvals">${ap} approval${ap>1?'s':''} waiting for you</button>`);
+    const od=mtOverdue().length; if(od) w.push(`<button class="btn small" data-goto="performance">${od} overdue action${od>1?'s':''}</button>`);
+    hello=`<div class="card" style="padding:14px 16px;margin-bottom:14px;"><div style="font-size:17px;font-weight:700;">${g}${nm?', '+esc(nm):''} 👋</div><div class="dim" style="margin:3px 0 10px;">${w.length?'A few things are waiting for you:':'Nothing is waiting for you right now. Here is what you can do:'}</div><div class="flex gap8" style="flex-wrap:wrap;">${w.join('')}<button class="btn small primary" data-goto="monday">🗓️ Monday Meeting</button><button class="btn small" data-goto="journey">Log a trip</button><button class="btn small" data-goto="vouchers">Raise a voucher</button><button class="btn small" data-goto="accounts">Accounts</button></div></div>`;
+  }catch(e){ console.error('hello',e); }
+  return hello+_sum18.apply(this,arguments);
+};
+/* gentle polish: spacing, touch targets, empty states, focus */
+(function(){ const st=document.createElement('style'); st.textContent=`
+  .navgroup{margin-top:14px;font-size:10.5px;letter-spacing:.09em;opacity:.7;}
+  .card,.form-card{transition:border-color .15s;} .card:hover{border-color:var(--border-lite);}
+  .btn{min-height:32px;} .btn:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--amber);outline-offset:1px;}
+  .empty-row td{text-align:center;color:var(--muted);padding:22px 12px !important;}
+  .section-title{margin-top:22px;}
+  .table-wrap{scrollbar-width:thin;}
+  @media (max-width:700px){ .btn{min-height:40px;} input,select{min-height:40px;} .topbar h1{font-size:20px;} }
+  .mt-ov{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;}
+  .mt-top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  .mt-dots{display:flex;gap:6px;flex-wrap:wrap;} .mt-dots button{width:11px;height:11px;border-radius:50%;border:1px solid var(--dim);background:transparent;padding:0;cursor:pointer;} .mt-dots button.on{background:var(--amber);border-color:var(--amber);}
+  .mt-body{flex:1;overflow:auto;padding:22px clamp(16px,5vw,64px);max-width:1200px;width:100%;margin:0 auto;} .mt-body h2{font-size:clamp(24px,4vw,36px);margin:4px 0 2px;}
+  body:has(.mt-ov) .toast{bottom:80px !important;}
+  .mt-nav{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 18px;border-top:1px solid var(--border);}
+`; document.head.appendChild(st); })();
 
 loadAll();
 </script>
