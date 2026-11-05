@@ -13,7 +13,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <title>FleetDesk — Vehicle Management System</title>
 <link rel="preconnect" href="https://fonts.googleapis.com/">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'"><noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
 <style>
   :root{
     --bg:#0B0E13; --panel:#141920; --panel-2:#191F28; --border:#232B36; --border-lite:#2C3644;
@@ -397,7 +397,7 @@
 .pf-reco{margin:0;padding-left:18px;font-size:12.5px;line-height:1.6;}
 
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.1 · 5 Nov 2026';
+const APP_VERSION='v15.2 · 5 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -10170,6 +10170,33 @@ renderSummary=function(){
   body:has(.mt-ov) .toast{bottom:80px !important;}
   .mt-nav{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 18px;border-top:1px solid var(--border);}
 `; document.head.appendChild(st); })();
+
+/* ============================================================ ws_x.js ============================================================ */
+/* ===== v15.2: faster opening — the last saved data shows at once while the latest loads · scripts and fonts no longer block the page ===== */
+const SNAP_DB='fleetdesk-snap';
+function snapOpen(){ return new Promise((res,rej)=>{ try{ const r=indexedDB.open(SNAP_DB,1); r.onupgradeneeded=()=>r.result.createObjectStore('s'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }catch(e){ rej(e); } }); }
+async function snapPut(o){ try{ const db=await snapOpen(); db.transaction('s','readwrite').objectStore('s').put(JSON.stringify(o),'last'); }catch(e){} }
+async function snapGet(){ try{ const db=await snapOpen(); return await new Promise(res=>{ const q=db.transaction('s').objectStore('s').get('last'); q.onsuccess=()=>res(q.result||null); q.onerror=()=>res(null); }); }catch(e){ return null; } }
+const _render19=render;
+render=function(){ if(STATE.loading&&STATE.cacheShow){ STATE.loading=false; try{ _render19(); } finally{ STATE.loading=true; } } else _render19(); };
+const _persist19=persist;
+persist=async function(){ if(STATE.fromSnap&&(STATE.loading||STATE.connectionError)){ showToast('Still loading the latest data — please try again in a few seconds.'); return; } return _persist19.apply(this,arguments); };
+let _snapAt=0;
+const _la19=loadAll;
+loadAll=async function(){
+  const r=await _la19.apply(this,arguments);
+  STATE.cacheShow=false; if(!STATE.connectionError) STATE.fromSnap=false;
+  try{ if(!STATE.connectionError&&!STATE.loading&&Date.now()-_snapAt>60000){ _snapAt=Date.now(); snapPut({url:GAS_URL,at:Date.now(),data:STATE.data,targets:STATE.targets}); } }catch(e){}
+  return r;
+};
+(async()=>{
+  try{
+    if(!GAS_CONFIGURED) return; const raw=await snapGet(); if(!raw||!STATE.loading) return;
+    const o=JSON.parse(raw); if(o.url!==GAS_URL||Date.now()-o.at>7*864e5||!o.data||!(o.data.vehicles||[]).length) return;
+    STATE.data=Object.assign(STATE.data,o.data); if(o.targets) STATE.targets=Object.assign({},STATE.targets,o.targets);
+    STATE.cacheShow=true; STATE.fromSnap=true; render();
+  }catch(e){ console.error('snapshot',e); }
+})();
 
 loadAll();
 </script>
