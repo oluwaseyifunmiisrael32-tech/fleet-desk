@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v14.2 · 5 Nov 2026';
+const APP_VERSION='v15.0 · 5 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -9459,6 +9459,377 @@ const _att17=attachEvents; attachEvents=function(){ _att17(); try{
   document.querySelectorAll('[data-oct-run]').forEach(e=>e.addEventListener('click',async()=>{ e.disabled=true; STATE.ofBusy=0; OCT_TRIES=0; showToast('Applying the October correction…'); await octKick(); render(); }));
 }catch(err){ console.error('oct run',err); } };
 
+
+/* ============================================================ ws_v.js ============================================================ */
+/* ===== v15.0: Trip earnings per truck (inside Cost per KM) · E-vouchers (raise → Head of Finance authorizes → MD/GM approves), automatic ledger postings, print/download, physical voucher storage ===== */
+['tripEarnings','vouchers','voucherScans','ledger'].forEach(k=>{ if(WS_COLLS.indexOf(k)<0) WS_COLLS.push(k); STORAGE_KEYS[k]='vms:'+k; if(!STATE.data[k]) STATE.data[k]=[]; });
+if(WS_ROLES.indexOf('Head of Finance')<0) WS_ROLES.splice(WS_ROLES.indexOf('Viewer'),0,'Head of Finance');
+const SKB_LOGO='data:image/jpeg;base64,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';
+const FIN_ALL=['Head of Finance','Logistics Manager','General Manager','MD'];
+const isoNow=()=>new Date().toISOString();
+const b64of=u8=>{ let s=''; for(let i=0;i<u8.length;i+=0x8000) s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(s); };
+
+/* ================= PART 1 — TRIP EARNINGS PER TRUCK ================= */
+const TE_W=[['lastweek','Last week'],['prevweek','Week before'],['week','This week so far']], TE_M=[['month','This month so far'],['lastmonth','Last month'],['prevmonth','Month before']];
+Object.assign(STATE,{teView:STATE.teView||'km',teWk:STATE.teWk||'lastweek',teMo:STATE.teMo||'month',teTruck:STATE.teTruck||'',teAll:false});
+const teNewRow=()=>({truck:'',loading:'',offloading:'',allow:'',levy:'',gas:'',diesel:'',rate:''});
+STATE.teDraft=STATE.teDraft||{date:todayStr(),rows:[teNewRow()],editId:''};
+const teExp=r=>num(r.allow)+num(r.levy)+num(r.gas)+num(r.diesel);
+const teLabel=r=>r.vehicleId?vehicleLabel(r.vehicleId):(r.regNoText||'—');
+const teKey=r=>r.vehicleId||('~'+normReg(r.regNoText));
+function teMatch(txt){ const k=normReg(txt); if(!k) return null; return (STATE.data.vehicles||[]).find(v=>normReg(v.regNo)===k)||(STATE.data.vehicles||[]).find(v=>{ const d=String(v.regNo||'').replace(/[^0-9]/g,''), e=String(txt||'').replace(/[^0-9]/g,''); return e.length>=3&&d===e; })||null; }
+function teSum(period){
+  const by={}; const T={n:0,rate:0,allow:0,levy:0,gas:0,diesel:0,exp:0,net:0};
+  (STATE.data.tripEarnings||[]).filter(r=>inPeriod(r.date,period)).forEach(r=>{
+    const k=teKey(r), x=by[k]||(by[k]={label:teLabel(r),n:0,rate:0,allow:0,levy:0,gas:0,diesel:0,exp:0,net:0});
+    const a=num(r.allow),l=num(r.levy),g=num(r.gas),d=num(r.diesel),rt=num(r.rate),e=a+l+g+d;
+    [x,T].forEach(o=>{ o.n++; o.rate+=rt; o.allow+=a; o.levy+=l; o.gas+=g; o.diesel+=d; o.exp+=e; o.net+=rt-e; });
+  });
+  return {rows:Object.values(by).sort((a,b)=>b.net-a.net),T};
+}
+const teNet=v=>`<b style="color:var(${v<0?'--red':'--green'});">${naira(v)}</b>`;
+function teSumTable(period,title,list,stateKey){
+  const S=teSum(period), rg=periodRange(period);
+  const row=(x,tot)=>`<tr${tot?' style="font-weight:700;background:rgba(232,163,61,.10);"':''}><td>${tot?'All trucks':esc(x.label)}</td><td>${fmt(x.n)}</td><td>${naira(x.rate)}</td><td>${naira(x.allow)}</td><td>${naira(x.levy)}</td><td>${naira(x.gas)}</td><td>${naira(x.diesel)}</td><td>${naira(x.exp)}</td><td>${teNet(x.net)}</td><td>${x.n?naira(x.net/x.n):'—'}</td><td>${x.rate?Math.round(x.net/x.rate*100)+'%':'—'}</td></tr>`;
+  return `<div class="section-title"><span>${title}</span><div class="line"></div></div>
+  <div class="flex gap8" style="margin-bottom:8px;flex-wrap:wrap;align-items:center;">${list.map(([k,l])=>`<button class="btn small ${STATE[stateKey]===k?'primary':''}" data-te-${stateKey==='teWk'?'wk':'mo'}="${k}">${l}</button>`).join('')}<span class="dim small mono">${esc(rangeText(rg))}</span></div>
+  <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Trips</th><th>Rate (income)</th><th>Trip allowance</th><th>Community levy</th><th>Gas</th><th>Diesel</th><th>Total expenses</th><th>Net — what the truck makes</th><th>Net / trip</th><th>Margin</th></tr></thead><tbody>${S.rows.length?S.rows.map(x=>row(x)).join('')+row(S.T,true):'<tr class="empty-row"><td colspan="11">No trips entered for this period.</td></tr>'}</tbody></table></div>`;
+}
+function teFormHtml(){
+  const d=STATE.teDraft, locs=new Set(['Apapa','Ewekoro','Sagamu','Adunmbu','Igbesa']); (STATE.data.tripEarnings||[]).forEach(r=>{ if(r.loading) locs.add(r.loading); if(r.offloading) locs.add(r.offloading); });
+  const inp=(f,i,v,ph,w,type)=>`<input type="${type||'number'}" ${type==='text'?'':'step="0.01" min="0"'} data-te="${f}" data-i="${i}" value="${esc(v)}" placeholder="${ph||''}" style="width:${w||96}px;">`;
+  return `<datalist id="dl-te-trucks">${(STATE.data.vehicles||[]).map(v=>`<option value="${esc(v.regNo)}">`).join('')}</datalist><datalist id="dl-te-loc">${[...locs].map(l=>`<option value="${esc(l)}">`).join('')}</datalist>
+  <form data-te-form="1" class="form-card" style="margin-bottom:14px;">
+    <div class="flex gap8" style="flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;"><div><label>Date</label><input type="date" data-te="date" value="${esc(d.date)}" required></div>
+      <div class="dim small" style="flex:1;min-width:220px;line-height:1.5;">${d.editId?'<b>Editing one entry.</b> ':''}One row = one trip. Add as many trucks as you need and save them all at once. Total expenses is worked out for you; <b>net = rate − total expenses</b>.</div></div>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>Truck no.</th><th>Loading location</th><th>Offloading location</th><th>Trip allowance (₦)</th><th>Community levy (₦)</th><th>Gas (₦)</th><th>Diesel (₦)</th><th>Total expenses</th><th>Rate (₦)</th><th>Net</th><th></th></tr></thead><tbody>${d.rows.map((r,i)=>`<tr><td>${i+1}</td>
+      <td><input type="text" list="dl-te-trucks" data-te="truck" data-i="${i}" value="${esc(r.truck)}" placeholder="pick or type" style="width:130px;"></td>
+      <td><input type="text" list="dl-te-loc" data-te="loading" data-i="${i}" value="${esc(r.loading)}" placeholder="Loading" style="width:120px;"></td>
+      <td><input type="text" list="dl-te-loc" data-te="offloading" data-i="${i}" value="${esc(r.offloading)}" placeholder="Offloading" style="width:120px;"></td>
+      <td>${inp('allow',i,r.allow)}</td><td>${inp('levy',i,r.levy)}</td><td>${inp('gas',i,r.gas)}</td><td>${inp('diesel',i,r.diesel)}</td>
+      <td id="te-exp-${i}"><b>${naira(teExp(r))}</b></td><td>${inp('rate',i,r.rate,'',110)}</td><td id="te-net-${i}">${teNet(num(r.rate)-teExp(r))}</td>
+      <td>${d.rows.length>1?`<button type="button" class="btn small danger" data-te-delrow="${i}">✕</button>`:''}</td></tr>`).join('')}</tbody></table></div>
+    <div class="form-actions" style="flex-wrap:wrap;">${d.editId?'':`<button type="button" class="btn small" data-te-addrow="1">+ Add a truck</button><button type="button" class="btn small" data-te-alltrucks="1">Add every truck</button><button type="button" class="btn small" data-te-same="1">Copy row 1 to all rows</button>`}<button type="button" class="btn small ghost" data-te-clear="1">${d.editId?'Cancel edit':'Clear'}</button><button type="submit" class="btn primary">${d.editId?'Save changes':'Save all trips'}</button></div>
+  </form>`;
+}
+function renderEarningsPage(){
+  const all=(STATE.data.tripEarnings||[]), mo=teSum('month').T, wk=teSum('lastweek').T;
+  const trucks=[...new Set(all.map(r=>teKey(r)))].map(k=>({k,l:teLabel(all.find(r=>teKey(r)===k))})).sort((a,b)=>a.l.localeCompare(b.l));
+  let log=all.filter(r=>!STATE.teTruck||teKey(r)===STATE.teTruck).sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0); const shown=STATE.teAll?log:log.slice(0,60);
+  const k=(l,v,s)=>`<div class="card kpi"><div class="label"><span>${l}</span></div><div class="value">${v}</div><div class="target">${s}</div></div>`;
+  return `<div class="topbar"><div><h1>Trip earnings per truck</h1><div class="sub">What each truck makes from its trips — income (rate) less allowance, levy, gas and diesel — per week and per month.</div></div><div class="topbar-right">${syncBadge()}</div></div>
+  <div class="grid cols-4" style="margin-bottom:14px;">${k('Net — last week',teNet(wk.net),fmt(wk.n)+' trips · income '+naira(wk.rate))}${k('Net — this month',teNet(mo.net),fmt(mo.n)+' trips · income '+naira(mo.rate))}${k('Expenses this month',naira(mo.exp),'Allowance '+naira(mo.allow)+' · levy '+naira(mo.levy))}${k('Fuel this month',naira(mo.gas+mo.diesel),'Gas '+naira(mo.gas)+' · diesel '+naira(mo.diesel))}</div>
+  ${teFormHtml()}
+  ${teSumTable(STATE.teWk,'Per truck — weekly (Monday to Sunday)',TE_W,'teWk')}
+  ${teSumTable(STATE.teMo,'Per truck — monthly',TE_M,'teMo')}
+  <div class="section-title"><span>Trip log</span><div class="line"></div>
+    <select data-te-truckfilter="1" style="width:auto;"><option value="">All trucks</option>${trucks.map(t=>`<option value="${esc(t.k)}" ${STATE.teTruck===t.k?'selected':''}>${esc(t.l)}</option>`).join('')}</select> <button class="btn small ghost" data-te-csv="1">Download CSV</button></div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Truck no.</th><th>Trip allowance</th><th>Loading</th><th>Offloading</th><th>Community levy</th><th>Gas</th><th>Diesel</th><th>Total expenses</th><th>Rate</th><th>Net</th><th></th></tr></thead><tbody>${shown.length?shown.map(r=>`<tr><td>${esc(fmtDate(r.date))}</td><td>${esc(teLabel(r))}</td><td>${naira(num(r.allow))}</td><td>${esc(r.loading||'')}</td><td>${esc(r.offloading||'')}</td><td>${naira(num(r.levy))}</td><td>${naira(num(r.gas))}</td><td>${naira(num(r.diesel))}</td><td>${naira(teExp(r))}</td><td>${naira(num(r.rate))}</td><td>${teNet(num(r.rate)-teExp(r))}</td><td><div class="row-actions"><button class="btn small" data-te-edit="${esc(r.id)}">Edit</button><button class="btn small danger" data-te-del="${esc(r.id)}">Delete</button></div></td></tr>`).join(''):'<tr class="empty-row"><td colspan="12">No trips saved yet.</td></tr>'}</tbody></table></div>
+  ${log.length>60?`<div style="margin-top:8px;"><button class="btn small ghost" data-te-showall="1">${STATE.teAll?'Show the latest 60':'Show all '+log.length}</button></div>`:''}`;
+}
+async function teSave(){
+  const d=STATE.teDraft; if(!d.date){ showToast('Pick the date.'); return; }
+  const rows=d.rows.filter(r=>String(r.truck).trim()||num(r.rate)||teExp(r)); if(!rows.length){ showToast('Add at least one truck.'); return; }
+  const bad=rows.findIndex(r=>!String(r.truck).trim()); if(bad>=0){ showToast('Row '+(d.rows.indexOf(rows[bad])+1)+' has no truck number.'); return; }
+  const mk=(r,id)=>{ const v=teMatch(r.truck), rec={id:id||uid(),date:d.date,vehicleId:v?v.id:'',regNoText:v?'':String(r.truck).trim().toUpperCase(),allow:String(num(r.allow)),loading:String(r.loading||'').trim(),offloading:String(r.offloading||'').trim(),levy:String(num(r.levy)),gas:String(num(r.gas)),diesel:String(num(r.diesel)),rate:String(num(r.rate)),totalExpenses:String(teExp(r)),by:(typeof wsWho==='function'?wsWho():''),at:isoNow()}; return rec; };
+  if(d.editId){ const i=STATE.data.tripEarnings.findIndex(x=>x.id===d.editId); if(i>=0) STATE.data.tripEarnings[i]=mk(rows[0],d.editId); }
+  else STATE.data.tripEarnings=(STATE.data.tripEarnings||[]).concat(rows.map(r=>mk(r)));
+  const n=rows.length; STATE.teDraft={date:d.date,rows:[teNewRow()],editId:''};
+  await persist('tripEarnings'); showToast(d.editId?'Entry updated.':n+' trip'+(n>1?'s':'')+' saved.');
+}
+function teCsv(){
+  const q=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"'; const L=[['Date','Truck No','Trip Allowance','Loading Location','Offloading Location','Community Levy','Gas','Diesel','Total Expenses','Rate','Net'].map(q).join(',')];
+  (STATE.data.tripEarnings||[]).slice().sort((a,b)=>a.date<b.date?-1:1).forEach(r=>L.push([r.date,teLabel(r),num(r.allow),r.loading,r.offloading,num(r.levy),num(r.gas),num(r.diesel),teExp(r),num(r.rate),num(r.rate)-teExp(r)].map(q).join(',')));
+  triggerDownload(new Blob([L.join('\r\n')],{type:'text/csv'}),'Trip_earnings_'+todayStr()+'.csv');
+}
+const _wsCost18=WS_TABS.costkm;
+WS_TABS.costkm=function(){
+  const strip=`<div class="tabs" style="margin-bottom:14px;"><button data-te-view="km" class="${STATE.teView!=='earn'?'active':''}">Cost per KM</button><button data-te-view="earn" class="${STATE.teView==='earn'?'active':''}">Trip earnings per truck</button></div>`;
+  return strip+(STATE.teView==='earn'?renderEarningsPage():(_wsCost18?_wsCost18():renderCostKmPage()));
+};
+
+/* ================= PART 2 — E-VOUCHERS ================= */
+const VCH_ACCTS=[['5110','Fuel — Diesel'],['5120','Fuel — CNG / Gas'],['5130','Trip allowance'],['5140','Community levy'],['5210','Repairs & maintenance'],['5220','Spare parts'],['5230','Tyres'],['5310','Port & clearing charges'],['5320','Tolls, parking & fines'],['5410','Driver welfare & salaries'],['5510','Insurance & vehicle documents'],['5610','Office & administration'],['5710','Travel & accommodation'],['5990','Other expenses']];
+const VCH_PAY=[['1010','Cash in hand','Cash'],['1020','Bank','Bank transfer'],['1020','Bank','Cheque']];
+const VCH_ST={AUTH:'Awaiting authorization',APPR:'Awaiting approval',OK:'Approved',REJ:'Rejected',REV:'Reversed'};
+Object.assign(STATE,{vchView:STATE.vchView||'list',vchFilter:STATE.vchFilter||'all',vchOpen:'',vchLedgerP:STATE.vchLedgerP||'month',vchPrev:null,vchFile:null});
+const vchNewLine=()=>({date:'',desc:'',acct:'5990',truck:'',qty:'1',price:''});
+const vchNewDraft=()=>({date:todayStr(),payee:'',payFrom:'Cash',narr:'',preparedBy:(()=>{ try{ return localStorage.getItem('fd_name')||''; }catch(e){ return ''; } })(),lines:[vchNewLine()]});
+STATE.vchDraft=STATE.vchDraft||vchNewDraft();
+const VDOC_KINDS=['Invoice','Receipt','Quotation / proforma','Waybill / delivery note','Approval email / memo','Other'];
+STATE.vdocQ=STATE.vdocQ||[]; STATE.vdocKind=STATE.vdocKind||'Invoice';
+STATE.vsDraft=STATE.vsDraft||{ref:'',kind:'Signed voucher',date:todayStr(),amount:'',note:''};
+const vAmt=l=>Math.round(num(l.qty)*num(l.price)*100)/100;
+const vTot=ls=>Math.round((ls||[]).reduce((a,l)=>a+vAmt(l),0)*100)/100;
+function nWords(n){
+  const a=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'], b=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const h=x=>{ let s=''; if(x>=100){ s+=a[Math.floor(x/100)]+' Hundred'; x%=100; if(x) s+=' and '; } if(x>=20) s+=b[Math.floor(x/10)]+(x%10?'-'+a[x%10]:''); else if(x>0) s+=a[x]; return s; };
+  let w=Math.floor(Math.abs(n)), k=Math.round((Math.abs(n)-w)*100); if(k===100){ w++; k=0; }
+  if(!w&&!k) return 'Zero Naira Only';
+  const sc=[[1e9,'Billion'],[1e6,'Million'],[1e3,'Thousand']]; let out=[]; sc.forEach(([v,nm])=>{ if(w>=v){ out.push(h(Math.floor(w/v))+' '+nm); w%=v; } }); if(w) out.push((out.length&&w<100?'and ':'')+h(w));
+  return (out.join(' ')||'Zero')+' Naira'+(k?' and '+h(k)+' Kobo':'')+' Only';
+}
+const vAcctName=c=>(VCH_ACCTS.find(x=>x[0]===c)||['',c])[1];
+const vNameOf=by=>String(by||'').split(' · ')[0]||'';
+const vRoleOf=by=>{ const p=String(by||'').split(' · '); return p.length>1?p[1]:p[0]; };
+function vchTag(s){ return wsTag(s,s===VCH_ST.OK?'green':s===VCH_ST.REJ?'red':s===VCH_ST.APPR?'teal':s===VCH_ST.REV?'grey':'amber'); }
+const vchWaiting=()=>{ const me=myRole(); return (STATE.data.vouchers||[]).filter(v=>(v.status===VCH_ST.AUTH&&me==='Head of Finance')||(v.status===VCH_ST.APPR&&(me==='MD'||me==='General Manager'))).length; };
+const _cb18=criticalBadgeFor; criticalBadgeFor=function(k){ if(k==='vouchers'){ const n=vchWaiting(); return n>0?n:null; } return _cb18(k); };
+
+/* ---------- the voucher document (screen, print and download) ---------- */
+const VCH_CSS='.vch{background:#fff;color:#111;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.45;padding:26px 30px;border:1px solid #cfd3d9;max-width:820px;margin:0 auto;position:relative;box-sizing:border-box;} .vch *{box-sizing:border-box;} .vch td,.vch th,.vch div,.vch span,.vch b{font-family:Arial,Helvetica,sans-serif;} .vch .vh{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:2px solid #1f2a37;padding-bottom:12px;margin-bottom:14px;} .vch .co{font-size:18px;font-weight:700;} .vch .tt{font-size:15px;font-weight:700;letter-spacing:.08em;text-align:right;} .vch .meta{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 24px;margin-bottom:14px;} .vch .meta div span{color:#555;display:inline-block;min-width:92px;} .vch table{width:100%;border-collapse:collapse;margin-bottom:8px;} .vch th{background:#eef0f3;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:7px 8px;border:1px solid #bfc5cd;color:#111;} .vch td{padding:7px 8px;border:1px solid #bfc5cd;color:#111;background:#fff;vertical-align:top;} .vch td.n,.vch th.n{text-align:right;white-space:nowrap;} .vch tr.tot td{font-weight:700;background:#f6f7f9;} .vch .words{margin:6px 0 4px;font-style:italic;} .vch .sig{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:34px;} .vch .sig .box{min-height:92px;} .vch .sig .nm{min-height:34px;font-style:italic;font-size:14px;border-bottom:1px solid #111;padding-bottom:3px;} .vch .sig .cap{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;margin-top:4px;font-weight:700;} .vch .sig .sub{font-size:11px;color:#444;} .vch .stamp{position:absolute;right:34px;top:118px;border:3px solid;padding:3px 12px;font-weight:700;letter-spacing:.12em;transform:rotate(-8deg);opacity:.75;font-size:15px;} .vch .stamp.ok{color:#1b7a4b;border-color:#1b7a4b;} .vch .stamp.rej{color:#b3261e;border-color:#b3261e;} .vch .stamp.rev{color:#555;border-color:#555;} .vch .note{margin-top:14px;font-size:11.5px;color:#b3261e;} .vch .foot{margin-top:18px;font-size:10.5px;color:#666;} @media print{.vch{border:none;padding:0;max-width:none;} @page{margin:14mm;}}';
+function vchSigBox(cap,who,at,pending){
+  const nm=who?vNameOf(who):'', role=who?vRoleOf(who):'';
+  return `<div class="box"><div class="nm">${who?esc(nm||role):'&nbsp;'}</div><div class="cap">${cap}</div>${who?`<div class="sub">${esc(role)} · ${esc(fmtDate(String(at||'').slice(0,10)))} ${esc(String(at||'').slice(11,16))}<br>Signed electronically</div>`:`<div class="sub">${pending?esc(pending):'&nbsp;'}</div>`}</div>`;
+}
+function vchDocBody(v){
+  const stamp=v.status===VCH_ST.OK?'<div class="stamp ok">APPROVED</div>':v.status===VCH_ST.REJ?'<div class="stamp rej">REJECTED</div>':v.status===VCH_ST.REV?'<div class="stamp rev">REVERSED</div>':'';
+  const lines=(v.lines||[]), tot=vTot(lines);
+  const pend2=v.status===VCH_ST.AUTH?'Awaiting Head of Finance':(v.status===VCH_ST.REJ?'':'');
+  const pend3=v.status===VCH_ST.APPR?'Awaiting MD / GM':(v.status===VCH_ST.AUTH?'After authorization':'');
+  return `<style>${VCH_CSS}</style><div class="vch">${stamp}
+  <div class="vh"><div style="display:flex;align-items:center;gap:10px;"><img src="${SKB_LOGO}" alt="SKB Logistics Ltd" style="height:62px;width:auto;"><div><div class="co">SKB Logistics Ltd</div><div style="color:#555;font-size:11.5px;">A Division of Bayoog Investment Ltd.</div></div></div><div><div class="tt">PAYMENT VOUCHER</div><div style="text-align:right;margin-top:4px;"><b>Ref no:</b> ${esc(v.ref)}</div></div></div>
+  <div class="meta"><div><span>Date</span><b>${esc(fmtDate(v.date))}</b></div><div><span>Paid to</span><b>${esc(v.payee||'—')}</b></div><div><span>Payment from</span>${esc(v.payFrom||'Cash')}</div><div><span>Status</span>${esc(v.status)}</div>${v.narr?`<div style="grid-column:1/-1;"><span>Narration</span>${esc(v.narr)}</div>`:''}</div>
+  <table><thead><tr><th style="width:74px;">Date</th><th>Description of expense</th><th>S/Ref</th><th class="n">Rate / price (₦)</th><th class="n">Qty</th><th class="n">Amount (₦)</th></tr></thead><tbody>${lines.map((l,i)=>`<tr><td>${esc(fmtDate(l.date||v.date))}</td><td>${esc(l.desc)}<div style="color:#555;font-size:11px;">${esc(vAcctName(l.acct))}</div></td><td>${esc(l.ref||'')}</td><td class="n">${fmt(num(l.price),2)}</td><td class="n">${esc(String(num(l.qty)))}</td><td class="n">${fmt(vAmt(l),2)}</td></tr>`).join('')}<tr class="tot"><td colspan="5" class="n">TOTAL AMOUNT</td><td class="n">₦${fmt(tot,2)}</td></tr></tbody></table>
+  <div class="words"><b>Total amount in words:</b> ${esc(nWords(tot))}</div>
+  <div class="sig">${vchSigBox('Prepared by',(v.preparedBy||'')+((v.preparedRole&&v.preparedRole!=='Viewer')?' · '+v.preparedRole:' · Requested'),v.preparedAt)}${vchSigBox('Authorized by',v.auth&&v.auth.by,v.auth&&v.auth.at,pend2)}${vchSigBox('Approved by',v.appr&&v.appr.by,v.appr&&v.appr.at,pend3)}</div>
+  ${v.rej?`<div class="note"><b>Rejected</b> at ${v.rej.stage==='authorization'?'authorization':'approval'} by ${esc(vNameOf(v.rej.by)||vRoleOf(v.rej.by))} — ${esc(v.rej.note||'')}</div>`:''}${v.rev?`<div class="note"><b>Reversed</b> by ${esc(vNameOf(v.rev.by)||vRoleOf(v.rev.by))} on ${esc(fmtDate(String(v.rev.at).slice(0,10)))} — ${esc(v.rev.note||'')}</div>`:''}
+  ${(v._docs&&v._docs.length)?`<div style="margin-top:12px;font-size:12px;"><b>Supporting documents attached:</b> ${v._docs.map(d=>esc(d.kind+' — '+d.name)).join('; ')}</div>`:''}<div class="foot">Raised in FleetDesk · ${esc(v.ref)} · printed ${esc(fmtDate(todayStr()))}</div></div>`;
+}
+const vchWithDocs=v=>Object.assign({},v,{_docs:(STATE.data.voucherScans||[]).filter(s=>s.ref===v.ref&&s.kind!=='Signed voucher')});
+const vchDocFull=v0=>{ const v=vchWithDocs(v0); return `<!doctype html><html><head><meta charset="utf-8"><title>Voucher ${esc(v.ref)}</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:16px;background:#fff;} ${VCH_CSS}</style></head><body>${vchDocBody(v)}</body></html>`; };
+function printHtmlDoc(html){
+  const f=document.createElement('iframe'); f.setAttribute('style','position:fixed;right:0;bottom:0;width:0;height:0;border:0;'); document.body.appendChild(f);
+  const d=f.contentWindow.document; d.open(); d.write(html); d.close();
+  setTimeout(()=>{ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ showToast('Printing is not available here — use Download instead.'); } setTimeout(()=>f.remove(),4000); },500);
+}
+
+/* ---------- postings: approval posts a balanced entry to the ledger ---------- */
+function vchPostEntries(v,rev){
+  const sgn=rev?-1:1, pay=VCH_PAY.find(p=>p[2]===v.payFrom)||VCH_PAY[0], out=[], base={voucherId:v.id,ref:v.ref,date:v.date,postedAt:isoNow(),rev:!!rev};
+  (v.lines||[]).forEach(l=>{ const a=vAmt(l); if(!a) return; const dr=sgn>0?a:0, cr=sgn>0?0:a; out.push(Object.assign({id:uid(),account:l.acct,accountName:vAcctName(l.acct),debit:dr,credit:cr,vehicleId:l.vehicleId||'',regNoText:l.regNoText||'',narr:(rev?'Reversal — ':'')+l.desc+' · '+(v.payee||'')},base)); });
+  const tot=vTot(v.lines); out.push(Object.assign({id:uid(),account:pay[0],accountName:pay[1],debit:sgn>0?0:tot,credit:sgn>0?tot:0,vehicleId:'',regNoText:'',narr:(rev?'Reversal — ':'')+'Payment '+v.ref+' · '+(v.payee||'')},base));
+  return out;
+}
+async function vchAct(id,act){
+  const v=(STATE.data.vouchers||[]).find(x=>x.id===id); if(!v) return; const tot=naira(vTot(v.lines),2);
+  if(act==='authorize'){
+    if(v.status!==VCH_ST.AUTH||!wsAuth(['Head of Finance'],'authorize this voucher')) return;
+    v.auth={by:wsWho(),at:isoNow()}; v.status=VCH_ST.APPR; wsNotify('Voucher to approve',v.ref+' · '+(v.payee||'')+' · '+tot+' — authorized, waiting for MD/GM',4); showToast('Authorized. It now waits for the MD or GM.'); await persist('vouchers');
+  }else if(act==='approve'){
+    if(v.status!==VCH_ST.APPR||!wsAuth(['MD','General Manager'],'approve this voucher')) return;
+    v.appr={by:wsWho(),at:isoNow()}; v.status=VCH_ST.OK;
+    STATE.data.ledger=(STATE.data.ledger||[]).concat(vchPostEntries(v,false)); v.posted=true;
+    await persist('ledger'); await persist('vouchers'); wsNotify('Voucher approved',v.ref+' · '+(v.payee||'')+' · '+tot,3); showToast('Approved and posted to the ledger.');
+  }else if(act==='reject'){
+    const stage=v.status===VCH_ST.AUTH?'authorization':v.status===VCH_ST.APPR?'approval':''; if(!stage) return;
+    if(!wsAuth(stage==='authorization'?['Head of Finance']:['MD','General Manager'],'reject this voucher')) return;
+    const note=prompt('Reason for rejecting (shown on the voucher):')||''; if(!note) return;
+    v.rej={stage,by:wsWho(),at:isoNow(),note}; v.status=VCH_ST.REJ; wsNotify('Voucher rejected',v.ref+' — '+note,3); showToast('Rejected.'); await persist('vouchers');
+  }else if(act==='reverse'){
+    if(v.status!==VCH_ST.OK||!wsAuth(['MD','General Manager'],'reverse this voucher')) return;
+    const note=prompt('Reason for reversing (the postings are reversed):')||''; if(!note) return;
+    v.rev={by:wsWho(),at:isoNow(),note}; v.status=VCH_ST.REV; STATE.data.ledger=(STATE.data.ledger||[]).concat(vchPostEntries(v,true));
+    await persist('ledger'); await persist('vouchers'); showToast('Reversed. The postings were reversed in the ledger.');
+  }else if(act==='delete'){
+    if(v.status!==VCH_ST.REJ||!wsAuth(['MD','General Manager'],'delete this voucher')) return; if(!confirm('Delete '+v.ref+'?')) return;
+    STATE.data.vouchers=STATE.data.vouchers.filter(x=>x.id!==id); STATE.vchOpen=''; await persist('vouchers');
+  }
+}
+async function vchSubmit(){
+  const d=STATE.vchDraft, lines=d.lines.filter(l=>String(l.desc).trim()||num(l.price));
+  if(!d.date||!String(d.payee).trim()){ showToast('Add the date and who is being paid.'); return; }
+  if(!String(d.preparedBy).trim()){ showToast('Type your name in “Prepared by”.'); return; }
+  const bad=lines.findIndex(l=>!String(l.desc).trim()||vAmt(l)<=0); if(!lines.length||bad>=0){ showToast(lines.length?'Line '+(bad+1)+' needs a description and a price.':'Add at least one line.'); return; }
+  try{ localStorage.setItem('fd_name',String(d.preparedBy).trim()); }catch(e){}
+  const v={id:uid(),ref:wsRef('vouchers','VCH'),date:d.date,payee:String(d.payee).trim(),payFrom:d.payFrom,narr:String(d.narr||'').trim(),
+    lines:lines.map(l=>{ const t=teMatch(l.truck); return {date:l.date||d.date,desc:String(l.desc).trim(),acct:l.acct,ref:String(l.truck||'').trim().toUpperCase(),vehicleId:t?t.id:'',regNoText:'',qty:String(num(l.qty)||1),price:String(num(l.price))}; }),
+    preparedBy:String(d.preparedBy).trim(),preparedRole:myRole(),preparedAt:isoNow(),status:VCH_ST.AUTH};
+  v.total=vTot(v.lines);
+  STATE.data.vouchers=(STATE.data.vouchers||[]).concat([v]); STATE.vchDraft=vchNewDraft(); STATE.vchOpen=v.id; STATE.vchView='list'; STATE.vchFilter='all';
+  await persist('vouchers'); await vdocFlush(v);
+  wsNotify('New voucher to authorize',v.ref+' · '+v.payee+' · '+naira(v.total,2)+' — raised by '+v.preparedBy,4); showToast(v.ref+' raised. It now waits for the Head of Finance.');
+}
+
+/* ---------- page ---------- */
+function vchFormHtml(){
+  const d=STATE.vchDraft, tot=vTot(d.lines);
+  return `<datalist id="dl-vch-trucks">${(STATE.data.vehicles||[]).map(v=>`<option value="${esc(v.regNo)}">`).join('')}</datalist>
+  <form data-vch-form="1" class="form-card" style="margin-bottom:14px;">
+    <div class="form-grid">
+      <div><label>Date</label><input type="date" data-vch="date" value="${esc(d.date)}" required></div>
+      <div><label>Paid to</label><input type="text" data-vch="payee" value="${esc(d.payee)}" placeholder="Payee / supplier / driver" required></div>
+      <div><label>Pay from</label><select data-vch="payFrom">${VCH_PAY.map(p=>`<option ${d.payFrom===p[2]?'selected':''}>${p[2]}</option>`).join('')}</select></div>
+      <div><label>Prepared by (your name)</label><input type="text" data-vch="preparedBy" value="${esc(d.preparedBy)}" placeholder="Your full name" required></div>
+      <div style="grid-column:1/-1;"><label>Narration (optional)</label><input type="text" data-vch="narr" value="${esc(d.narr)}" placeholder="What this payment is for"></div>
+    </div>
+    <div class="dim small" style="margin:12px 0 6px;">Lines — <b>amount = quantity × price</b>, and the total and the amount in words are worked out for you. Pick an account so approval can post it automatically.</div>
+    <div class="table-wrap"><table><thead><tr><th>#</th><th>Date</th><th>Description of expense</th><th>Account</th><th>S/Ref (truck no. or ref)</th><th>Qty</th><th>Rate / price (₦)</th><th>Amount (₦)</th><th></th></tr></thead><tbody>${d.lines.map((l,i)=>`<tr><td>${i+1}</td>
+      <td><input type="date" data-vl="date" data-i="${i}" value="${esc(l.date||d.date)}" style="width:140px;"></td>
+      <td><input type="text" data-vl="desc" data-i="${i}" value="${esc(l.desc)}" placeholder="Description" style="min-width:200px;"></td>
+      <td><select data-vl="acct" data-i="${i}">${VCH_ACCTS.map(a=>`<option value="${a[0]}" ${l.acct===a[0]?'selected':''}>${esc(a[1])}</option>`).join('')}</select></td>
+      <td><input type="text" list="dl-vch-trucks" data-vl="truck" data-i="${i}" value="${esc(l.truck)}" placeholder="e.g. LFG013" style="width:120px;"></td>
+      <td><input type="number" step="0.01" min="0" data-vl="qty" data-i="${i}" value="${esc(l.qty)}" style="width:70px;"></td>
+      <td><input type="number" step="0.01" min="0" data-vl="price" data-i="${i}" value="${esc(l.price)}" placeholder="0.00" style="width:120px;"></td>
+      <td id="vl-amt-${i}"><b>${naira(vAmt(l),2)}</b></td>
+      <td>${d.lines.length>1?`<button type="button" class="btn small danger" data-vl-del="${i}">✕</button>`:''}</td></tr>`).join('')}
+      <tr style="font-weight:700;"><td colspan="7" style="text-align:right;">TOTAL</td><td id="vl-total">${naira(tot,2)}</td><td></td></tr></tbody></table></div>
+    <div class="dim small" id="vl-words" style="margin:6px 0 10px;font-style:italic;">${tot?esc(nWords(tot)):''}</div>
+    <div class="card" style="margin:0 0 12px;padding:12px;"><div style="font-weight:600;margin-bottom:4px;">Supporting documents</div><div class="dim small" style="margin-bottom:8px;line-height:1.5;">Attach the invoice, receipt, quotation, waybill or any proof for this payment — photos or PDFs. Approvers see them with the voucher.</div>
+      <div class="flex gap8" style="flex-wrap:wrap;align-items:center;"><select data-vdoc-kind="1" style="width:auto;">${VDOC_KINDS.map(k=>`<option ${STATE.vdocKind===k?'selected':''}>${k}</option>`).join('')}</select><input type="file" id="vch-sup-file" data-vch-image="1" accept="image/*,application/pdf" multiple style="max-width:260px;"></div>
+      ${(STATE.vdocQ||[]).length?`<div style="margin-top:8px;">${STATE.vdocQ.map((q,i)=>`<div class="flex gap8" style="align-items:center;margin-top:4px;"><span class="tag teal">${esc(q.kind)}</span><span>${esc(q.file.name)}</span><button type="button" class="btn small danger" data-vdoc-rm="${i}">✕</button></div>`).join('')}</div>`:''}</div>
+    <div class="form-actions"><button type="button" class="btn small" data-vl-add="1">+ Add a line</button><button type="button" class="btn small ghost" data-vch-clear="1">Clear</button><button type="submit" class="btn primary">Raise voucher</button><span class="dim small">It goes to the Head of Finance to authorize, then to the MD or GM to approve.</span></div>
+  </form>`;
+}
+function vchOpenCard(){
+  const v=(STATE.data.vouchers||[]).find(x=>x.id===STATE.vchOpen); if(!v) return '';
+  const me=myRole(), can=(v.status===VCH_ST.AUTH&&me==='Head of Finance')||(v.status===VCH_ST.APPR&&(me==='MD'||me==='General Manager'));
+  const scans=(STATE.data.voucherScans||[]).filter(s=>s.ref===v.ref);
+  return `<div class="card" style="margin-bottom:14px;padding:14px;"><div class="flex gap8" style="flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+    ${v.status===VCH_ST.AUTH?`<button class="btn small primary" data-vch-act="authorize:${esc(v.id)}">Authorize (Head of Finance)</button>`:''}${v.status===VCH_ST.APPR?`<button class="btn small primary" data-vch-act="approve:${esc(v.id)}">Approve (MD / GM)</button>`:''}${can?`<button class="btn small danger" data-vch-act="reject:${esc(v.id)}">Reject</button>`:''}
+    ${v.status===VCH_ST.OK?`<button class="btn small danger" data-vch-act="reverse:${esc(v.id)}">Reverse</button>`:''}${v.status===VCH_ST.REJ?`<button class="btn small" data-vch-copy="${esc(v.id)}">Raise a corrected copy</button><button class="btn small danger" data-vch-act="delete:${esc(v.id)}">Delete</button>`:''}
+    <button class="btn small" data-vch-print="${esc(v.id)}">Print / Save as PDF</button><button class="btn small" data-vch-dl="${esc(v.id)}">Download copy</button><button class="btn small ghost" data-vch-close="1">Close</button>
+    </div>
+    <div class="card" style="margin-bottom:10px;padding:10px 12px;"><div style="font-weight:600;margin-bottom:6px;">Supporting documents & scans (${scans.length})</div>${scans.length?scans.map(s=>`<div class="flex gap8" style="align-items:center;flex-wrap:wrap;margin-top:4px;">${wsTag(s.kind||'Signed voucher',(s.kind||'Signed voucher')==='Signed voucher'?'green':'teal')}<span>${esc(s.name)}</span><span class="dim small">${Math.max(1,Math.round(s.size/1024))} KB</span><button class="btn small" data-vs-view="${esc(s.id)}">View</button><button class="btn small" data-vs-dl="${esc(s.id)}">Download</button><button class="btn small" data-vs-print="${esc(s.id)}">Print</button></div>`).join(''):'<div class="dim small">None attached yet.</div>'}<div style="margin-top:8px;"><button class="btn small" data-vch-attach="${esc(v.ref)}">+ Attach a document</button></div></div>
+    <div style="overflow-x:auto;">${vchDocBody(vchWithDocs(v))}</div>
+    ${v.posted&&v.status===VCH_ST.OK?`<div class="dim small" style="margin-top:8px;">Posted to the ledger: ${(v.lines||[]).map(l=>esc(vAcctName(l.acct))).filter((x,i,a)=>a.indexOf(x)===i).join(', ')} (debit) · ${esc((VCH_PAY.find(p=>p[2]===v.payFrom)||VCH_PAY[0])[1])} (credit).</div>`:''}</div>`;
+}
+function vchListHtml(){
+  const all=(STATE.data.vouchers||[]).slice().sort((a,b)=>String(b.preparedAt).localeCompare(String(a.preparedAt)));
+  const F=STATE.vchFilter, me=myRole();
+  const flt={all:()=>true,mine:v=>(v.status===VCH_ST.AUTH&&me==='Head of Finance')||(v.status===VCH_ST.APPR&&(me==='MD'||me==='General Manager')),auth:v=>v.status===VCH_ST.AUTH,appr:v=>v.status===VCH_ST.APPR,ok:v=>v.status===VCH_ST.OK,rej:v=>v.status===VCH_ST.REJ||v.status===VCH_ST.REV};
+  const rows=all.filter(flt[F]||flt.all);
+  const tabs=[['all','All'],['mine','Waiting for me'],['auth','Awaiting authorization'],['appr','Awaiting approval'],['ok','Approved'],['rej','Rejected / reversed']];
+  return vchOpenCard()+`<div class="flex gap8" style="flex-wrap:wrap;margin-bottom:10px;">${tabs.map(([k,l])=>`<button class="btn small ${F===k?'primary':''}" data-vch-filter="${k}">${l} (${all.filter(flt[k]).length})</button>`).join('')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Ref no</th><th>Date</th><th>Paid to</th><th>Narration</th><th>Amount</th><th>Prepared by</th><th>Status</th><th></th></tr></thead><tbody>${rows.length?rows.map(v=>`<tr><td><b>${esc(v.ref)}</b></td><td>${esc(fmtDate(v.date))}</td><td>${esc(v.payee)}</td><td style="white-space:normal;max-width:260px;">${esc(v.narr||(v.lines&&v.lines[0]?v.lines[0].desc:''))}</td><td><b>${naira(vTot(v.lines),2)}</b></td><td>${esc(v.preparedBy||'')}</td><td>${vchTag(v.status)}</td><td><button class="btn small" data-vch-open="${esc(v.id)}">Open</button></td></tr>`).join(''):'<tr class="empty-row"><td colspan="8">No vouchers here yet.</td></tr>'}</tbody></table></div>`;
+}
+function vchLedgerHtml(){
+  const P=STATE.vchLedgerP, L=(STATE.data.ledger||[]).filter(e=>P==='all'||inPeriod(e.date,P));
+  const by={}; L.forEach(e=>{ const x=by[e.account]||(by[e.account]={code:e.account,name:e.accountName,dr:0,cr:0}); x.dr+=num(e.debit); x.cr+=num(e.credit); });
+  const acc=Object.values(by).sort((a,b)=>a.code<b.code?-1:1), tD=acc.reduce((a,x)=>a+x.dr,0), tC=acc.reduce((a,x)=>a+x.cr,0);
+  const tr={}; L.filter(e=>num(e.debit)||num(e.credit)).forEach(e=>{ if(!(e.vehicleId||e.regNoText)||!/^5/.test(e.account)) return; const k=e.vehicleId||('~'+normReg(e.regNoText)), x=tr[k]||(tr[k]={label:e.vehicleId?vehicleLabel(e.vehicleId):e.regNoText,amt:0,n:0}); x.amt+=num(e.debit)-num(e.credit); x.n++; });
+  const trucks=Object.values(tr).sort((a,b)=>b.amt-a.amt);
+  const per=[['month','This month'],['lastmonth','Last month'],['all','All time']];
+  return `<div class="dim small" style="margin-bottom:10px;line-height:1.6;">When the MD or GM approves a voucher, the app posts it by itself: each line is a <b>debit</b> to its expense account and the total is a <b>credit</b> to Cash or Bank. Reversing a voucher posts the opposite entries. Debits always equal credits.</div>
+  <div class="flex gap8" style="margin-bottom:10px;flex-wrap:wrap;">${per.map(([k,l])=>`<button class="btn small ${P===k?'primary':''}" data-vch-lp="${k}">${l}</button>`).join('')}</div>
+  <div class="table-wrap"><table><thead><tr><th>Code</th><th>Account</th><th>Debit (₦)</th><th>Credit (₦)</th></tr></thead><tbody>${acc.length?acc.map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${x.dr?fmt(x.dr,2):'—'}</td><td>${x.cr?fmt(x.cr,2):'—'}</td></tr>`).join('')+`<tr style="font-weight:700;"><td></td><td>Total ${Math.abs(tD-tC)<0.005?wsTag('balanced','green'):wsTag('out of balance','red')}</td><td>${fmt(tD,2)}</td><td>${fmt(tC,2)}</td></tr>`:'<tr class="empty-row"><td colspan="4">Nothing posted in this period.</td></tr>'}</tbody></table></div>
+  <div class="section-title"><span>Spend posted per truck</span><div class="line"></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Truck</th><th>Postings</th><th>Expense posted (₦)</th></tr></thead><tbody>${trucks.length?trucks.map(x=>`<tr><td>${esc(x.label)}</td><td>${x.n}</td><td><b>${naira(x.amt,2)}</b></td></tr>`).join(''):'<tr class="empty-row"><td colspan="3">No voucher lines linked to a truck yet — pick a truck on a voucher line.</td></tr>'}</tbody></table></div>
+  <div class="section-title"><span>Postings</span><div class="line"></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Voucher</th><th>Account</th><th>Narration</th><th>Debit</th><th>Credit</th></tr></thead><tbody>${L.length?L.slice().reverse().slice(0,120).map(e=>`<tr><td>${esc(fmtDate(e.date))}</td><td>${esc(e.ref)}</td><td>${esc(e.accountName)}</td><td style="white-space:normal;max-width:300px;">${esc(e.narr||'')}</td><td>${num(e.debit)?fmt(num(e.debit),2):'—'}</td><td>${num(e.credit)?fmt(num(e.credit),2):'—'}</td></tr>`).join(''):'<tr class="empty-row"><td colspan="6">No postings.</td></tr>'}</tbody></table></div>`;
+}
+function vchScansHtml(){
+  const d=STATE.vsDraft, S=(STATE.data.voucherScans||[]).slice().sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  return `<div class="dim small" style="margin-bottom:10px;line-height:1.6;">Upload a photo or PDF of a signed paper voucher, or any supporting document (invoice, receipt, quotation, waybill). It is stored in the app, linked to an e-voucher if you pick one, and can be viewed, downloaded and printed any time. Photos are shrunk to save space; PDFs can be up to 3 MB.</div>
+  <form data-vs-form="1" class="form-card" style="margin-bottom:14px;"><div class="form-grid">
+    <div><label>Linked e-voucher (optional)</label><select data-vs="ref"><option value="">— none —</option>${(STATE.data.vouchers||[]).slice().sort((a,b)=>a.ref<b.ref?1:-1).map(v=>`<option value="${esc(v.ref)}" ${d.ref===v.ref?'selected':''}>${esc(v.ref)} · ${esc(v.payee)}</option>`).join('')}</select></div>
+    <div><label>What is it?</label><select data-vs="kind">${['Signed voucher'].concat(VDOC_KINDS).map(k=>`<option ${(d.kind||'Signed voucher')===k?'selected':''}>${k}</option>`).join('')}</select></div>
+    <div><label>Date</label><input type="date" data-vs="date" value="${esc(d.date)}"></div>
+    <div><label>Amount (₦, optional)</label><input type="number" step="0.01" min="0" data-vs="amount" value="${esc(d.amount)}"></div>
+    <div><label>Note / paper voucher no.</label><input type="text" data-vs="note" value="${esc(d.note)}" placeholder="e.g. paper voucher no. 0231"></div>
+    <div style="grid-column:1/-1;"><label>Photo or PDF</label><input type="file" id="vch-scan-file" data-vch-image="1" accept="image/*,application/pdf" capture="environment">${STATE.vchFile?`<div class="dim small" style="margin-top:4px;">Chosen: <b>${esc(STATE.vchFile.name)}</b></div>`:''}</div></div>
+    <div class="form-actions"><button type="submit" class="btn primary">Save document</button></div></form>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>E-voucher</th><th>Type</th><th>Note</th><th>Amount</th><th>File</th><th>Uploaded by</th><th></th></tr></thead><tbody>${S.length?S.map(s=>`<tr><td>${esc(fmtDate(s.date))}</td><td>${s.ref?'<b>'+esc(s.ref)+'</b>':'<span class="dim">—</span>'}</td><td>${wsTag(s.kind||'Signed voucher',(s.kind||'Signed voucher')==='Signed voucher'?'green':'teal')}</td><td style="white-space:normal;max-width:240px;">${esc(s.note||'')}</td><td>${num(s.amount)?naira(num(s.amount),2):'—'}</td><td>${esc(s.name)} <span class="dim small">${Math.max(1,Math.round(s.size/1024))} KB</span></td><td>${esc(s.by||'')}</td><td><div class="row-actions"><button class="btn small" data-vs-view="${esc(s.id)}">View</button><button class="btn small" data-vs-dl="${esc(s.id)}">Download</button><button class="btn small" data-vs-print="${esc(s.id)}">Print</button><button class="btn small danger" data-vs-del="${esc(s.id)}">Delete</button></div></td></tr>`).join(''):'<tr class="empty-row"><td colspan="8">Nothing stored yet.</td></tr>'}</tbody></table></div>`;
+}
+function renderVouchersPage(){
+  const V=STATE.data.vouchers||[], pa=V.filter(v=>v.status===VCH_ST.AUTH).length, pp=V.filter(v=>v.status===VCH_ST.APPR).length, mine=vchWaiting();
+  const ym=todayStr().slice(0,7), okm=V.filter(v=>v.status===VCH_ST.OK&&String(v.date).slice(0,7)===ym).reduce((a,v)=>a+vTot(v.lines),0);
+  const k=(l,v,s,t)=>kc(l,v,s,t);
+  const view=STATE.vchView, body=view==='raise'?vchFormHtml():view==='ledger'?vchLedgerHtml():view==='scans'?vchScansHtml():vchListHtml();
+  const prev=STATE.vchPrev?`<div data-vs-close="1" style="position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:90;display:flex;align-items:center;justify-content:center;padding:16px;"><div style="background:#fff;border-radius:10px;max-width:96vw;max-height:94vh;overflow:auto;padding:10px;"><div style="text-align:right;margin-bottom:6px;"><button class="btn small" data-vs-close="1">Close</button></div>${/pdf/i.test(STATE.vchPrev.type)?`<iframe src="${STATE.vchPrev.url}" style="width:min(86vw,820px);height:80vh;border:0;"></iframe>`:`<img src="${STATE.vchPrev.url}" style="max-width:100%;height:auto;display:block;">`}</div></div>`:'';
+  return wsHead('Vouchers','Raise a payment voucher → Head of Finance authorizes → MD or GM approves. Approval posts it automatically.')+wsRoleBar()+
+  `<div class="grid cols-4" style="margin-bottom:14px;">${k('Awaiting authorization',pa,'Head of Finance',pa?'amber':'green')}${k('Awaiting approval',pp,'MD or GM',pp?'amber':'green')}${k('Waiting for you',mine,'As '+myRole(),mine?'amber':'green')}${k('Approved this month',naira(okm,2),'Posted to the ledger')}</div>`+
+  wsTabs('vch-view',view,[['list','Vouchers'],['raise','Raise a voucher'],['ledger','Postings & ledger'],['scans','Paper vouchers & documents ('+(STATE.data.voucherScans||[]).length+')']])+body+prev;
+}
+WS_TABS.vouchers=renderVouchersPage;
+(function(){ const at=NAV.findIndex(n=>n[0]==='fuel')+1; NAV.splice(at,0,['vouchers','Vouchers']); NAV_ICON.vouchers='💳'; NAV_LABEL.vouchers='Vouchers'; NAV_GROUP.vouchers='Fuel & Costs'; })();
+
+/* ---------- physical vouchers: store, view, download, print ---------- */
+async function vsPrepare(file){
+  if(/^image\//.test(file.type)){
+    const url=URL.createObjectURL(file); const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+    const sc=Math.min(1,1800/Math.max(img.width,img.height)), c=document.createElement('canvas'); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc); c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.78)); return {u8:new Uint8Array(await blob.arrayBuffer()),type:'image/jpeg',name:file.name.replace(/\.[^.]+$/,'')+'.jpg'};
+  }
+  if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){ if(file.size>3*1024*1024) throw new Error('That PDF is over 3 MB. Please scan at a lower quality or send a photo.'); return {u8:new Uint8Array(await file.arrayBuffer()),type:'application/pdf',name:file.name}; }
+  throw new Error('Please choose a photo or a PDF.');
+}
+async function vsStore(file,meta){
+  const p=await vsPrepare(file), id=uid(); await gasSetChunked('vms:file:'+id,b64of(p.u8));
+  const rec={id,ref:meta.ref||'',kind:meta.kind||'Signed voucher',date:meta.date||todayStr(),amount:String(num(meta.amount)||''),note:String(meta.note||'').trim(),name:p.name,type:p.type,size:p.u8.length,by:wsWho(),at:isoNow()};
+  STATE.data.voucherScans=(STATE.data.voucherScans||[]).concat([rec]); return rec;
+}
+async function vdocFlush(v){
+  const Q=(STATE.vdocQ||[]).slice(); if(!Q.length) return; STATE.vdocQ=[]; let ok=0;
+  for(const q of Q){ try{ await vsStore(q.file,{ref:v.ref,kind:q.kind,date:v.date,note:'Supporting document for '+v.ref}); ok++; }catch(e){ console.error('vdoc',e); showToast(e&&e.message?e.message:'One supporting document could not be saved.'); } }
+  if(ok){ await persist('voucherScans'); }
+}
+async function vsSave(){
+  const f=STATE.vchFile; if(!f){ showToast('Choose a photo or PDF first.'); return; } const d=STATE.vsDraft;
+  try{
+    showToast('Saving…'); await vsStore(f,d);
+    STATE.vchFile=null; STATE.vsDraft={ref:d.ref||'',kind:d.kind||'Signed voucher',date:todayStr(),amount:'',note:''}; await persist('voucherScans'); showToast('Saved.');
+  }catch(e){ console.error('vsSave',e); showToast(e&&e.message?e.message:'Could not save that file.'); }
+}
+async function vsFetch(id){ const s=(STATE.data.voucherScans||[]).find(x=>x.id===id); if(!s) return null; const got=await gasGetAllChunked(['vms:file:'+id]); const bin=atob(got['vms:file:'+id]||''); if(!bin) return null; const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return {s,blob:new Blob([u],{type:s.type||'application/octet-stream'})}; }
+
+/* ---------- events (delegated once) ---------- */
+document.addEventListener('input',ev=>{
+  const t=ev.target; if(!t||!t.dataset) return;
+  if(t.dataset.te!==undefined){ const D=STATE.teDraft; if(t.dataset.te==='date') D.date=t.value; else{ const i=+t.dataset.i, r=D.rows[i]; if(!r) return; r[t.dataset.te]=t.value; const e=document.getElementById('te-exp-'+i), n=document.getElementById('te-net-'+i); if(e) e.innerHTML='<b>'+naira(teExp(r))+'</b>'; if(n) n.innerHTML=teNet(num(r.rate)-teExp(r)); } }
+  else if(t.dataset.vch!==undefined){ STATE.vchDraft[t.dataset.vch]=t.value; }
+  else if(t.dataset.vl!==undefined){ const i=+t.dataset.i, l=STATE.vchDraft.lines[i]; if(!l) return; l[t.dataset.vl]=t.value; const a=document.getElementById('vl-amt-'+i); if(a) a.innerHTML='<b>'+naira(vAmt(l),2)+'</b>'; const tot=vTot(STATE.vchDraft.lines), T=document.getElementById('vl-total'), W=document.getElementById('vl-words'); if(T) T.textContent=naira(tot,2); if(W) W.textContent=tot?nWords(tot):''; }
+  else if(t.dataset.vs!==undefined){ STATE.vsDraft[t.dataset.vs]=t.value; }
+});
+document.addEventListener('change',ev=>{
+  const t=ev.target; if(!t||!t.dataset) return;
+  if(t.dataset.te!==undefined||t.dataset.vch!==undefined||t.dataset.vl!==undefined||t.dataset.vs!==undefined){ ev.target.dispatchEvent(new Event('input',{bubbles:true})); }
+  if(t.hasAttribute&&t.hasAttribute('data-te-truckfilter')){ STATE.teTruck=t.value; render(); }
+  if(t.id==='vch-scan-file'&&t.files&&t.files[0]){ STATE.vchFile=t.files[0]; render(); }
+  if(t.id==='vch-sup-file'&&t.files&&t.files.length){ [...t.files].forEach(f=>STATE.vdocQ.push({file:f,kind:STATE.vdocKind})); render(); }
+  if(t.hasAttribute&&t.hasAttribute('data-vdoc-kind')){ STATE.vdocKind=t.value; }
+});
+document.addEventListener('submit',ev=>{
+  const f=ev.target; if(!f||!f.matches) return;
+  if(f.matches('[data-te-form]')){ ev.preventDefault(); teSave(); }
+  else if(f.matches('[data-vch-form]')){ ev.preventDefault(); vchSubmit(); }
+  else if(f.matches('[data-vs-form]')){ ev.preventDefault(); vsSave(); }
+});
+document.addEventListener('click',async ev=>{
+  const b=ev.target.closest&&ev.target.closest('[data-te-view],[data-te-wk],[data-te-mo],[data-te-addrow],[data-te-alltrucks],[data-te-same],[data-te-clear],[data-te-delrow],[data-te-edit],[data-te-del],[data-te-csv],[data-te-showall],[data-vch-filter],[data-vch-open],[data-vch-close],[data-vch-act],[data-vch-print],[data-vch-dl],[data-vch-copy],[data-vch-attach],[data-vch-clear],[data-vch-lp],[data-vl-add],[data-vl-del],[data-vch-view],[data-vdoc-rm],[data-vs-view],[data-vs-dl],[data-vs-print],[data-vs-del],[data-vs-close]');
+  if(!b||!document.getElementById('app')) return; const g=n=>b.getAttribute(n), has=n=>b.hasAttribute(n);
+  const T=STATE.teDraft, V=STATE.vchDraft;
+  if(has('data-te-view')){ STATE.teView=g('data-te-view'); render(); }
+  else if(has('data-te-wk')){ STATE.teWk=g('data-te-wk'); render(); } else if(has('data-te-mo')){ STATE.teMo=g('data-te-mo'); render(); }
+  else if(has('data-te-addrow')){ T.rows.push(teNewRow()); render(); }
+  else if(has('data-te-alltrucks')){ const have=new Set(T.rows.map(r=>normReg(r.truck))); (STATE.data.vehicles||[]).forEach(v=>{ if(!have.has(normReg(v.regNo))){ const r=teNewRow(); r.truck=v.regNo; T.rows.push(r); } }); T.rows=T.rows.filter((r,i)=>String(r.truck).trim()||T.rows.length===1||i===0&&false); render(); }
+  else if(has('data-te-same')){ const s=T.rows[0]; T.rows.forEach((r,i)=>{ if(i) ['loading','offloading','allow','levy','gas','diesel','rate'].forEach(k=>{ r[k]=s[k]; }); }); render(); }
+  else if(has('data-te-clear')){ STATE.teDraft={date:T.date,rows:[teNewRow()],editId:''}; render(); }
+  else if(has('data-te-delrow')){ T.rows.splice(+g('data-te-delrow'),1); render(); }
+  else if(has('data-te-edit')){ const r=(STATE.data.tripEarnings||[]).find(x=>x.id===g('data-te-edit')); if(r){ STATE.teDraft={date:r.date,editId:r.id,rows:[{truck:teLabel(r)==='—'?'':teLabel(r),loading:r.loading||'',offloading:r.offloading||'',allow:r.allow||'',levy:r.levy||'',gas:r.gas||'',diesel:r.diesel||'',rate:r.rate||''}]}; render(); window.scrollTo(0,0); } }
+  else if(has('data-te-del')){ if(!wsAuth(FIN_ALL,'delete trip earnings')) return; if(!confirm('Delete this trip entry?')) return; STATE.data.tripEarnings=STATE.data.tripEarnings.filter(x=>x.id!==g('data-te-del')); await persist('tripEarnings'); }
+  else if(has('data-te-csv')) teCsv();
+  else if(has('data-te-showall')){ STATE.teAll=!STATE.teAll; render(); }
+  else if(has('data-vch-view')){ STATE.vchView=g('data-vch-view'); render(); }
+  else if(has('data-vch-filter')){ STATE.vchFilter=g('data-vch-filter'); render(); }
+  else if(has('data-vch-open')){ STATE.vchOpen=g('data-vch-open'); render(); window.scrollTo(0,0); }
+  else if(has('data-vch-close')){ STATE.vchOpen=''; render(); }
+  else if(has('data-vch-act')){ const [a,id]=g('data-vch-act').split(':'); vchAct(id,a); }
+  else if(has('data-vch-print')){ const v=(STATE.data.vouchers||[]).find(x=>x.id===g('data-vch-print')); if(v) printHtmlDoc(vchDocFull(v)); }
+  else if(has('data-vch-dl')){ const v=(STATE.data.vouchers||[]).find(x=>x.id===g('data-vch-dl')); if(v) triggerDownload(new Blob([vchDocFull(v)],{type:'text/html'}),'Voucher-'+v.ref+'.html'); }
+  else if(has('data-vch-copy')){ const v=(STATE.data.vouchers||[]).find(x=>x.id===g('data-vch-copy')); if(v){ STATE.vchDraft={date:todayStr(),payee:v.payee,payFrom:v.payFrom,narr:v.narr||'',preparedBy:v.preparedBy||'',lines:(v.lines||[]).map(l=>({date:'',desc:l.desc,acct:l.acct,truck:l.ref||(l.vehicleId?vehicleLabel(l.vehicleId):''),qty:String(l.qty),price:String(l.price)}))}; STATE.vchView='raise'; render(); } }
+  else if(has('data-vch-attach')){ STATE.vsDraft.ref=g('data-vch-attach'); STATE.vsDraft.kind='Invoice'; STATE.vchView='scans'; render(); window.scrollTo(0,0); }
+  else if(has('data-vdoc-rm')){ STATE.vdocQ.splice(+g('data-vdoc-rm'),1); render(); }
+  else if(has('data-vch-clear')){ STATE.vchDraft=vchNewDraft(); STATE.vdocQ=[]; render(); }
+  else if(has('data-vch-lp')){ STATE.vchLedgerP=g('data-vch-lp'); render(); }
+  else if(has('data-vl-add')){ V.lines.push(vchNewLine()); render(); }
+  else if(has('data-vl-del')){ V.lines.splice(+g('data-vl-del'),1); render(); }
+  else if(has('data-vs-close')){ if(ev.target.closest('[data-vs-close]')!==b) return; if(STATE.vchPrev&&STATE.vchPrev.url) URL.revokeObjectURL(STATE.vchPrev.url); STATE.vchPrev=null; render(); }
+  else if(has('data-vs-view')){ showToast('Opening…'); const r=await vsFetch(g('data-vs-view')); if(!r){ showToast('Could not open that file.'); return; } STATE.vchPrev={url:URL.createObjectURL(r.blob),type:r.s.type,name:r.s.name}; render(); }
+  else if(has('data-vs-dl')){ const r=await vsFetch(g('data-vs-dl')); if(!r){ showToast('Could not download that file.'); return; } triggerDownload(r.blob,r.s.name); }
+  else if(has('data-vs-print')){ const r=await vsFetch(g('data-vs-print')); if(!r){ showToast('Could not open that file.'); return; } const u=URL.createObjectURL(r.blob); printHtmlDoc(/pdf/i.test(r.s.type)?`<!doctype html><html><body style="margin:0"><iframe src="${u}" style="width:100vw;height:100vh;border:0"></iframe></body></html>`:`<!doctype html><html><body style="margin:0"><img src="${u}" style="max-width:100%;"></body></html>`); }
+  else if(has('data-vs-del')){ if(!wsAuth(FIN_ALL,'delete a stored voucher')) return; const s=(STATE.data.voucherScans||[]).find(x=>x.id===g('data-vs-del')); if(!s||!confirm('Delete “'+s.name+'”?')) return; try{ await gasSetChunked('vms:file:'+s.id,''); }catch(e){} STATE.data.voucherScans=STATE.data.voucherScans.filter(x=>x.id!==s.id); await persist('voucherScans'); }
+});
 
 loadAll();
 </script>
