@@ -1,5 +1,5 @@
 /* FleetDesk service worker: fetches the newest app when online (falls back to the saved copy after 3.5 seconds on a slow signal or when offline). The spreadsheet library is kept so it does not download every time. */
-const CACHE='fleetdesk-v50', LIBS='fleetdesk-libs';
+const CACHE='fleetdesk-v51', LIBS='fleetdesk-libs';
 const SHELL=['./','index.html','manifest.webmanifest','icons/icon-192.png','icons/icon-512.png'];
 self.addEventListener('install',e=>{ e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL.map(u=>new Request(u,{cache:'reload'})))).then(()=>self.skipWaiting())); });
 self.addEventListener('activate',e=>{ e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==CACHE&&x!==LIBS).map(x=>caches.delete(x)))).then(()=>self.clients.claim())); });

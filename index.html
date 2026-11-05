@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.2 · 5 Nov 2026';
+const APP_VERSION='v15.3 · 5 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -10197,6 +10197,21 @@ loadAll=async function(){
     STATE.cacheShow=true; STATE.fromSnap=true; render();
   }catch(e){ console.error('snapshot',e); }
 })();
+
+/* ============================================================ ws_y.js ============================================================ */
+/* ===== v15.3: the app notices when a newer version is published and offers a one-tap update (clears the old saved copy) ===== */
+async function checkNewVersion(){
+  try{ const r=await fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}); if(!r.ok) return; const t=await r.text(), m=t.match(/const APP_VERSION='([^']+)'/); if(m&&m[1]!==APP_VERSION&&!STATE.newVer){ STATE.newVer=m[1]; render(); } }catch(e){}
+}
+async function applyNewVersion(){
+  try{ if(navigator.serviceWorker){ const regs=await navigator.serviceWorker.getRegistrations(); for(const r of regs) await r.unregister(); } if(window.caches){ const ks=await caches.keys(); for(const k of ks) await caches.delete(k); } }catch(e){}
+  location.reload();
+}
+const _rs20=renderShell;
+renderShell=function(){ const b=STATE.newVer?`<div style="position:fixed;top:0;left:0;right:0;z-index:300;background:var(--amber);color:#111;padding:9px 12px;text-align:center;font-weight:600;">A newer version (${esc(STATE.newVer)}) is ready. <button class="btn small" data-app-update="1" style="margin-left:8px;color:#111;border-color:#111;">Update now</button></div>`:''; return b+_rs20.apply(this,arguments); };
+document.addEventListener('click',e=>{ if(e.target.closest&&e.target.closest('[data-app-update]')) applyNewVersion(); });
+setTimeout(checkNewVersion,4000); setInterval(checkNewVersion,300000);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) checkNewVersion(); });
 
 loadAll();
 </script>
