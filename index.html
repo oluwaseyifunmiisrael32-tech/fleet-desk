@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.4 · 6 Nov 2026';
+const APP_VERSION='v15.5 · 9 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -9218,7 +9218,7 @@ parseBulkWorkbook=function(wb){
   const out=_pbw14(wb);
   try{
     const last=lastByRoute(); let n=0; const seen={};
-    (out.rows||[]).forEach(r=>{ if(r.state!=='ok'||!r.date||!r.route) return; const L=last[r.route]; if(L&&r.date<L){ r.state='dup'; r.dupId=null; r.before=true; r.warns=(r.warns||[]).concat(['Before the last saved date for this route ('+fmtDate(L)+') — skipped']); n++; seen[r.route]=L; } });
+    (out.rows||[]).forEach(r=>{ if(r.state!=='ok'||!r.date||!r.route) return; const L=last[r.route]; if(L&&r.date<L&&r.date<addDays(wkStart(todayStr()),-7)){ r.state='dup'; r.dupId=null; r.before=true; r.warns=(r.warns||[]).concat(['Before the last saved date for this route ('+fmtDate(L)+') — skipped']); n++; seen[r.route]=L; } });
     const list=Object.keys(last).filter(k=>(out.rows||[]).some(r=>r.route===k)).map(k=>(ROUTES[k]?ROUTES[k].label:k)+' — '+fmtDate(last[k]));
     if(list.length) out.summary=(out.summary||'')+`<div class="note" style="margin:0 0 10px;line-height:1.6;">Continuing from the last saved date for each route: ${esc(list.join(' · '))}.${n?` <b>${n} older line${n===1?'':'s'}</b> in the file were left out.`:' Everything in this file is new.'}${n?`<label style="display:flex;gap:8px;align-items:center;text-transform:none;font-size:12.5px;margin-top:6px;"><input type="checkbox" data-bulk-alldates="1" style="width:auto;"> Also import older dates that are missing (lines already saved are still skipped)</label>`:''}</div>`;
   }catch(e){ console.error('continue from last date',e); }
@@ -10212,6 +10212,113 @@ renderShell=function(){ const b=STATE.newVer?`<div style="position:fixed;top:0;l
 document.addEventListener('click',e=>{ if(e.target.closest&&e.target.closest('[data-app-update]')) applyNewVersion(); });
 setTimeout(checkNewVersion,4000); setInterval(checkNewVersion,300000);
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) checkNewVersion(); });
+
+/* ============================================================ ws_z.js ============================================================ */
+/* ===== v15.5: every truck's trips for the week — done, target, deficit — in Transport Ops and the Monday meeting; check the app against the Excel and fix differences ===== */
+function twTarget(){ const c=pfCfg('truckweek'); const n=c&&num(c.target); return n>0?n:J_TRUCK_TARGET.week; }
+function twWeekStart(){ return STATE.twWk||addDays(wkStart(todayStr()),-7); }
+function twRouteWord(k){ const r=ROUTES[k]; return r?String(r.label).replace(/\(.*\)/,'').replace(/^Gypsum — /,'Gyp. ').replace(/^Clinker — .*/,'Clinker').trim():String(k||''); }
+function twRows(ws){
+  const we=addDays(ws,6), days=[0,1,2,3,4,5,6].map(i=>addDays(ws,i)), by={}, target=twTarget();
+  const vs=STATE.data.vehicles||[];
+  const lab=r=>trLabelCell(r)||'Unknown truck';
+  const slot=(nk,label,v)=>by[nk]||(by[nk]={nk,label,v,d:[0,0,0,0,0,0,0],trips:0,ton:0,routes:{},drivers:{},recs:0});
+  vs.forEach(v=>{ if(/diesel/i.test(v.fuelType||'')) return; slot(normReg(v.regNo),v.regNo,v); });          // every registered CNG truck is expected to run
+  (STATE.data.transport||[]).forEach(r=>{
+    if(!r.date||r.date<ws||r.date>we) return;
+    const l=lab(r), nk=normReg(l)||('x'+r.id); const v=r.vehicleId?vs.find(x=>x.id===r.vehicleId):null;
+    const x=slot(nk,v?v.regNo:l,v); const t=num(r.tripsActual)||0, di=days.indexOf(r.date);
+    x.trips+=t; x.ton+=num(r.tonnageActual); x.recs++; if(di>=0) x.d[di]+=t;
+    if(r.route) x.routes[r.route]=(x.routes[r.route]||0)+t; if(r.driverName) x.drivers[r.driverName]=1;
+  });
+  const rows=Object.values(by).map(x=>{ const gap=target-x.trips; return Object.assign(x,{target,gap,pct:target?x.trips/target:0,notReg:!x.v}); });
+  rows.sort((a,b)=>b.trips-a.trips||a.label.localeCompare(b.label));
+  return {rows,days,ws,we,target};
+}
+function twTotals(R){ const T={trips:R.rows.reduce((s,x)=>s+x.trips,0),target:R.rows.length*R.target,ton:R.rows.reduce((s,x)=>s+x.ton,0),on:R.rows.filter(x=>x.trips>=R.target).length,idle:R.rows.filter(x=>!x.trips).length}; T.gap=Math.max(0,T.target-T.trips); T.short=R.rows.reduce((s,x)=>s+Math.max(0,x.gap),0); return T; }
+function twTable(R,opts){
+  opts=opts||{}; const T=twTotals(R);
+  const tag=x=>x.trips>=R.target?wsTag('On target','green'):(x.trips>=R.target/2?wsTag('Behind','amber'):wsTag(x.trips?'Well behind':'No trips','red'));
+  const dh=R.days.map(d=>`<th style="text-align:center;">${esc(new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'short'}))}<div class="dim small" style="font-weight:400;">${esc(fmtDay(d))}</div></th>`).join('');
+  const dsum=R.days.map((_,i)=>R.rows.reduce((s,x)=>s+x.d[i],0));
+  const body=R.rows.map(x=>{ const rts=Object.keys(x.routes).sort((a,b)=>x.routes[b]-x.routes[a]).map(k=>twRouteWord(k)+' '+x.routes[k]).join(' · ');
+    return `<tr><td><b>${esc(x.label)}</b>${x.notReg?' <span class="dim small" title="Typed on the entry, not in the vehicle register">(not in register)</span>':''}<div class="dim small" style="white-space:normal;">${esc(Object.keys(x.drivers).join(', '))}</div></td>${x.d.map(n=>`<td style="text-align:center;${n?'':'color:var(--dim);'}">${n||'·'}</td>`).join('')}<td style="text-align:center;"><b style="font-size:15px;">${fmt(x.trips)}</b></td><td style="text-align:center;">${fmt(R.target)}</td><td style="text-align:center;">${x.gap>0?`<b style="color:var(--red);">−${fmt(x.gap)}</b>`:`<b style="color:var(--green);">${x.gap<0?'+'+fmt(-x.gap):'0'}</b>`}</td><td>${tag(x)}</td><td class="dim small" style="white-space:normal;min-width:150px;">${esc(rts||'—')}</td><td>${x.ton?fmt(x.ton,1)+' MT':'<span class="dim">—</span>'}</td></tr>`; }).join('');
+  return `<div class="grid cols-4" style="margin-bottom:12px;">${kc('Trips done',fmt(T.trips),'Target '+fmt(T.target)+' ('+R.rows.length+' trucks × '+R.target+')',T.trips>=T.target?'green':'amber')}${kc('Deficit',fmt(T.gap),'Trucks short by '+fmt(T.short)+' trips in total',T.gap?'red':'green')}${kc('Trucks on target',T.on+' / '+R.rows.length,'',T.on===R.rows.length?'green':'amber')}${kc('Trucks with no trips',T.idle,T.idle?'Ask why — workshop, no load, or not entered?':'Every truck ran',T.idle?'red':'green')}</div>
+  <div class="table-wrap" style="max-height:${opts.tall?'none':'520px'};"><table><thead><tr><th>Truck</th>${dh}<th style="text-align:center;">Trips done</th><th style="text-align:center;">Target</th><th style="text-align:center;">Deficit</th><th>Status</th><th>Routes (trips)</th><th>Tonnage</th></tr></thead><tbody>${body||'<tr><td colspan="13" class="dim">No trucks yet.</td></tr>'}<tr style="font-weight:700;background:rgba(232,163,61,.12);"><td>All trucks</td>${dsum.map(n=>`<td style="text-align:center;">${n}</td>`).join('')}<td style="text-align:center;">${fmt(T.trips)}</td><td style="text-align:center;">${fmt(T.target)}</td><td style="text-align:center;color:var(--${T.gap?'red':'green'});">${T.gap?'−'+fmt(T.gap):'0'}</td><td></td><td></td><td>${fmt(T.ton,1)} MT</td></tr></tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">Target = ${R.target} trips a week per truck (2 a day) — change it above. Deficit = target minus trips done; a truck that did more shows a surplus (+). Counts come from the Transport Ops entries, so a trip missing here is also missing from the KPIs — use “Check against the Excel” to find it.</div>`;
+}
+
+/* ----- compare with the Excel route tabs ----- */
+function twReadFile(wb,ws,we){
+  readPresets(wb); const known={}; TAB_SPECS.forEach(s=>{ known[normKey(s.tab)]=s; }); Object.keys(BULK_CTX.tabMap).forEach(k=>{ if(!known[k]) known[k]={tab:k,route:'other',material:''}; });
+  const by={}, tabs={};
+  wb.SheetNames.forEach(name=>{ const spec=known[normKey(name)]; if(!spec) return; const ov=BULK_CTX.tabMap[normKey(name)]||{}; const tabRoute=ov.route||spec.route;
+    const grid=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,raw:true,defval:''}); const rd=readTabTrips(grid);
+    rd.trips.forEach(tr=>{ if(!tr.date||tr.date<ws||tr.date>we) return; const m=matchTruck(tr.truck); const label=m.v?m.v.regNo:String(tr.truck).trim().toUpperCase(); const nk=normReg(label);
+      const x=by[nk]||(by[nk]={nk,label,trips:0,tabs:{}}); x.trips+=tr.trips; x.tabs[name.trim()]=(x.tabs[name.trim()]||0)+tr.trips; tabs[name.trim()]=(tabs[name.trim()]||0)+tr.trips; }); });
+  return {by,tabs};
+}
+function twCompareCard(){
+  const c=STATE.twCmp; const ws=twWeekStart(), we=addDays(ws,6);
+  const head=`<div class="card" style="margin:12px 0;padding:14px;border-left:3px solid var(--teal);"><div class="flex between" style="gap:12px;flex-wrap:wrap;align-items:center;"><div style="max-width:640px;"><div style="font-weight:600;">Check against the Excel</div><div class="dim small" style="line-height:1.55;">Pick the filled FleetDesk workbook. It counts every trip in the route tabs for ${esc(wkText(ws))} and shows, truck by truck, where the app has fewer or more trips. One tap then brings the app in line with the file.</div></div><div><button class="btn primary" data-tw-pick="1">⬆ Choose the Excel file</button><input type="file" accept=".xlsx,.xls" data-tw-file="1" style="display:none"></div></div>`;
+  if(!c) return head+'</div>';
+  if(c.err) return head+`<div class="note warn" style="margin-top:10px;">${esc(c.err)}</div></div>`;
+  const R=twRows(ws), app={}; R.rows.forEach(x=>{ app[x.nk]=x.trips; });
+  const keys=new Set([...Object.keys(c.by),...Object.keys(app)]); const L=[...keys].map(k=>({k,label:(c.by[k]||{}).label||(R.rows.find(x=>x.nk===k)||{}).label||k,f:(c.by[k]||{}).trips||0,a:app[k]||0})).filter(x=>x.f||x.a);
+  L.forEach(x=>{ x.d=x.f-x.a; }); L.sort((a,b)=>Math.abs(b.d)-Math.abs(a.d)||a.label.localeCompare(b.label));
+  const ff=L.reduce((s,x)=>s+x.f,0), aa=L.reduce((s,x)=>s+x.a,0), bad=L.filter(x=>x.d);
+  const tabsTxt=Object.keys(c.tabs).map(n=>`<span class="tag teal" style="margin:0 6px 4px 0;">${esc(n)}: ${c.tabs[n]}</span>`).join('');
+  return head+`<div style="margin-top:12px;">${tabsTxt}</div><div class="grid cols-3" style="margin:8px 0 10px;">${kc('Trips in the Excel',fmt(ff),esc(c.file),'')}${kc('Trips in the app',fmt(aa),'same week')}${kc('Trucks that differ',bad.length,bad.length?'See the list below':'Everything matches',bad.length?'red':'green')}</div>
+  <div class="table-wrap" style="max-height:340px;"><table><thead><tr><th>Truck</th><th style="text-align:center;">Excel</th><th style="text-align:center;">App</th><th style="text-align:center;">Difference</th></tr></thead><tbody>${L.map(x=>`<tr><td><b>${esc(x.label)}</b></td><td style="text-align:center;">${x.f}</td><td style="text-align:center;">${x.a}</td><td style="text-align:center;">${x.d?`<b style="color:var(--${x.d>0?'red':'amber'});">${x.d>0?'app is missing '+x.d:'app has '+(-x.d)+' extra'}</b>`:'<span style="color:var(--green);">✔ matches</span>'}</td></tr>`).join('')}</tbody></table></div>
+  ${bad.length?`<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><button class="btn primary" data-tw-fix="1">Fix the app from this file</button><span class="dim small">Opens the usual import preview, with only this week’s changed or missing lines in it. Nothing is saved until you press Import.</span></div>`:''}</div>`;
+}
+async function twHandleFile(f){
+  if(!f) return; if(typeof XLSX==='undefined'){ alert('The spreadsheet reader could not be loaded. Check your internet connection and reload the page.'); return; }
+  const ws=twWeekStart(), we=addDays(ws,6);
+  try{ const buf=await f.arrayBuffer(); const wb=XLSX.read(buf,{type:'array'}); const out=twReadFile(wb,ws,we); STATE.twWb=wb; STATE.twCmp=Object.keys(out.tabs).length?{file:f.name,by:out.by,tabs:out.tabs}:{err:'No trips dated '+wkText(ws)+' were found in the route tabs of that file. Pick another week above, or check the dates in the sheet.'}; }
+  catch(e){ console.error(e); STATE.twCmp={err:'Could not read that file: '+(e&&e.message?e.message:e)}; }
+  render();
+}
+function twFix(){
+  const wb=STATE.twWb; if(!wb) return; const ws=twWeekStart(), we=addDays(ws,6);
+  const out=parseBulkWorkbook(wb); const cur={}; (STATE.data.transport||[]).forEach(r=>{ const k=[r.date,trKey(r),r.route].join('|'); cur[k]=(cur[k]||0)+num(r.tripsActual); });
+  const keep=(out.rows||[]).filter(r=>r.date&&r.date>=ws&&r.date<=we&&r.state!=='error'&&(()=>{ const k=[r.date,r.vehicleId||('~'+normReg(r.truckTxt)),r.route].join('|'); return !(k in cur)||cur[k]!==num(r.tripsActual); })());
+  keep.forEach(r=>{ if(r.before){ r.state='ok'; } });
+  if(!keep.length){ showToast('Nothing to change — the app already has these trips.'); return; }
+  STATE.bulk={file:(STATE.twCmp&&STATE.twCmp.file)||'Excel',rows:keep,err:'',replace:true,allDates:true,summary:`<div class="note" style="margin:0 0 10px;">Only the ${keep.length} line${keep.length===1?'':'s'} for ${esc(wkText(ws))} that are new or have a different number of trips are listed. Lines that already match are left alone.</div>`};
+  render();
+}
+function twCard(){
+  const ws=twWeekStart(), R=twRows(ws), cur=wkStart(todayStr()); const opts=[]; for(let i=0;i<10;i++) opts.push(addDays(cur,-7*i)); if(opts.indexOf(ws)<0) opts.push(ws);
+  return `<div class="section-title"><span>Truck trips — done vs target</span><div class="line"></div></div>
+  <div class="flex gap8" style="flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;"><div><label>Week</label><select data-tw-wk="1" style="width:auto;">${opts.map(d=>`<option value="${d}"${d===ws?' selected':''}>${esc(wkText(d))}${d===cur?' (this week so far)':(d===addDays(cur,-7)?' (last week)':'')}</option>`).join('')}</select></div><div><label>Target trips per truck</label><input type="number" min="1" data-tw-target="1" value="${twTarget()}" style="width:90px;"></div></div>
+  ${twTable(R)}${twCompareCard()}`;
+}
+const _mrc25=matRouteCard;
+matRouteCard=function(){ let a=''; try{ a=twCard(); }catch(e){ console.error('truck week card',e); } return a+_mrc25.apply(this,arguments); };
+const _mts25=mtSlides;
+mtSlides=function(){
+  const S=_mts25.apply(this,arguments); const i=S.findIndex(x=>x.t==='Transport & journeys');
+  const sl={t:'Truck trips — done vs target',s:'Each truck, last week, against its weekly target',b:()=>{ const R=twRows(addDays(wkStart(todayStr()),-7)), T=twTotals(R), low=R.rows.filter(x=>x.trips<R.target).sort((a,b)=>a.trips-b.trips).slice(0,3).map(x=>x.label);
+    return twTable(R,{tall:true})+mtAsk('Which trucks missed '+R.target+' trips, and what stopped them?',low.length?('Start with '+low.join(', ')+' — what happened?'):'Every truck met its target — what made the difference?','Is any trip done but not entered in the app?'); }};
+  S.splice(i<0?S.length:i+1,0,sl); return S;
+};
+document.addEventListener('change',e=>{ const t=e.target; if(!t||!t.matches) return;
+  if(t.matches('[data-tw-wk]')){ STATE.twWk=t.value; STATE.twCmp=null; STATE.twWb=null; render(); }
+  else if(t.matches('[data-tw-target]')){ const n=parseFloat(t.value); if(n>0) pfSetCfg('truckweek',{target:n}).then(()=>render()); }
+  else if(t.matches('[data-tw-file]')){ const f=t.files&&t.files[0]; t.value=''; twHandleFile(f); } });
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-tw-pick],[data-tw-fix]'); if(!b) return;
+  if(b.hasAttribute('data-tw-pick')){ const f=document.querySelector('[data-tw-file]'); if(f) f.click(); } else twFix(); });
+/* uploads: a line that is already in the app but with a different number of trips is called out, and last/this week can always be corrected */
+const _pbw25=parseBulkWorkbook;
+parseBulkWorkbook=function(wb){
+  const out=_pbw25(wb);
+  try{ const cur={}; (STATE.data.transport||[]).forEach(r=>{ const k=[r.date,trKey(r),r.route].join('|'); cur[k]=(cur[k]||0)+num(r.tripsActual); }); let n=0;
+    (out.rows||[]).forEach(r=>{ if(r.state!=='dup'||!r.dupId) return; const k=[r.date,r.vehicleId||('~'+normReg(r.truckTxt)),r.route].join('|'); if(k in cur&&cur[k]!==num(r.tripsActual)){ r.warns=(r.warns||[]).concat(['App has '+cur[k]+' trip'+(cur[k]===1?'':'s')+', the file has '+num(r.tripsActual)+' — tick “Replace” to update']); r.changed=true; n++; } });
+    if(n) out.summary=(out.summary||'')+`<div class="note warn" style="margin:0 0 10px;">${n} line${n===1?' is':'s are'} already in the app with a <b>different number of trips</b> than this file. Tick “Replace the existing entries” below to bring them in line.</div>`;
+  }catch(e){ console.error('changed trips',e); }
+  return out;
+};
 
 loadAll();
 </script>
