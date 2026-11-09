@@ -4968,7 +4968,7 @@ function reportMarkdown(pkg,by){
   pkg.depts.forEach(d=>{
     md+=`## ${d.title}\n\n`;
     if(!d.hasData) md+=`_Nothing was logged for this department in this period._\n\n`;
-    d.blocks.forEach(b=>{ if(b.title) md+=`**${b.title}**\n\n`; md+=`| ${b.head.join(' | ')} |\n|${b.head.map(()=>'---').join('|')}|\n`; b.rows.forEach(r=>{ md+=`| ${r.map(c=>cellText(c).replace(/\|/g,'/')).join(' | ')} |\n`; }); md+='\n'; });
+    d.blocks.forEach(b=>{ if(b.htmlOnly) return; if(b.title) md+=`**${b.title}**\n\n`; md+=`| ${b.head.join(' | ')} |\n|${b.head.map(()=>'---').join('|')}|\n`; b.rows.forEach(r=>{ md+=`| ${r.map(c=>cellText(c).replace(/\|/g,'/')).join(' | ')} |\n`; }); md+='\n'; });
     md+=`*Commentary:* ${d.comment.length?d.comment.join(' '):'No exceptions — performance within target.'}\n\n`;
   });
   return md;
@@ -4994,7 +4994,7 @@ function downloadReport(pkg,fmtKey,by){
     }
     pkg.depts.forEach(d=>{
       const aoa=pkg.single?head.slice():[]; aoa.push([d.title],[]);
-      d.blocks.forEach(b=>{ if(b.title) aoa.push([b.title]); aoa.push(b.head); b.rows.forEach(r=>aoa.push(r.map(cellText))); aoa.push([]); });
+      d.blocks.forEach(b=>{ if(b.htmlOnly) return; if(b.title) aoa.push([b.title]); aoa.push(b.head); b.rows.forEach(r=>aoa.push(r.map(cellText))); aoa.push([]); });
       aoa.push(['Commentary',d.comment.length?d.comment.join(' '):'No exceptions — performance within target.']);
       sheet(d.short,aoa,[36,20,20,20,24,20]);
     });
@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.5 · 9 Nov 2026';
+const APP_VERSION='v15.6 · 9 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -10318,6 +10318,157 @@ parseBulkWorkbook=function(wb){
     if(n) out.summary=(out.summary||'')+`<div class="note warn" style="margin:0 0 10px;">${n} line${n===1?' is':'s are'} already in the app with a <b>different number of trips</b> than this file. Tick “Replace the existing entries” below to bring them in line.</div>`;
   }catch(e){ console.error('changed trips',e); }
   return out;
+};
+
+/* ============================================================ ws_aa.js ============================================================ */
+/* ===== v15.6: (1) saves never wipe a teammate's upload, uploads are labelled and announced; (2) repairs matched to each truck's weekly trip deficit, with charts — in Transport Ops, the Monday meeting and the weekly report ===== */
+
+/* ---------- 1. shared saves ---------- */
+const AA_SKIP={};   // collections that must never be merged
+function aaIds(arr){ const s=new Set(); (arr||[]).forEach(r=>{ if(r&&r.id) s.add(r.id); }); return s; }
+function aaSnap(keys){ STATE.base=STATE.base||{}; (keys||Object.keys(STORAGE_KEYS)).forEach(k=>{ if(Array.isArray(STATE.data[k])) STATE.base[k]=aaIds(STATE.data[k]); }); }
+async function aaMerge(k){
+  if(!GAS_CONFIGURED||AA_SKIP[k]||!Array.isArray(STATE.data[k])||!STATE.base||!STATE.base[k]||!STORAGE_KEYS[k]) return 0;
+  const j=await gasGetAllChunked([STORAGE_KEYS[k]]); const remote=safeParseJSON(j[STORAGE_KEYS[k]],[]); if(!Array.isArray(remote)) return 0;
+  const have=aaIds(STATE.data[k]), base=STATE.base[k];
+  const add=remote.filter(r=>r&&r.id&&!have.has(r.id)&&!base.has(r.id));      // saved by someone else since this screen last loaded, and not deleted here
+  if(add.length) STATE.data[k]=[...STATE.data[k],...add];
+  return add.length;
+}
+let AA_UPL=null;
+const _ib26=importBulk;
+importBulk=async function(){
+  AA_UPL={by:wsWho(),at:new Date().toISOString(),file:(STATE.bulk&&STATE.bulk.file)||'',before:new Map((STATE.data.transport||[]).map(r=>[r.id,JSON.stringify(r)]))};
+  try{ return await _ib26.apply(this,arguments); } finally{ AA_UPL=null; }
+};
+const _persist26=persist;
+persist=async function(k){
+  try{
+    if(k==='transport'&&AA_UPL){ const u=AA_UPL; (STATE.data.transport||[]).forEach(r=>{ if(u.before.get(r.id)!==JSON.stringify(r)){ r.uploadedBy=u.by; r.uploadedAt=u.at; if(u.file) r.uploadFile=String(u.file).slice(0,80); } }); }
+    const n=await aaMerge(k); if(n) setTimeout(()=>showToast('Kept '+n+' '+(n===1?'entry':'entries')+' your teammates saved a moment ago — nothing was lost.'),300);
+  }catch(e){ console.error('merge before save failed',e); }
+  const r=await _persist26.apply(this,arguments);
+  try{ aaSnap([k]); }catch(e){}
+  return r;
+};
+const _la26=loadAll;
+loadAll=async function(){
+  const before=STATE.data; const r=await _la26.apply(this,arguments);
+  try{ if(STATE.data!==before) aaSnap(); }catch(e){ console.error(e); }
+  try{ const L=aaLatestUpload(); if(L){ let seen=null; try{ seen=localStorage.getItem('fd_seen_upl'); }catch(e){}
+    if(seen===null){ try{ localStorage.setItem('fd_seen_upl',L.at); }catch(e){} }
+    else if(L.at>seen){ try{ localStorage.setItem('fd_seen_upl',L.at); }catch(e){} if(L.by!==wsWho()) setTimeout(()=>showToast((L.by||'A teammate')+' uploaded a transport report — '+L.n+' entries are now showing.'),400); } } }catch(e){}
+  return r;
+};
+function aaUploads(){
+  const g={}; (STATE.data.transport||[]).forEach(r=>{ if(!r.uploadedAt) return; const x=g[r.uploadedAt]||(g[r.uploadedAt]={at:r.uploadedAt,by:r.uploadedBy||'',file:r.uploadFile||'',n:0,trips:0,ton:0,from:r.date,to:r.date}); x.n++; x.trips+=num(r.tripsActual); x.ton+=num(r.tonnageActual); if(r.date<x.from) x.from=r.date; if(r.date>x.to) x.to=r.date; });
+  return Object.values(g).sort((a,b)=>a.at<b.at?1:-1);
+}
+function aaLatestUpload(){ const u=aaUploads()[0]; return u?{at:u.at,by:u.by,n:u.n}:null; }
+function aaUploadsCard(){
+  const U=aaUploads().slice(0,5); if(!U.length) return '';
+  return `<div class="card" style="margin:0 0 14px;padding:12px 14px;border-left:3px solid var(--teal);"><div style="font-weight:600;margin-bottom:6px;">Recent uploads — everyone sees these</div>
+  <div class="table-wrap"><table><thead><tr><th>When</th><th>Uploaded by</th><th>File</th><th>Entries</th><th>Trips</th><th>Tonnage</th><th>Dates covered</th></tr></thead><tbody>${U.map(u=>`<tr><td>${esc(new Date(u.at).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))}</td><td>${esc(u.by||'—')}</td><td class="dim small" style="white-space:normal;">${esc(u.file||'—')}</td><td>${fmt(u.n)}</td><td>${fmt(u.trips)}</td><td>${fmt(u.ton,1)} MT</td><td>${esc(fmtDay(u.from))} – ${esc(fmtDay(u.to))}</td></tr>`).join('')}</tbody></table></div>
+  <div class="dim small" style="margin-top:6px;">The app checks for new entries every 10 seconds while it is open, and saving never overwrites what a teammate has added.</div></div>`;
+}
+
+/* ---------- 2. repairs vs trips ---------- */
+const AA_HRS_PER_TRIP=12;     // at 2 trips a day a truck spends about 12 hours per trip
+const AA_C={green:'#3FB37F',red:'#E1543F',amber:'#E8A33D',grey:'#7C8796',blue:'#4DA3FF',teal:'#2EC4B6',purple:'#A78BFA',pink:'#F472B6'};
+function aaKind(r){ return r.type==='Scheduled'?'Scheduled service':(isRepairJob(r)?'Workshop repair':'Roadside breakdown'); }
+function aaWhat(r){ try{ return whatDone(r); }catch(e){ return r.component||'Repair'; } }
+function aaAnalysis(ws){
+  const R=twRows(ws), we=R.we, vs=STATE.data.vehicles||[], M=STATE.data.maintenance||[];
+  const byNk={}; R.rows.forEach(x=>{ x.rep=[]; x.down=0; x.cost=0; byNk[x.nk]=x; });
+  const list=[], extra=[];
+  M.forEach(r=>{ if(!r.date||!r.vehicleId) return; const inW=r.date>=ws&&r.date<=we, carried=r.date<ws&&r.status==='Open'&&r.type!=='Scheduled'; if(!inW&&!carried) return;
+    const v=vs.find(z=>z.id===r.vehicleId), nk=v?normReg(v.regNo):'', x=byNk[nk]; const rec={r,kind:aaKind(r),what:aaWhat(r),h:inW?num(r.downtimeHours):0,carried:!inW,label:v?v.regNo:vehicleLabel(r.vehicleId),cost:inW?num(r.cost):0};
+    if(x){ x.rep.push(rec); if(inW){ x.down+=rec.h; x.cost+=rec.cost; } } else extra.push(rec); list.push(rec); });
+  R.rows.forEach(x=>{ const gap=Math.max(0,x.gap); x.repLost=Math.round(Math.min(gap,x.down/AA_HRS_PER_TRIP)*10)/10; x.unexp=Math.round((gap-x.repLost)*10)/10; const noHrs=x.rep.some(z=>!z.carried&&!z.h);
+    x.verdict=gap<=0?['On target','green']:(x.repLost>=gap*0.6?['Repairs explain it','red']:(x.repLost>0?['Partly repairs','amber']:(x.rep.length?[x.rep.every(z=>z.carried)?'Repair still open':(noHrs?'Repair logged — no hours':'Repair, no lost time'),'amber']:['No repair — find the reason','grey']))); });
+  const miss=R.rows.filter(x=>x.gap>0);
+  const T={miss:miss.length,gap:miss.reduce((s,x)=>s+x.gap,0),repLost:Math.round(miss.reduce((s,x)=>s+x.repLost,0)*10)/10,unexp:Math.round(miss.reduce((s,x)=>s+x.unexp,0)*10)/10,down:R.rows.reduce((s,x)=>s+x.down,0),repairs:list.filter(z=>!z.carried).length,carried:list.filter(z=>z.carried).length,cost:list.reduce((s,z)=>s+z.cost,0)};
+  return {R,ws,we,list,extra,T};
+}
+function aaPie(slices,center){
+  const tot=slices.reduce((s,x)=>s+x.v,0); if(!tot) return '<div class="dim small">Nothing to chart for this week.</div>';
+  const pal=[AA_C.red,AA_C.amber,AA_C.blue,AA_C.teal,AA_C.purple,AA_C.pink,AA_C.green,AA_C.grey]; let a0=-Math.PI/2; const R=72,r=40,cx=80,cy=80; let sv='';
+  slices.forEach((s,i)=>{ s.col=s.color||pal[i%pal.length]; const f=s.v/tot; if(f<=0) return;
+    if(f>=0.9999){ sv+=`<circle cx="${cx}" cy="${cy}" r="${(R+r)/2}" fill="none" stroke="${s.col}" stroke-width="${R-r}"/>`; return; }
+    const a1=a0+f*2*Math.PI, lg=f>.5?1:0, P=(rad,a)=>(cx+rad*Math.cos(a)).toFixed(2)+' '+(cy+rad*Math.sin(a)).toFixed(2);
+    sv+=`<path d="M${P(R,a0)} A${R} ${R} 0 ${lg} 1 ${P(R,a1)} L${P(r,a1)} A${r} ${r} 0 ${lg} 0 ${P(r,a0)} Z" fill="${s.col}" stroke="rgba(0,0,0,.25)" stroke-width="1"/>`; a0=a1; });
+  const leg=slices.filter(s=>s.v>0).map(s=>`<div style="display:flex;gap:7px;align-items:center;font-size:12px;line-height:1.5;"><span style="width:10px;height:10px;border-radius:2px;background:${s.col};flex:none;"></span><span style="white-space:normal;">${esc(s.label)}</span><b style="margin-left:auto;padding-left:8px;">${esc(s.txt||fmt(s.v,1))} <span style="font-weight:400;opacity:.6;">(${Math.round(s.v/tot*100)}%)</span></b></div>`).join('');
+  return `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;"><svg viewBox="0 0 160 160" width="150" height="150" style="flex:none;">${sv}<text x="80" y="76" text-anchor="middle" font-size="20" font-weight="700" fill="currentColor">${esc(center&&center[0]!==undefined?center[0]:fmt(tot,0))}</text><text x="80" y="94" text-anchor="middle" font-size="10" fill="currentColor" opacity=".6">${esc(center&&center[1]||'total')}</text></svg><div style="flex:1;min-width:170px;">${leg}</div></div>`;
+}
+function aaBars(A){
+  const rows=A.R.rows.filter(x=>x.trips||x.gap>0||x.rep.length).sort((a,b)=>b.gap-a.gap||b.trips-a.trips); if(!rows.length) return '<div class="dim small">No trucks to chart.</div>';
+  const tg=A.R.target, H=24, L=104, W=800, Rm=64, top=42, max=Math.max(tg,...rows.map(x=>x.trips))*1.04||1, sx=v=>L+(W-L-Rm)*v/max; let s='';
+  rows.forEach((x,i)=>{ const y=top+i*H, bh=H-8; const done=sx(x.trips)-L, rl=x.gap>0?sx(x.trips+x.repLost)-sx(x.trips):0, un=x.gap>0?sx(Math.min(tg,x.trips+x.repLost+x.unexp))-sx(x.trips+x.repLost):0;
+    s+=`<text x="${L-8}" y="${y+bh-2}" text-anchor="end" font-size="11" fill="currentColor">${esc(x.label)}</text><rect x="${L}" y="${y}" width="${Math.max(0,done).toFixed(1)}" height="${bh}" rx="2" fill="${x.trips>=tg?AA_C.green:AA_C.amber}"/>`;
+    if(rl>0) s+=`<rect x="${sx(x.trips).toFixed(1)}" y="${y}" width="${rl.toFixed(1)}" height="${bh}" fill="${AA_C.red}"/>`;
+    if(un>0) s+=`<rect x="${sx(x.trips+x.repLost).toFixed(1)}" y="${y}" width="${un.toFixed(1)}" height="${bh}" fill="${AA_C.grey}" opacity=".55"/>`;
+    s+=`<text x="${(sx(Math.max(x.trips,tg))+6).toFixed(1)}" y="${y+bh-2}" font-size="11" font-weight="700" fill="currentColor">${x.trips} / ${tg}</text>`; });
+  const h=top+rows.length*H+8, tx=sx(tg).toFixed(1);
+  const key=[[AA_C.green,'Trips done (on target)'],[AA_C.amber,'Trips done (below target)'],[AA_C.red,'Missed — repairs'],[AA_C.grey,'Missed — no repair']].map((k,i)=>`<rect x="${L+i*172}" y="6" width="10" height="10" rx="2" fill="${k[0]}"/><text x="${L+i*172+14}" y="15" font-size="10.5" fill="currentColor">${k[1]}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${h}" width="100%" style="max-width:${W}px;display:block;">${key}<line x1="${tx}" y1="${top-6}" x2="${tx}" y2="${h-4}" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 3" opacity=".7"/><text x="${tx}" y="${top-9}" text-anchor="middle" font-size="10" fill="currentColor" opacity=".75">Target ${tg}</text>${s}</svg>`;
+}
+function aaCharts(A){
+  const T=A.T, comp={}, kinds={};
+  A.list.filter(z=>!z.carried).forEach(z=>{ const k=z.what.replace(/^Scheduled service · /,'Service · '); comp[k]=(comp[k]||0)+(z.h||0); kinds[z.kind]=(kinds[z.kind]||0)+1; });
+  const anyH=Object.values(comp).some(v=>v>0); const cs=Object.keys(comp).map(k=>({label:k,v:anyH?comp[k]:A.list.filter(z=>!z.carried&&z.what.replace(/^Scheduled service · /,'Service · ')===k).length,txt:anyH?fmt(comp[k],0)+' h':null})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+  const top=cs.slice(0,6), rest=cs.slice(6).reduce((s,x)=>s+x.v,0); if(rest) top.push({label:'Other items',v:rest,txt:anyH?fmt(rest,0)+' h':null});
+  const cause=[{label:'Lost to repairs',v:T.repLost,color:AA_C.red,txt:fmt(T.repLost,1)+' trips'},{label:'No repair recorded — find out why',v:T.unexp,color:AA_C.grey,txt:fmt(T.unexp,1)+' trips'}];
+  const kp=Object.keys(kinds).map((k,i)=>({label:k,v:kinds[k],color:[AA_C.red,AA_C.amber,AA_C.blue][i%3],txt:kinds[k]+''}));
+  const box=(t,b)=>`<div class="card" style="padding:12px 14px;"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">${t}</div>${b}</div>`;
+  return `<div class="card" style="padding:12px 14px;margin-bottom:12px;"><div style="font-weight:600;font-size:13px;margin-bottom:6px;">Trips done against target, truck by truck</div>${aaBars(A)}</div>
+  <div class="grid cols-3" style="gap:12px;margin-bottom:12px;">${box('Where the missed trips came from',aaPie(cause,[fmt(T.gap,0),'trips missed']))}${box(anyH?'Repair hours by item':'Repairs by item',aaPie(top,[anyH?fmt(T.down,0):fmt(T.repairs,0),anyH?'hours down':'repairs']))}${box('Kind of repair',aaPie(kp,[fmt(T.repairs,0),'jobs']))}</div>`;
+}
+function aaTable(A){
+  const rows=A.R.rows.filter(x=>x.gap>0||x.rep.length).sort((a,b)=>b.gap-a.gap||a.label.localeCompare(b.label));
+  const rep=x=>x.rep.length?x.rep.map(z=>`<div style="white-space:normal;">${esc(fmtDay(z.r.date))} · ${esc(z.what)}${z.carried?' <span class="dim">(opened earlier, still open)</span>':''} · ${z.carried?'—':(z.h?fmt(z.h,0)+' h down':'no hours')} ${z.kind==='Scheduled service'?'':`<span class="dim">· ${esc(z.kind)}</span>`}</div>`).join(''):'<span class="dim">No repair logged</span>';
+  const vt=x=>wsTag(x.verdict[0],x.verdict[1]);
+  return `<div class="table-wrap"><table><thead><tr><th>Truck</th><th style="text-align:center;">Trips</th><th style="text-align:center;">Target</th><th style="text-align:center;">Deficit</th><th>Repairs this week</th><th style="text-align:center;">Hours down</th><th style="text-align:center;">Trips lost to repairs</th><th style="text-align:center;">Not explained</th><th>Verdict</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.label)}</b></td><td style="text-align:center;">${fmt(x.trips)}</td><td style="text-align:center;">${fmt(A.R.target)}</td><td style="text-align:center;">${x.gap>0?`<b style="color:var(--red);">−${fmt(x.gap)}</b>`:`<b style="color:var(--green);">${x.gap<0?'+'+fmt(-x.gap):'0'}</b>`}</td><td style="min-width:240px;">${rep(x)}</td><td style="text-align:center;">${x.down?fmt(x.down,0):'—'}</td><td style="text-align:center;">${x.gap>0?(x.repLost?'<b>'+fmt(x.repLost,1)+'</b>':'0'):'—'}</td><td style="text-align:center;">${x.gap>0?fmt(x.unexp,1):'—'}</td><td>${vt(x)}</td></tr>`).join('')||'<tr><td colspan="9" class="dim">No truck missed its target and no repairs were logged.</td></tr>'}</tbody></table></div>`;
+}
+function aaNote(A){
+  const T=A.T; return `<div class="dim small" style="margin-top:6px;line-height:1.55;">Each repair is matched to its truck by the date it was logged in Maintenance. <b>Trips lost to repairs</b> = hours the truck was down ÷ ${AA_HRS_PER_TRIP} (a truck on 2 trips a day spends about ${AA_HRS_PER_TRIP} hours per trip), capped at the truck’s deficit. A repair with no downtime hours recorded cannot be counted — fill in the hours on the repair. “Not explained” = the truck missed its target but no repair accounts for it (no load, not entered, driver off, …).${T.carried?` ${T.carried} repair${T.carried===1?' was':'s were'} opened in an earlier week and still open — listed, but their hours are not counted here.`:''}${A.extra.length?` ${A.extra.length} repair${A.extra.length===1?'':'s'} this week ${A.extra.length===1?'is':'are'} on trucks outside the trip table (e.g. diesel trucks).`:''}</div>`;
+}
+function aaKpis(A){ const T=A.T; return `<div class="grid cols-4" style="margin-bottom:12px;">${kc('Trucks below target',T.miss+' / '+A.R.rows.length,'Missed '+fmt(T.gap)+' trips in total',T.miss?'red':'green')}${kc('Repairs logged',fmt(T.repairs),T.carried?T.carried+' more still open from earlier':'this week',T.repairs?'amber':'green')}${kc('Trips lost to repairs',fmt(T.repLost,1),fmt(T.down,0)+' hours of downtime',T.repLost?'red':'green')}${kc('Missed, no repair found',fmt(T.unexp,1),'trips to find reasons for',T.unexp?'amber':'green')}</div>`; }
+function aaCard(ws){
+  let A; try{ A=aaAnalysis(ws); }catch(e){ console.error('repair analysis',e); return ''; }
+  return `<div class="section-title" style="margin-top:22px;"><span>Repairs vs trips — why trucks missed target</span><div class="line"></div></div>${aaKpis(A)}${aaCharts(A)}${aaTable(A)}${aaNote(A)}`;
+}
+const _twc26=twCard;
+twCard=function(){ let u=''; try{ u=aaUploadsCard(); }catch(e){ console.error(e); } let a=''; try{ a=aaCard(twWeekStart()); }catch(e){ console.error(e); } return u+_twc26.apply(this,arguments)+a; };
+
+/* ----- Monday meeting ----- */
+const _mts26=mtSlides;
+mtSlides=function(){
+  const S=_mts26.apply(this,arguments); let i=S.findIndex(x=>x.t==='Truck trips — done vs target'); if(i<0) i=S.length-1;
+  const ws=()=>addDays(wkStart(todayStr()),-7);
+  S.splice(i+1,0,
+   {t:'Trips vs target — the picture',s:'Where each truck finished, and what the misses were made of',b:()=>{ const A=aaAnalysis(ws()); return aaKpis(A)+aaCharts(A); }},
+   {t:'Repairs that cost us trips',s:'Each repair matched to its truck for the week',b:()=>{ const A=aaAnalysis(ws()); const w=A.R.rows.filter(x=>x.gap>0&&x.repLost>0).sort((a,b)=>b.repLost-a.repLost).slice(0,3).map(x=>x.label), u=A.R.rows.filter(x=>x.gap>0&&!x.repLost&&!x.rep.length).length;
+     return aaTable(A)+aaNote(A)+mtAsk('Which repairs took trucks off the road, and could they have been prevented?',w.length?('Start with '+w.join(', ')+' — what failed, and when will it be back?'):'No repair explains a missed target this week.',u?(u+' truck'+(u===1?'':'s')+' missed target with no repair — what happened?'):'Is any repair still missing its downtime hours?'); }});
+  return S;
+};
+
+/* ----- weekly report ----- */
+const _blk26=blockHTML;
+blockHTML=function(b){ return b&&b.html?`<div class="rblock">${b.title?`<h4>${esc(b.title)}</h4>`:''}${b.html}</div>`:_blk26.apply(this,arguments); };
+const _rp26=reportPackage;
+reportPackage=function(kind,start,deptKeys){
+  const pkg=_rp26.apply(this,arguments);
+  try{ if(kind==='week'&&!pkg.single){
+    const A=aaAnalysis(pkg.range.start), T=A.T, rows=A.R.rows.filter(x=>x.gap>0||x.rep.length).sort((a,b)=>b.gap-a.gap||a.label.localeCompare(b.label));
+    const cell=x=>x.rep.length?x.rep.map(z=>fmtDay(z.r.date)+' '+z.what+(z.carried?' (still open)':'')+' '+(z.carried?'':(z.h?z.h+'h':'no hrs'))).join('; '):'None';
+    const d={key:'trucks',title:'Truck trips vs target & repairs',short:'Trucks',icon:'🚛',hasData:A.R.rows.some(x=>x.trips),comment:[],blocks:[
+      {title:'Trips done, target and deficit — and what the misses were made of',html:aaCharts(A),head:[],rows:[],htmlOnly:true},
+      {title:'Truck by truck: deficit and the repairs that explain it',head:['Truck','Trips','Target','Deficit','Repairs this week','Hours down','Trips lost to repairs','Not explained','Verdict'],rows:rows.map(x=>[x.label,x.trips,A.R.target,x.gap>0?-x.gap:(x.gap<0?'+'+(-x.gap):0),cell(x),x.down||'—',x.gap>0?x.repLost:'—',x.gap>0?x.unexp:'—',x.verdict[0]])},
+      {title:'All trucks — trips for the week',head:['Truck','Trips done','Target','Deficit','Tonnage (MT)'],rows:A.R.rows.map(x=>[x.label,x.trips,A.R.target,x.gap>0?-x.gap:(x.gap<0?'+'+(-x.gap):0),x.ton?Math.round(x.ton*10)/10:'—'])}]};
+    d.comment=[T.miss?`${T.miss} of ${A.R.rows.length} trucks finished below the ${A.R.target}-trip weekly target, ${fmt(T.gap)} trips short in total. Repairs account for about ${fmt(T.repLost,1)} of them (${fmt(T.down,0)} hours of downtime); ${fmt(T.unexp,1)} trips are not explained by any repair.`:'Every truck met its weekly trip target.'];
+    const at=pkg.depts.findIndex(x=>x.key==='transport'); pkg.depts.splice(at<0?pkg.depts.length:at+1,0,d);
+  } }catch(e){ console.error('report truck section',e); }
+  return pkg;
 };
 
 loadAll();
