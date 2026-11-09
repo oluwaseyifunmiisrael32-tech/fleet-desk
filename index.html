@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.6 · 9 Nov 2026';
+const APP_VERSION='v15.7 · 9 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -10470,6 +10470,51 @@ reportPackage=function(kind,start,deptKeys){
   } }catch(e){ console.error('report truck section',e); }
   return pkg;
 };
+
+/* ============================================================ ws_ab.js ============================================================ */
+/* ===== v15.7: diesel trucks are left out of the weekly target; download (Excel/CSV) and print the truck-trips page ===== */
+const _twr27=twRows;
+twRows=function(ws){
+  const R=_twr27.apply(this,arguments); const isD=x=>!!(x.v&&/diesel/i.test(x.v.fuelType||''));
+  R.diesel=R.rows.filter(isD); R.rows=R.rows.filter(x=>!isD(x)); return R;
+};
+function twStatus(x,tg){ return x.trips>=tg?'On target':(x.trips>=tg/2?'Behind':(x.trips?'Well behind':'No trips')); }
+function twDieselNote(R){
+  const D=(R.diesel||[]).filter(x=>x.trips); const n=(R.diesel||[]).length; if(!n) return '';
+  return `<div class="dim small" style="margin-top:8px;line-height:1.55;"><b>${n} diesel truck${n===1?'':'s'} left out of the target.</b> ${D.length?'Trips they did this week: '+D.map(x=>esc(x.label)+' '+x.trips).join(' · ')+' (not counted above).':'None of them logged trips this week.'}</div>`;
+}
+function twToolbar(R){
+  return `<div class="flex gap8" style="flex-wrap:wrap;justify-content:flex-end;margin:0 0 10px;"><button class="btn small" data-tw-csv="${R.ws}">⬇ Download (Excel)</button><button class="btn small" data-tw-print="${R.ws}">🖨 Print / save as PDF</button></div>`;
+}
+const _twt27=twTable;
+twTable=function(R,opts){ return twToolbar(R)+_twt27.apply(this,arguments)+twDieselNote(R); };
+function twCsv(ws){
+  const R=twRows(ws), T=twTotals(R), q=v=>'"'+String(v===undefined||v===null?'':v).replace(/"/g,'""')+'"', L=[];
+  L.push([ 'SKB Logistics — truck trips vs target', wkText(ws) ].map(q).join(','));
+  L.push(['Truck','Drivers'].concat(R.days.map(d=>fmtDay(d)),['Trips done','Target','Deficit','Status','Routes (trips)','Tonnage (MT)']).map(q).join(','));
+  R.rows.forEach(x=>L.push([x.label,Object.keys(x.drivers).join(', ')].concat(x.d,[x.trips,R.target,x.gap>0?-x.gap:(x.gap<0?'+'+(-x.gap):0),twStatus(x,R.target),Object.keys(x.routes).sort((a,b)=>x.routes[b]-x.routes[a]).map(k=>twRouteWord(k)+' '+x.routes[k]).join(' · '),Math.round(x.ton*10)/10]).map(q).join(',')));
+  L.push(['All trucks',''].concat(R.days.map((_,i)=>R.rows.reduce((s,x)=>s+x.d[i],0)),[T.trips,T.target,T.gap?-T.gap:0,'','',Math.round(T.ton*10)/10]).map(q).join(','));
+  if((R.diesel||[]).length){ L.push(''); L.push(['Diesel trucks — not in the target'].map(q).join(',')); R.diesel.forEach(x=>L.push([x.label,Object.keys(x.drivers).join(', ')].concat(x.d,[x.trips,'no target','','','',Math.round(x.ton*10)/10]).map(q).join(','))); }
+  try{ const A=aaAnalysis(ws); L.push(''); L.push(['Repairs this week, matched to trucks'].map(q).join(',')); L.push(['Truck','Date','What was done','Kind','Hours down','Status'].map(q).join(','));
+    A.list.forEach(z=>L.push([z.label,z.r.date,z.what,z.kind,z.carried?'(opened earlier)':(z.h||''),z.r.status||''].map(q).join(','))); }catch(e){}
+  return '﻿'+L.join('\r\n');
+}
+function twPrintHtml(ws){
+  const R=twRows(ws), T=twTotals(R); let rep='';
+  try{ const A=aaAnalysis(ws); rep=`<h2>Repairs vs trips — why trucks missed target</h2>${aaKpis(A)}${aaCharts(A)}${aaTable(A)}${aaNote(A)}`; }catch(e){}
+  const css=`:root{--red:#c0392b;--green:#1e8a55;--amber:#b7791f;--dim:#666;--teal:#1b8a82;}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;padding:18px;font-size:12px;}h1{font-size:19px;margin:0}h2{font-size:15px;margin:22px 0 8px;page-break-before:always}.sub{color:#555;margin:2px 0 12px}.hd{display:flex;gap:12px;align-items:center;border-bottom:2px solid #E8A33D;padding-bottom:8px;margin-bottom:12px}.hd img{height:44px}
+  table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #bbb;padding:4px 6px;text-align:left;vertical-align:top;font-size:11px}th{background:#f1f1f1}.grid{display:grid;gap:8px;grid-template-columns:repeat(4,1fr);margin-bottom:10px}.grid.cols-3{grid-template-columns:repeat(3,1fr)}.card{border:1px solid #ccc;border-radius:6px;padding:8px}.kc{border:1px solid #ccc;border-radius:6px;padding:8px}.table-wrap{overflow:visible}.dim{color:#666}.small{font-size:10.5px}.tag{border:1px solid #999;border-radius:8px;padding:1px 6px;font-size:10px;white-space:nowrap}.flex{display:flex}svg{max-width:100%}tr{page-break-inside:avoid}@page{size:A4 landscape;margin:10mm}`;
+  const rows=R.rows.map(x=>`<tr><td><b>${esc(x.label)}</b><div class="dim small">${esc(Object.keys(x.drivers).join(', '))}</div></td>${x.d.map(n=>`<td style="text-align:center">${n||'·'}</td>`).join('')}<td style="text-align:center"><b>${x.trips}</b></td><td style="text-align:center">${R.target}</td><td style="text-align:center;color:${x.gap>0?'#c0392b':'#1e8a55'}"><b>${x.gap>0?'−'+x.gap:(x.gap<0?'+'+(-x.gap):'0')}</b></td><td>${twStatus(x,R.target)}</td><td class="small">${esc(Object.keys(x.routes).sort((a,b)=>x.routes[b]-x.routes[a]).map(k=>twRouteWord(k)+' '+x.routes[k]).join(' · ')||'—')}</td><td>${x.ton?fmt(x.ton,1)+' MT':'—'}</td></tr>`).join('');
+  const dsum=R.days.map((_,i)=>R.rows.reduce((s,x)=>s+x.d[i],0));
+  const dd=(R.diesel||[]).length?`<p class="small"><b>${R.diesel.length} diesel truck${R.diesel.length===1?'':'s'} left out of the target.</b> ${R.diesel.filter(x=>x.trips).map(x=>esc(x.label)+' '+x.trips).join(' · ')||'No trips logged.'}</p>`:'';
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Truck trips — ${esc(wkText(ws))}</title><style>${css}</style></head><body>
+  <div class="hd"><img src="${SKB_LOGO}" alt=""><div><h1>SKB Logistics Ltd — Truck trips vs target</h1><div class="sub">Week ${esc(wkText(ws))} · target ${R.target} trips per truck (diesel trucks excluded) · printed ${esc(fmtDate(todayStr()))}</div></div></div>
+  <div class="grid"><div class="kc"><div class="dim small">Trips done</div><b style="font-size:20px">${T.trips}</b><div class="small dim">Target ${T.target} (${R.rows.length} trucks × ${R.target})</div></div><div class="kc"><div class="dim small">Deficit</div><b style="font-size:20px;color:#c0392b">${T.gap}</b></div><div class="kc"><div class="dim small">Trucks on target</div><b style="font-size:20px">${T.on} / ${R.rows.length}</b></div><div class="kc"><div class="dim small">Trucks with no trips</div><b style="font-size:20px">${T.idle}</b></div></div>
+  <table><thead><tr><th>Truck</th>${R.days.map(d=>`<th>${esc(new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'short'}))}<br>${esc(fmtDay(d))}</th>`).join('')}<th>Trips done</th><th>Target</th><th>Deficit</th><th>Status</th><th>Routes (trips)</th><th>Tonnage</th></tr></thead><tbody>${rows}<tr style="font-weight:700;background:#f7f0e0"><td>All trucks</td>${dsum.map(n=>`<td style="text-align:center">${n}</td>`).join('')}<td style="text-align:center">${T.trips}</td><td style="text-align:center">${T.target}</td><td style="text-align:center">${T.gap?'−'+T.gap:'0'}</td><td></td><td></td><td>${fmt(T.ton,1)} MT</td></tr></tbody></table>${dd}${rep}</body></html>`;
+}
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-tw-csv],[data-tw-print]'); if(!b) return;
+  if(b.hasAttribute('data-tw-csv')){ const ws=b.getAttribute('data-tw-csv'); triggerDownload(new Blob([twCsv(ws)],{type:'text/csv;charset=utf-8'}),'FleetDesk-Truck-trips-'+ws+'.csv'); showToast('Downloaded — it opens in Excel.'); }
+  else printHtmlDoc(twPrintHtml(b.getAttribute('data-tw-print'))); });
 
 loadAll();
 </script>
