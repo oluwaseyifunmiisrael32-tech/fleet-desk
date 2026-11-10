@@ -5561,7 +5561,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.7 · 9 Nov 2026';
+const APP_VERSION='v15.8 · 10 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
@@ -10194,6 +10194,7 @@ loadAll=async function(){
     if(!GAS_CONFIGURED) return; const raw=await snapGet(); if(!raw||!STATE.loading) return;
     const o=JSON.parse(raw); if(o.url!==GAS_URL||Date.now()-o.at>7*864e5||!o.data||!(o.data.vehicles||[]).length) return;
     STATE.data=Object.assign(STATE.data,o.data); if(o.targets) STATE.targets=Object.assign({},STATE.targets,o.targets);
+    STATE.snapBase={}; Object.keys(o.data).forEach(k=>{ if(Array.isArray(o.data[k])){ const m={}; o.data[k].forEach(r=>{ if(r&&r.id) m[r.id]=JSON.stringify(r); }); STATE.snapBase[k]=m; } });
     STATE.cacheShow=true; STATE.fromSnap=true; render();
   }catch(e){ console.error('snapshot',e); }
 })();
@@ -10515,6 +10516,37 @@ function twPrintHtml(ws){
 document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('[data-tw-csv],[data-tw-print]'); if(!b) return;
   if(b.hasAttribute('data-tw-csv')){ const ws=b.getAttribute('data-tw-csv'); triggerDownload(new Blob([twCsv(ws)],{type:'text/csv;charset=utf-8'}),'FleetDesk-Truck-trips-'+ws+'.csv'); showToast('Downloaded — it opens in Excel.'); }
   else printHtmlDoc(twPrintHtml(b.getAttribute('data-tw-print'))); });
+
+/* ============================================================ ws_ac.js ============================================================ */
+/* ===== v15.8: an input saved while the app is still opening, or while a save is being checked, can no longer vanish ===== */
+const _persist28=persist;
+persist=async function(k){
+  if(STATE.fromSnap&&(STATE.loading||STATE.connectionError)){            // the screen is still showing the saved copy: keep the edit and replay it once fresh data has loaded
+    STATE.pend=STATE.pend||{}; try{ STATE.pend[k]=JSON.parse(JSON.stringify(STATE.data[k]===undefined?null:STATE.data[k])); }catch(e){}
+    showToast('Saved on this screen — it will sync as soon as the latest data has loaded.'); return;
+  }
+  STATE.saveSeq=(STATE.saveSeq||0)+1; STATE.syncing=true;                 // from the first moment: a background refresh must not replace the screen while this save is checked and written
+  try{ return await _persist28.apply(this,arguments); } finally{ STATE.syncing=false; }
+};
+async function aaReplay(){
+  const P=STATE.pend; STATE.pend=null; if(!P) return; const done=[];
+  Object.keys(P).forEach(k=>{ const local=P[k], cur=STATE.data[k];
+    if(Array.isArray(local)&&Array.isArray(cur)){
+      const base=(STATE.snapBase&&STATE.snapBase[k])||{}, lm=new Set(local.filter(r=>r&&r.id).map(r=>r.id)); let n=0;
+      local.forEach(r=>{ if(!r||!r.id||base[r.id]===JSON.stringify(r)) return; const i=cur.findIndex(x=>x&&x.id===r.id); if(i>=0) cur[i]=r; else cur.push(r); n++; });
+      Object.keys(base).forEach(id=>{ if(!lm.has(id)){ const i=cur.findIndex(x=>x&&x.id===id); if(i>=0){ cur.splice(i,1); n++; } } });
+      if(n) done.push(k);
+    }else if(local!==null&&!Array.isArray(local)&&!Array.isArray(cur)){ STATE.data[k]=local; done.push(k); }
+  });
+  for(const k of done) await persist(k);
+  if(done.length) showToast('Your changes made while the app was opening have been saved.');
+}
+const _la28=loadAll;
+loadAll=async function(){
+  const r=await _la28.apply(this,arguments);
+  try{ if(STATE.pend&&!STATE.fromSnap&&!STATE.loading) await aaReplay(); }catch(e){ console.error('replay failed',e); }
+  return r;
+};
 
 loadAll();
 </script>
