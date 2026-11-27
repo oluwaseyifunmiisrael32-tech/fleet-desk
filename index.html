@@ -2358,9 +2358,9 @@ function finalizeMaintInspection(rec){
   if(def.length) rec.def=def.join(',');
   rec.crit=String(crit.length);
   rec.outcome=(crit.length||rec.truckStatus==='Off road')?'Fail':((att.length||def.length)?'Pass with defects':'Pass');
-  const auto=rec.autoRaise==='on'; delete rec.autoRaise;
+  delete rec.autoRaise;   // v15.10: raising is no longer optional — every defective item goes to the Fault Log with a job card
   compactRec(rec);
-  return (auto&&def.length)?raiseInspectionJobs(rec):0;
+  return def.length?raiseInspectionJobs(rec):0;
 }
 function latestInspection(vid){
   let best=null; (STATE.data.maintInspections||[]).forEach(r=>{ if(r.vehicleId!==vid) return; if(!best||r.date>=best.date) best=r; }); return best;
@@ -2400,7 +2400,7 @@ function miFormHTML(){
         <div><label>Next Inspection Due</label><input type="date" name="nextDue"></div>
         <div style="grid-column:1/-1"><label>Findings / remarks</label><input type="text" name="findings" placeholder="What was found and what is needed"></div>
       </div>
-      <label class="chk-inline"><input type="checkbox" name="autoRaise" checked> Raise a repair job in Maintenance for each defective item</label>
+      <div class="dim small" style="margin-top:6px;">Each defective item is logged in the Fault Log and a job card is opened automatically.</div>
       <div class="form-actions"><button type="submit" class="btn primary">Save Inspection</button><span class="dim small">Shared by the Inspections and Maintenance tabs.</span></div>
     </form>
   </details>`;
@@ -3019,8 +3019,9 @@ function attachEvents(){
       await persist(dept);
       if(wsDirty.size) await wsFlush();
       if(regChanged) await persist('vehicles');
-      if(jobs) await persist('maintenance');
-      showToast(jobs ? `Inspection saved — ${jobs} repair job(s) raised in Maintenance.` : (dept==='pretrip' && rec.result==='Fail') ? 'Check saved with defects — raise it to Maintenance from the log.' : (regChanged ? 'Entry saved — the truck registry was updated with the new service.' : 'Entry saved and synced.'));
+      if(jobs){ await persist('maintenance'); if(wsDirty.size) await wsFlush(); }   // v15.10: fault log + job card are saved straight away, not on a delay
+      const nChk=(dept==='pretrip'&&rec.defectRefs)?splitKeys(rec.defectRefs).length:0;
+      showToast(jobs ? `Inspection saved — ${jobs} fault(s) logged in the Fault Log and job card(s) opened.` : nChk ? `Check saved — ${nChk} fault(s) logged in the Fault Log (${rec.defectRefs}) and job card(s) opened.` : (dept==='pretrip' && rec.result==='Fail') ? 'Check saved with defects — raise it to Maintenance from the log.' : (regChanged ? 'Entry saved — the truck registry was updated with the new service.' : 'Entry saved and synced.'));
     });
   });
   app.querySelectorAll('[data-safety-view]').forEach(el=>el.addEventListener('click',()=>{ STATE.safetyView=el.getAttribute('data-safety-view'); render(); }));
@@ -5561,7 +5562,7 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.9 · 27 Nov 2026';
+const APP_VERSION='v15.10 · 27 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; const go=()=>{ let busy=false; try{ busy=window.fdAnyEntryDirty&&window.fdAnyEntryDirty(); }catch(e){} if(busy) setTimeout(go,5000); else location.reload(); }; go(); } });   // v15.9: wait until nobody is mid-entry before reloading for an update

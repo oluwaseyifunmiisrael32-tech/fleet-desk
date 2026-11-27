@@ -1,5 +1,5 @@
 /* FleetDesk service worker: fetches the newest app when online (falls back to the saved copy after 3.5 seconds on a slow signal or when offline). The spreadsheet library is kept so it does not download every time. */
-const CACHE='fleetdesk-v57', LIBS='fleetdesk-libs';
+const CACHE='fleetdesk-v58', LIBS='fleetdesk-libs';
 const SHELL=['./','index.html','manifest.webmanifest','icons/icon-192.png','icons/icon-512.png'];
 self.addEventListener('install',e=>{ e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL.map(u=>new Request(u,{cache:'reload'})))).then(()=>self.skipWaiting())); });
 self.addEventListener('activate',e=>{ e.waitUntil((async()=>{ const old=(await caches.keys()).filter(x=>x!==CACHE&&x!==LIBS); await Promise.all(old.map(x=>caches.delete(x))); await self.clients.claim(); })()); });   // the page itself reloads for an upgrade once nothing is half-typed (we no longer force-navigate open windows: that wiped unsaved entries)
