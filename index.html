@@ -5561,10 +5561,10 @@ function attachEventsV10(app){
   }));
   app.querySelectorAll('[data-close-install]').forEach(el=>el.addEventListener('click',e=>{ if(e.target===el||el.tagName==='BUTTON'){ STATE.installHelp=false; render(); } }));
 }
-const APP_VERSION='v15.8 · 10 Nov 2026';
+const APP_VERSION='v15.9 · 27 Nov 2026';
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   const hadSW=!!navigator.serviceWorker.controller;
-  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; location.reload(); } });
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{ if(hadSW&&!window.__swReload){ window.__swReload=1; const go=()=>{ let busy=false; try{ busy=window.fdAnyEntryDirty&&window.fdAnyEntryDirty(); }catch(e){} if(busy) setTimeout(go,5000); else location.reload(); }; go(); } });   // v15.9: wait until nobody is mid-entry before reloading for an update
   window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').then(r=>{ try{ r.update(); }catch(e){} }).catch(()=>{}); });
 }
 
@@ -10179,6 +10179,61 @@ async function snapPut(o){ try{ const db=await snapOpen(); db.transaction('s','r
 async function snapGet(){ try{ const db=await snapOpen(); return await new Promise(res=>{ const q=db.transaction('s').objectStore('s').get('last'); q.onsuccess=()=>res(q.result||null); q.onerror=()=>res(null); }); }catch(e){ return null; } }
 const _render19=render;
 render=function(){ if(STATE.loading&&STATE.cacheShow){ STATE.loading=false; try{ _render19(); } finally{ STATE.loading=true; } } else _render19(); };
+/* ===== v15.9: half-typed entries survive background redraws (teammate's entry arriving, toasts, auto-saves, syncs) =====
+   render() rebuilds the whole screen, which used to wipe any form being filled in. Now, before a redraw that the user did not
+   cause by tapping a button, every field that has been changed is remembered and put back (with focus and cursor) afterwards. */
+(function(){
+  let userActAt=0;
+  const skipType=t=>t==='hidden'||t==='file'||t==='submit'||t==='button'||t==='reset'||t==='password';
+  const ctrls=()=>{ const app=document.getElementById('app'); return app?[...app.querySelectorAll('input,select,textarea')].filter(el=>!skipType(el.type)):[]; };
+  const isDirty=el=>{
+    if(el.tagName==='SELECT'){ const di=[...el.options].findIndex(o=>o.defaultSelected); return el.selectedIndex!==(di<0?0:di); }
+    if(el.type==='checkbox'||el.type==='radio') return el.checked!==el.defaultChecked;
+    return el.value!==el.defaultValue;
+  };
+  function keyed(list){
+    const app=document.getElementById('app'), forms=app?[...app.querySelectorAll('form')]:[], seen={}, out=[];
+    list.forEach(el=>{
+      const id=el.id||el.name||el.getAttribute('data-k')||el.getAttribute('data-f')||''; if(!id) return;
+      const fi=el.form?forms.indexOf(el.form):-1;
+      let k=fi+'|'+el.tagName+'|'+(el.type||'')+'|'+id+((el.type==='radio'||el.type==='checkbox')?'|'+el.value:'');
+      seen[k]=(seen[k]||0)+1; out.push({el,key:k+'#'+seen[k]});
+    });
+    return out;
+  }
+  window.fdAnyEntryDirty=function(){ try{ return ctrls().some(isDirty); }catch(e){ return false; } };
+  document.addEventListener('click',e=>{ const t=e.target; if(t&&t.closest&&!t.closest('input,select,textarea,label')) userActAt=Date.now(); },true);
+  document.addEventListener('submit',()=>{ userActAt=Date.now(); },true);
+  const _r=render;
+  render=function(){
+    const byUser=userActAt&&Date.now()-userActAt<4000; userActAt=0;
+    let snap=null;
+    if(!byUser){
+      try{
+        const items=keyed(ctrls()).filter(x=>isDirty(x.el)).map(x=>({key:x.key,tag:x.el.tagName,type:x.el.type,value:x.el.value,checked:x.el.checked}));
+        if(items.length){
+          const a=document.activeElement; let focus=null;
+          if(a&&a!==document.body&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)){ const m=keyed(ctrls()).find(x=>x.el===a); if(m){ focus={key:m.key}; try{ focus.s=a.selectionStart; focus.e=a.selectionEnd; }catch(e){} } }
+          snap={items,focus};
+        }
+      }catch(e){ snap=null; }
+    }
+    _r.apply(this,arguments);
+    if(!snap) return;
+    try{
+      const map={}; keyed(ctrls()).forEach(x=>{ map[x.key]=x.el; });
+      // only restore if the same form is still on screen (every changed field is found); otherwise the user moved on
+      if(!snap.items.every(i=>map[i.key])) return;
+      snap.items.forEach(i=>{
+        const el=map[i.key]; if(isDirty(el)) return;
+        if(i.tag==='SELECT'){ const has=[...el.options].some(o=>o.value===i.value); if(has) el.value=i.value; }
+        else if(i.type==='checkbox'||i.type==='radio') el.checked=i.checked;
+        else el.value=i.value;
+      });
+      if(snap.focus&&map[snap.focus.key]){ const f=map[snap.focus.key]; try{ f.focus({preventScroll:true}); if(snap.focus.s!=null&&f.setSelectionRange) f.setSelectionRange(snap.focus.s,snap.focus.e); }catch(e){} }
+    }catch(e){ console.error('restore entries',e); }
+  };
+})();
 const _persist19=persist;
 persist=async function(){ if(STATE.fromSnap&&(STATE.loading||STATE.connectionError)){ showToast('Still loading the latest data — please try again in a few seconds.'); return; } return _persist19.apply(this,arguments); };
 let _snapAt=0;
